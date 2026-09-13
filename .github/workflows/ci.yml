@@ -1,0 +1,40 @@
+name: Locus CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  local:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned JamScript
+        uses: actions/checkout@v4
+        with:
+          repository: ArcheLabs/JamScript
+          ref: e96c078f9764b8cf662339eb474e78b461f99d37
+          path: .toolchain/JamScript
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+      - name: Install SDK test dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Build JamScript CLI
+        working-directory: .toolchain/JamScript
+        run: cargo build --locked --bin jams
+      - name: SDK and model tests
+        run: npm test
+        env:
+          LOCUS_NODE_BIN: node
+      - name: Service check and ABI validation
+        run: scripts/check.sh
+        env:
+          LOCUS_JAMSCRIPT_HOME: ${{ github.workspace }}/.toolchain/JamScript
+      - name: Service build and PVM artifact gate
+        run: scripts/build.sh
+        env:
+          LOCUS_JAMSCRIPT_HOME: ${{ github.workspace }}/.toolchain/JamScript
+          LOCUS_BUILD_OFFLINE: "1"
