@@ -1,0 +1,17 @@
+{
+  "name": "@archelabs/locus",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/sdk/index.js"
+  },
+  "scripts": {
+    "check": "bash scripts/check.sh",
+    "build": "bash scripts/build.sh",
+    "test": "bash scripts/test-local.sh"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.2"
+  }
+}
