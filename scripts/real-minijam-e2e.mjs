@@ -7,12 +7,13 @@ const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..")
 const clientRoot = process.env.JAMSCRIPT_CLIENT_ROOT;
 const backendUrl = process.env.LOCUS_E2E_BACKEND_RPC ?? "http://127.0.0.1:8091";
 const genesisHash = process.env.LOCUS_E2E_GENESIS_HASH;
+const networkDomain = process.env.LOCUS_E2E_NETWORK_DOMAIN ?? genesisHash;
 const serviceId = Number(process.env.LOCUS_E2E_SERVICE_ID);
 const artifactDir = process.env.LOCUS_E2E_ARTIFACTS ?? path.join(root, "dist");
 
 if (!clientRoot) throw new Error("JAMSCRIPT_CLIENT_ROOT is required");
-if (!genesisHash || !Number.isInteger(serviceId)) {
-  throw new Error("LOCUS_E2E_GENESIS_HASH and LOCUS_E2E_SERVICE_ID are required");
+if (!genesisHash || !networkDomain || !Number.isInteger(serviceId)) {
+  throw new Error("LOCUS_E2E_GENESIS_HASH, LOCUS_E2E_NETWORK_DOMAIN and LOCUS_E2E_SERVICE_ID are required");
 }
 
 const importFrom = (file) => import(pathToFileURL(path.join(clientRoot, file)).href);
@@ -32,6 +33,7 @@ const build = JSON.parse(await fs.readFile(path.join(artifactDir, "build.json"),
 const abi = JSON.parse(await fs.readFile(path.join(artifactDir, "service.abi.json"), "utf8"));
 const deployment = {
   genesisHash,
+  networkDomain,
   serviceKey: build.serviceKey,
   serviceId,
   codeHash: build.code_hash,
@@ -63,7 +65,7 @@ function locusFor(signer) {
     submitAction: async (actionName, input) => {
       const submitted = await protocolClient.submitAction(actionName, input, signer);
       const result = await protocolClient.waitForAction(
-        submitted.packageHash,
+        submitted.transactionId,
         submitted.actionHash,
         { intervalMs: 500, timeoutMs: 120_000 },
       );
@@ -75,14 +77,14 @@ function locusFor(signer) {
       return result;
     },
     queryLatest: (queryName, key) => protocolClient.queryLatest(queryName, key),
-    waitForAction: (actionHash, options) => protocolClient.waitForAction(actionHash, undefined, options),
+    waitForAction: (transactionId, options) => protocolClient.waitForAction(transactionId, options),
   });
 }
 
 async function submitExpected(signer, actionName, input, status, errorCode) {
   const submitted = await protocolClient.submitAction(actionName, input, signer);
   const result = await protocolClient.waitForAction(
-    submitted.packageHash,
+    submitted.transactionId,
     submitted.actionHash,
     { intervalMs: 500, timeoutMs: 120_000 },
   );
@@ -109,6 +111,7 @@ const aliceNew = locusFor(signerFor(aliceB));
 const bob = locusFor(signerFor(bobPair));
 const carol = locusFor(signerFor(carolPair));
 const abc = alice.asset(assetId);
+const rotatedAbc = aliceNew.asset(assetId);
 
 await protocolClient.validateDeployment();
 
@@ -158,24 +161,24 @@ await submitExpected(
 );
 console.log("OLD_OWNER_REJECTED=PASS");
 
-await abc.transfer(aliceId, bobId, 10n * unit);
+await rotatedAbc.transfer(aliceId, bobId, 10n * unit);
 assertAmount(await abc.balanceOf(aliceId), 70n * unit, "Alice after new-owner transfer");
 assertAmount(await abc.balanceOf(bobId), 30n * unit, "Bob after new-owner transfer");
 console.log("NEW_OWNER_ACCEPTED=PASS");
 
-await abc.transferFrom(bobId, aliceId, carolId, 7n * unit);
+await bob.asset(assetId).transferFrom(bobId, aliceId, carolId, 7n * unit);
 assertAmount(await abc.balanceOf(aliceId), 63n * unit, "Alice after transferFrom");
 assertAmount(await abc.balanceOf(bobId), 30n * unit, "Bob after transferFrom");
 assertAmount(await abc.balanceOf(carolId), 7n * unit, "Carol after transferFrom");
 assertAmount(await abc.allowance(aliceId, bobId), 8n * unit, "allowance after transferFrom");
 console.log("TRANSFER_FROM=PASS");
 
-await abc.mint(aliceId, bobId, 10n * unit);
+await rotatedAbc.mint(aliceId, bobId, 10n * unit);
 assertAmount(await abc.balanceOf(bobId), 40n * unit, "Bob after mint");
 assertAmount(await abc.totalSupply(), 110n * unit, "supply after mint");
 console.log("MINT=PASS");
 
-await abc.burn(aliceId, 3n * unit);
+await rotatedAbc.burn(aliceId, 3n * unit);
 assertAmount(await abc.balanceOf(aliceId), 60n * unit, "Alice after burn");
 assertAmount(await abc.totalSupply(), 107n * unit, "supply after burn");
 console.log("BURN=PASS");
