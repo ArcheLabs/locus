@@ -40,7 +40,7 @@ export interface JamScriptLikeClient {
     input: Record<string, LocusValue>,
   ): Promise<unknown>;
   queryLatest(queryName: string, key?: LocusValue): Promise<LocusQueryResult>;
-  waitForAction(actionHash: string, options?: Record<string, LocusValue>): Promise<unknown>;
+  waitForAction(transactionId: string, options?: Record<string, LocusValue>): Promise<unknown>;
 }
 
 export interface LocusActionReceipt {
