@@ -9,4 +9,5 @@ export type LocusWebSession = {
   ownershipSession: OwnershipSession;
   label: string;
   address: string;
+  connectionId?: string;
 };

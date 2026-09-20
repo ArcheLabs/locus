@@ -1,4 +1,6 @@
+import * as Dialog from "@radix-ui/react-dialog";
 import type { PropsWithChildren, ReactNode } from "react";
+import { X } from "lucide-react";
 
 type ModalProps = PropsWithChildren<{
   open: boolean;
@@ -8,17 +10,21 @@ type ModalProps = PropsWithChildren<{
 }>;
 
 export function Modal({ open, title, onClose, footer, children }: ModalProps) {
-  if (!open) return null;
   return (
-    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="modal card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-        <header className="modal-header">
-          <h2 id="modal-title">{title}</h2>
-          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}>×</button>
-        </header>
-        <div className="modal-body">{children}</div>
-        {footer && <footer className="modal-footer">{footer}</footer>}
-      </section>
-    </div>
+    <Dialog.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="modal-backdrop" />
+        <Dialog.Content className="modal card" aria-describedby={undefined}>
+          <header className="modal-header">
+            <Dialog.Title className="modal-title">{title}</Dialog.Title>
+            <Dialog.Close asChild>
+              <button type="button" className="icon-button" aria-label="Close"><X size={20} aria-hidden="true" /></button>
+            </Dialog.Close>
+          </header>
+          <div className="modal-body">{children}</div>
+          {footer && <footer className="modal-footer">{footer}</footer>}
+        </Dialog.Content>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 }

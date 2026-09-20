@@ -69,12 +69,22 @@ Service deployment. Testnet is shown as an option but remains Not configured
 until a canonical public descriptor is published. Network Mode never falls
 back to Demo Mode.
 
-In Network Mode, `Connect` uses a browser-provided EVM EIP-1193 wallet,
-Polkadot extension, or Solana Wallet Standard wallet as an Ownership session.
-Transfers show a review step before signing. The Assets page can create an
-asset with the connected Ownership as issuer and can display a canonical
-`locus:` Receive identifier. Demo Mode remains mock-only and never submits
-these actions.
+In Network Mode, `Connect` uses a browser-provided EVM EIP-1193 wallet, the
+official Polkadot extension-dapp adapter, or the official Solana Wallet
+Standard registry. If a wallet exposes multiple accounts, the account is
+selected explicitly. A Polkadot account without a reliable `ed25519`,
+`sr25519`, or `ecdsa` scheme is rejected rather than guessed. Transfers show
+a review step before signing. The Assets page is the default page, supports
+searchable network-asset selection, can create an asset with the connected
+Ownership as issuer, and can display a canonical `locus:` Receive identifier.
+Demo Mode remains mock-only and never submits these actions.
+
+The browser stores only the selected wallet kind and account identifier so a
+previous session can be restored when the wallet still authorizes it. EVM
+account changes invalidate the old signer immediately. Matrix login and
+recipient resolution remain outside this release's browser scope; browser
+wallet E2E requires the corresponding wallet extension or Wallet Standard
+provider to be installed.
 
 Stop the Vite preview with `Ctrl-C`. If it was started in the Docker preview
 container used by this checkout, stop it with:

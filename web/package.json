@@ -9,7 +9,11 @@
   },
   "dependencies": {
     "@jamscript/client": "0.1.0-rc.2",
+    "@polkadot/extension-dapp": "0.63.1",
     "@polkadot/networks": "14.0.3",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@wallet-standard/app": "^1.1.1",
+    "lucide-react": "^1.47.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1"
   },

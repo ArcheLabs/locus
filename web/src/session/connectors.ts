@@ -1,3 +1,5 @@
+import { web3Accounts, web3Enable, web3FromAddress } from "@polkadot/extension-dapp";
+import { getWallets } from "@wallet-standard/app";
 import {
   EvmOwnershipSigner,
   PolkadotOwnershipSigner,
@@ -15,26 +17,29 @@ type PolkadotAccount = {
   publicKey?: Uint8Array;
   type?: string;
   name?: string;
-  meta?: { name?: string };
+  meta?: { name?: string; source?: string };
 };
 
-type PolkadotInjection = {
-  accounts: { get(): Promise<readonly PolkadotAccount[]> };
-  signer: { signRaw(input: { address: string; data: string; type: "bytes" }): Promise<{ signature: string }> };
-};
-
-type WindowWithWallets = Window & {
-  ethereum?: Eip1193Provider;
-  injectedWeb3?: Record<string, { enable(name: string): Promise<PolkadotInjection> }>;
-};
+type WindowWithEthereum = Window & { ethereum?: Eip1193Provider };
 
 type StandardConnectFeature = {
   connect(options?: { silent?: boolean }): Promise<{ accounts: readonly WalletAccount[] }>;
 };
 
-function browserWindow(): WindowWithWallets {
+export type BrowserAccountOption = {
+  id: string;
+  label: string;
+  description: string;
+};
+
+type EventProvider = Eip1193Provider & {
+  on?: (event: string, listener: (...args: unknown[]) => void) => void;
+  removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
+};
+
+function browserWindow(): WindowWithEthereum {
   if (typeof window === "undefined") throw new Error("browser wallet access is unavailable");
-  return window as WindowWithWallets;
+  return window as WindowWithEthereum;
 }
 
 function shortAddress(value: string): string {
@@ -53,24 +58,79 @@ export type ConnectorInfo = {
 
 export const connectorInfo: readonly ConnectorInfo[] = [
   { kind: "evm", label: "EVM wallet", description: "Sign with an injected EIP-1193 wallet" },
-  { kind: "polkadot", label: "Polkadot extension", description: "Use an injected Polkadot account" },
-  { kind: "solana", label: "Solana wallet", description: "Use a Wallet Standard message signer" },
+  { kind: "polkadot", label: "Polkadot extension", description: "Choose an account from an enabled extension" },
+  { kind: "solana", label: "Solana wallet", description: "Choose a Wallet Standard message signer" },
 ];
 
 export function hasEvmWallet(): boolean {
   return Boolean(browserWindow().ethereum);
 }
 
-export function hasPolkadotWallet(): boolean {
-  return Object.keys(browserWindow().injectedWeb3 ?? {}).length > 0;
+export function hasSolanaWallet(): boolean {
+  return getWallets().get().some((wallet) => wallet.chains.some((chain) => chain.startsWith("solana:")) || Boolean(wallet.features[SolanaSignMessage]));
 }
 
-async function connectEvm(): Promise<LocusWebSession> {
+async function evmAccounts(): Promise<BrowserAccountOption[]> {
   const provider = browserWindow().ethereum;
   if (!provider) throw new Error("No EVM wallet was detected in this browser.");
   const result = await provider.request({ method: "eth_requestAccounts" });
   const accounts = Array.isArray(result) ? result.filter((value): value is string => typeof value === "string") : [];
-  const address = accounts[0];
+  return accounts.map((address) => ({ id: address, label: shortAddress(address), description: address }));
+}
+
+async function polkadotAccounts(): Promise<{ account: PolkadotAccount; option: BrowserAccountOption }[]> {
+  const extensions = await web3Enable("Locus");
+  if (extensions.length === 0) throw new Error("No Polkadot extension was detected in this browser.");
+  const accounts = await web3Accounts() as PolkadotAccount[];
+  return accounts.map((account) => ({
+    account,
+    option: {
+      id: account.address,
+      label: account.meta?.name ?? account.name ?? shortAddress(account.address),
+      description: `${account.meta?.source ?? "Polkadot extension"} · ${account.type ?? "scheme unavailable"}`,
+    },
+  }));
+}
+
+function solanaWallets(): readonly Wallet[] {
+  return getWallets().get().filter((wallet) => wallet.chains.some((chain) => chain.startsWith("solana:")) || Boolean(wallet.features[SolanaSignMessage]));
+}
+
+function walletAccountOption(wallet: Wallet, account: WalletAccount): BrowserAccountOption {
+  return {
+    id: `${wallet.name}::${account.address}`,
+    label: account.label || wallet.name,
+    description: `${wallet.name} · ${shortAddress(account.address)}`,
+  };
+}
+
+async function solanaAccounts(): Promise<BrowserAccountOption[]> {
+  const options: BrowserAccountOption[] = [];
+  for (const wallet of solanaWallets()) {
+    const accounts = wallet.accounts.filter((account) => account.chains.some((chain) => chain.startsWith("solana:")));
+    if (accounts.length > 0) {
+      options.push(...accounts.map((account) => walletAccountOption(wallet, account)));
+      continue;
+    }
+    if (wallet.features["standard:connect"]) {
+      options.push({ id: `${wallet.name}::connect`, label: wallet.name, description: "Connect this wallet" });
+    }
+  }
+  if (options.length === 0) throw new Error("No Solana Wallet Standard wallet was detected in this browser.");
+  return options;
+}
+
+export async function listBrowserAccounts(kind: SessionKind): Promise<BrowserAccountOption[]> {
+  if (kind === "evm") return evmAccounts();
+  if (kind === "polkadot") return (await polkadotAccounts()).map(({ option }) => option);
+  return solanaAccounts();
+}
+
+async function connectEvm(selectedId: string): Promise<LocusWebSession> {
+  const provider = browserWindow().ethereum;
+  if (!provider) throw new Error("No EVM wallet was detected in this browser.");
+  const accounts = await evmAccounts();
+  const address = accounts.find((account) => account.id === selectedId)?.id ?? selectedId;
   if (!address) throw new Error("The EVM wallet did not return an account.");
   const signer = new EvmOwnershipSigner(provider, address);
   return {
@@ -79,27 +139,27 @@ async function connectEvm(): Promise<LocusWebSession> {
     ownershipSession: { signer },
     label: `EVM ${shortAddress(address)}`,
     address,
+    connectionId: address,
   };
 }
 
 function polkadotScheme(account: PolkadotAccount): "ed25519" | "sr25519" | "ecdsa" {
   if (account.type === "ed25519" || account.type === "sr25519" || account.type === "ecdsa") return account.type;
-  return "sr25519";
+  throw new Error("The Polkadot extension did not provide a supported signature scheme for this account.");
 }
 
-async function connectPolkadot(): Promise<LocusWebSession> {
-  const extensions = Object.values(browserWindow().injectedWeb3 ?? {});
-  if (extensions.length === 0) throw new Error("No Polkadot extension was detected in this browser.");
-  const injection = await extensions[0].enable("Locus");
-  const accounts = await injection.accounts.get();
-  const account = accounts[0];
-  if (!account) throw new Error("The Polkadot extension did not return an account.");
+async function connectPolkadot(selectedId: string): Promise<LocusWebSession> {
+  const selected = (await polkadotAccounts()).find(({ account }) => account.address === selectedId);
+  if (!selected) throw new Error("The selected Polkadot account is no longer available.");
+  const { account } = selected;
+  const injector = await web3FromAddress(account.address);
+  if (!injector.signer.signRaw) throw new Error("The selected Polkadot extension cannot sign raw messages.");
   const accountId = account.publicKey ? Uint8Array.from(account.publicKey) : decodePolkadotAccountId(account.address);
   const signer = new PolkadotOwnershipSigner({
     accountId,
     address: account.address,
     scheme: polkadotScheme(account),
-    signer: injection.signer,
+    signer: { signRaw: (input) => injector.signer.signRaw!(input) },
   });
   return {
     kind: "polkadot",
@@ -107,43 +167,17 @@ async function connectPolkadot(): Promise<LocusWebSession> {
     ownershipSession: { signer },
     label: `Polkadot ${shortAddress(account.address)}`,
     address: account.address,
+    connectionId: account.address,
   };
 }
 
-function discoverStandardWallets(): Promise<Wallet[]> {
-  const found: Wallet[] = [];
-  const register = (wallet: Wallet): (() => void) => {
-    if (!found.some((entry) => entry === wallet || entry.name === wallet.name)) found.push(wallet);
-    return () => {
-      const index = found.indexOf(wallet);
-      if (index >= 0) found.splice(index, 1);
-    };
-  };
-  const onRegister = (event: Event) => {
-    const callback = (event as CustomEvent<(api: { register(wallet: Wallet): () => void }) => void>).detail;
-    if (typeof callback === "function") callback({ register });
-  };
-  const target = browserWindow();
-  target.addEventListener("wallet-standard:register-wallet", onRegister);
-  target.dispatchEvent(new CustomEvent("wallet-standard:app-ready", { detail: { register } }));
-  const legacyWallets = (target.navigator as Navigator & { wallets?: { push(callback: (api: { register(...wallets: Wallet[]): void }) => void): void } }).wallets;
-  legacyWallets?.push((api) => api.register(...found));
-  return new Promise((resolve) => {
-    window.setTimeout(() => {
-      target.removeEventListener("wallet-standard:register-wallet", onRegister);
-      resolve(found);
-    }, 50);
-  });
-}
-
-async function connectSolana(): Promise<LocusWebSession> {
-  const wallets = await discoverStandardWallets();
-  const wallet = wallets.find((candidate) => {
-    const hasSolanaChain = candidate.chains.some((chain) => chain.startsWith("solana:"));
-    return hasSolanaChain || Boolean(candidate.features[SolanaSignMessage]);
-  });
-  if (!wallet) throw new Error("No Solana Wallet Standard wallet was detected in this browser.");
-  let account = wallet.accounts.find((candidate) => candidate.chains.some((chain) => chain.startsWith("solana:")));
+async function connectSolana(selectedId: string): Promise<LocusWebSession> {
+  const separator = selectedId.indexOf("::");
+  const walletName = separator < 0 ? selectedId : selectedId.slice(0, separator);
+  const requestedAddress = separator < 0 ? "" : selectedId.slice(separator + 2);
+  const wallet = solanaWallets().find((candidate) => candidate.name === walletName);
+  if (!wallet) throw new Error("The selected Solana wallet is no longer available.");
+  let account = wallet.accounts.find((candidate) => candidate.address === requestedAddress);
   if (!account) {
     const connect = wallet.features["standard:connect"] as StandardConnectFeature | undefined;
     if (!connect) throw new Error("The Solana wallet does not expose a connect feature.");
@@ -160,11 +194,25 @@ async function connectSolana(): Promise<LocusWebSession> {
     ownershipSession: { signer },
     label: `Solana ${shortAddress(account.address)}`,
     address: account.address,
+    connectionId: `${wallet.name}::${account.address}`,
   };
 }
 
-export async function connectBrowserSession(kind: SessionKind): Promise<LocusWebSession> {
-  if (kind === "evm") return connectEvm();
-  if (kind === "polkadot") return connectPolkadot();
-  return connectSolana();
+export async function connectBrowserSession(kind: SessionKind, selectedId: string): Promise<LocusWebSession> {
+  if (kind === "evm") return connectEvm(selectedId);
+  if (kind === "polkadot") return connectPolkadot(selectedId);
+  return connectSolana(selectedId);
+}
+
+/** Keep a connected browser session from signing with an account that the wallet has replaced. */
+export function watchBrowserSession(session: LocusWebSession, onAccountChanged: (address: string | null) => void): () => void {
+  if (session.kind !== "evm") return () => undefined;
+  const provider = browserWindow().ethereum as EventProvider | undefined;
+  if (!provider?.on) return () => undefined;
+  const listener = (...args: unknown[]) => {
+    const accounts = Array.isArray(args[0]) ? args[0].filter((value): value is string => typeof value === "string") : [];
+    onAccountChanged(accounts[0] ?? null);
+  };
+  provider.on("accountsChanged", listener);
+  return () => provider.removeListener?.("accountsChanged", listener);
 }
