@@ -1,8 +1,17 @@
 [package]
 name = "locus"
-version = "0.1.0"
+version = "0.2.0"
 entry = "src/service.ts"
 language = "0.3"
 
 [compiler]
 backend = "scriptc"
+
+[deployment]
+default_network = "local"
+
+[networks.local]
+kind = "minijam"
+deployment_rpc = "http://127.0.0.1:8080"
+node_rpc = "http://127.0.0.1:9944"
+backend_rpc = "http://127.0.0.1:8090"

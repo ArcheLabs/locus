@@ -1,24 +1,21 @@
-export type IdentityId = Uint8Array;
+import type {
+  CodecValue,
+  Ownership as JamOwnership,
+  OwnershipSigner,
+  SubmitActionResult,
+  WaitForActionResult,
+} from "@jamscript/client";
+
+export type Ownership = JamOwnership;
 export type AssetId = Uint8Array;
 export type Amount = bigint;
 
 export type LocusRecord = { [key: string]: LocusValue };
-export type LocusValue = Uint8Array | bigint | number | boolean | LocusRecord;
+export type LocusValue = CodecValue;
 
-export interface IdentityOwnerV1 {
-  version: number;
-  scheme: number;
-  payload: Uint8Array;
-}
-
-export interface IdentityV1 {
-  version: number;
-  owner: IdentityOwnerV1;
-}
-
-export interface AssetV1 {
-  version: number;
-  issuer: IdentityId;
+export interface Asset {
+  version: 2;
+  issuer: Ownership;
   name: Uint8Array;
   symbol: Uint8Array;
   decimals: number;
@@ -29,20 +26,23 @@ export interface LocusQueryResult {
   value: LocusValue | null;
 }
 
-/**
- * Deliberately small boundary around JamScript's client. Signing, wallet
- * nonces, ABI encoding, managed-state proofs, and Work submission remain
- * owned by the injected JamScript client/adapter.
- */
-export interface JamScriptLikeClient {
-  submitAction(
-    actionName: string,
-    input: Record<string, LocusValue>,
-  ): Promise<unknown>;
-  queryLatest(queryName: string, key?: LocusValue): Promise<LocusQueryResult>;
-  waitForAction(transactionId: string, options?: Record<string, LocusValue>): Promise<unknown>;
+export interface OwnershipSession {
+  signer: OwnershipSigner;
 }
 
-export interface LocusActionReceipt {
-  [key: string]: unknown;
+/** The subset implemented by the published @jamscript/client package. */
+export interface JamScriptLikeClient {
+  submitOwnershipAction(
+    actionName: string,
+    input: Record<string, CodecValue>,
+    signer: OwnershipSigner,
+    options?: { actAs?: Ownership; ttl?: bigint; extrinsics?: Uint8Array[] },
+  ): Promise<SubmitActionResult>;
+  queryLatest(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
+  waitForAction(
+    transactionId: string,
+    options?: { intervalMs?: number; timeoutMs?: number },
+  ): Promise<WaitForActionResult>;
 }
+
+export type ActionReceipt = WaitForActionResult;

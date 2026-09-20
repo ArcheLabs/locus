@@ -1,6 +1,6 @@
 {
   "name": "@archelabs/locus",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "exports": {
@@ -9,7 +9,13 @@
   "scripts": {
     "check": "bash scripts/check.sh",
     "build": "bash scripts/build.sh",
-    "test": "bash scripts/test-local.sh"
+    "test": "bash scripts/test-local.sh",
+    "build:web": "npm --prefix web run build",
+    "dev": "npm --prefix web run dev"
+  },
+  "dependencies": {
+    "@jamscript/client": "0.1.0-rc.1",
+    "@polkadot/util-crypto": "^14.0.1"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

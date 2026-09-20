@@ -1,13 +1,4 @@
 export const LOCUS_ERROR_CODES = {
-  IDENTITY_NOT_FOUND: 1001,
-  IDENTITY_ALREADY_EXISTS: 1002,
-  INVALID_IDENTITY_ID: 1003,
-  UNAUTHORIZED_OWNER: 1004,
-  UNSUPPORTED_OWNER_SCHEME: 1005,
-  INVALID_OWNER: 1006,
-  IDENTITY_NONCE_MISMATCH: 1007,
-  OWNER_UNCHANGED: 1008,
-
   ASSET_NOT_FOUND: 2001,
   ASSET_ALREADY_EXISTS: 2002,
   INVALID_ASSET_ID: 2003,
@@ -16,13 +7,10 @@ export const LOCUS_ERROR_CODES = {
   INVALID_DECIMALS: 2006,
   NOT_ASSET_ISSUER: 2007,
 
-  DESTINATION_IDENTITY_NOT_FOUND: 3001,
   INSUFFICIENT_BALANCE: 3002,
   AMOUNT_OVERFLOW: 3003,
 
-  SPENDER_IDENTITY_NOT_FOUND: 4001,
   INSUFFICIENT_ALLOWANCE: 4002,
-
   STATE_INVARIANT_VIOLATION: 9001,
 } as const;
 
@@ -50,7 +38,6 @@ function codeFrom(value: unknown): number | undefined {
   return undefined;
 }
 
-/** Convert an adapter/provider abort into the stable Locus application error. */
 export function normalizeLocusError(error: unknown): LocusError | null {
   if (error instanceof LocusError) return error;
   if (!error || typeof error !== "object") return null;

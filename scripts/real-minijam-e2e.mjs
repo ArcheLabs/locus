@@ -2,32 +2,28 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import {
+  FetchRpcTransport,
+  JamScriptClient,
+  OWNERSHIP_KIND,
+} from "@jamscript/client";
+import {
+  cryptoWaitReady,
+  sr25519PairFromSeed,
+  sr25519Sign,
+} from "@polkadot/util-crypto";
+import { LocusClient } from "../dist/sdk/index.js";
 
 const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
-const clientRoot = process.env.JAMSCRIPT_CLIENT_ROOT;
-const backendUrl = process.env.LOCUS_E2E_BACKEND_RPC ?? "http://127.0.0.1:8091";
+const backendUrl = process.env.LOCUS_E2E_BACKEND_RPC ?? "http://127.0.0.1:8090";
 const genesisHash = process.env.LOCUS_E2E_GENESIS_HASH;
 const networkDomain = process.env.LOCUS_E2E_NETWORK_DOMAIN ?? genesisHash;
 const serviceId = Number(process.env.LOCUS_E2E_SERVICE_ID);
 const artifactDir = process.env.LOCUS_E2E_ARTIFACTS ?? path.join(root, "dist");
 
-if (!clientRoot) throw new Error("JAMSCRIPT_CLIENT_ROOT is required");
 if (!genesisHash || !networkDomain || !Number.isInteger(serviceId)) {
   throw new Error("LOCUS_E2E_GENESIS_HASH, LOCUS_E2E_NETWORK_DOMAIN and LOCUS_E2E_SERVICE_ID are required");
 }
-
-const importFrom = (file) => import(pathToFileURL(path.join(clientRoot, file)).href);
-const {
-  FetchRpcTransport,
-  JamScriptClient,
-} = await importFrom("dist/index.js");
-const { hexToU8a, u8aToHex } = await importFrom("node_modules/@polkadot/util/index.js");
-const {
-  cryptoWaitReady,
-  sr25519PairFromSeed,
-  sr25519Sign,
-} = await importFrom("node_modules/@polkadot/util-crypto/index.js");
-const { LocusClient } = await import(pathToFileURL(path.join(root, "dist/sdk/index.js")).href);
 
 const build = JSON.parse(await fs.readFile(path.join(artifactDir, "build.json"), "utf8"));
 const abi = JSON.parse(await fs.readFile(path.join(artifactDir, "service.abi.json"), "utf8"));
@@ -42,172 +38,110 @@ const deployment = {
 };
 
 await cryptoWaitReady();
-const transport = new FetchRpcTransport(backendUrl);
-const protocolClient = new JamScriptClient(deployment, transport);
+const protocolClient = new JamScriptClient(deployment, new FetchRpcTransport(backendUrl));
 
 function id(byte) {
   return new Uint8Array(32).fill(byte);
 }
 
-function pair(byte) {
-  return sr25519PairFromSeed(id(byte));
-}
-
-function signerFor(keyPair) {
+function signerFor(seedByte) {
+  const pair = sr25519PairFromSeed(id(seedByte));
+  const controller = { version: 1, kind: OWNERSHIP_KIND.SR25519_KEY, public: pair.publicKey };
   return {
-    publicKey: keyPair.publicKey,
-    signRaw: async (message) => sr25519Sign(message, keyPair),
+    controller,
+    async getController() { return controller; },
+    async signJamScriptAction(request) { return sr25519Sign(request.message, pair); },
   };
 }
 
-function locusFor(signer) {
-  return new LocusClient({
-    submitAction: async (actionName, input) => {
-      const submitted = await protocolClient.submitAction(actionName, input, signer);
-      const result = await protocolClient.waitForAction(
-        submitted.transactionId,
-        submitted.actionHash,
-        { intervalMs: 500, timeoutMs: 120_000 },
-      );
-      assert.equal(
-        result.actionReceipt.status,
-        "applied",
-        `${actionName} application receipt was ${JSON.stringify(result.actionReceipt)}`,
-      );
-      return result;
-    },
-    queryLatest: (queryName, key) => protocolClient.queryLatest(queryName, key),
-    waitForAction: (transactionId, options) => protocolClient.waitForAction(transactionId, options),
-  });
+async function applied(submitted, label) {
+  const result = await protocolClient.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+  assert.equal(result.actionReceipt.status, "applied", `${label} receipt was ${JSON.stringify(result.actionReceipt)}`);
+  return result;
 }
 
-async function submitExpected(signer, actionName, input, status, errorCode) {
-  const submitted = await protocolClient.submitAction(actionName, input, signer);
-  const result = await protocolClient.waitForAction(
-    submitted.transactionId,
-    submitted.actionHash,
-    { intervalMs: 500, timeoutMs: 120_000 },
-  );
-  assert.equal(result.actionReceipt.status, status, `${actionName} receipt status`);
-  if (errorCode !== undefined) assert.equal(result.actionReceipt.errorCode, errorCode);
-  return result;
+async function rejected(submitted, label, errorCode) {
+  const result = await protocolClient.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+  assert.equal(result.actionReceipt.status, "failed", `${label} receipt status`);
+  assert.equal(result.actionReceipt.errorCode, errorCode, `${label} error code`);
+}
+
+async function submitExpected(client, signer, actionName, input, errorCode) {
+  const submitted = await protocolClient.submitOwnershipAction(actionName, input, signer);
+  await rejected(submitted, actionName, errorCode);
 }
 
 function assertAmount(actual, expected, label) {
   assert.equal(actual, expected, label);
 }
 
-const aliceA = pair(1);
-const aliceB = pair(2);
-const bobPair = pair(3);
-const carolPair = pair(4);
-const aliceId = id(0x11);
-const bobId = id(0x22);
-const carolId = id(0x33);
-const assetId = id(0xa1);
-const wideAssetId = id(0xa2);
-const alice = locusFor(signerFor(aliceA));
-const aliceNew = locusFor(signerFor(aliceB));
-const bob = locusFor(signerFor(bobPair));
-const carol = locusFor(signerFor(carolPair));
-const abc = alice.asset(assetId);
-const rotatedAbc = aliceNew.asset(assetId);
-
 await protocolClient.validateDeployment();
 
-await alice.createIdentity(aliceId);
-await bob.createIdentity(bobId);
-await carol.createIdentity(carolId);
-console.log("CREATE_IDENTITY=PASS");
+const aliceSigner = signerFor(1);
+const bobSigner = signerFor(2);
+const carolSigner = signerFor(3);
+const alice = new LocusClient(protocolClient, { signer: aliceSigner });
+const bob = new LocusClient(protocolClient, { signer: bobSigner });
+const carol = new LocusClient(protocolClient, { signer: carolSigner });
+const aliceOwner = aliceSigner.controller;
+const bobOwner = bobSigner.controller;
+const carolOwner = carolSigner.controller;
+
+const assetId = id(0xa1);
+const wideAssetId = id(0xa2);
+const abc = alice.asset(assetId);
 
 const unit = 10n ** 18n;
-await alice.createAsset(aliceId, assetId, "Asset ABC", "ABC", 18, 100n * unit);
-assertAmount(await abc.balanceOf(aliceId), 100n * unit, "initial Alice balance");
-assertAmount(await abc.balanceOf(bobId), 0n, "initial Bob balance");
-assertAmount(await abc.balanceOf(carolId), 0n, "initial Carol balance");
+await applied(await alice.createAsset(assetId, "Asset ABC", "ABC", 18, 100n * unit), "CREATE_ASSET");
+assertAmount(await abc.balanceOf(aliceOwner), 100n * unit, "initial Alice balance");
+assertAmount(await abc.balanceOf(bobOwner), 0n, "initial Bob balance");
+assertAmount(await abc.balanceOf(carolOwner), 0n, "initial Carol balance");
 assertAmount(await abc.totalSupply(), 100n * unit, "initial supply");
 console.log("CREATE_ASSET=PASS");
 
-await abc.transfer(aliceId, bobId, 20n * unit);
-assertAmount(await abc.balanceOf(aliceId), 80n * unit, "Alice after transfer");
-assertAmount(await abc.balanceOf(bobId), 20n * unit, "Bob after transfer");
+await applied(await alice.transfer(assetId, bobOwner, 20n * unit), "TRANSFER");
+assertAmount(await abc.balanceOf(aliceOwner), 80n * unit, "Alice after transfer");
+assertAmount(await abc.balanceOf(bobOwner), 20n * unit, "Bob after transfer");
 console.log("TRANSFER=PASS");
 
-await abc.approve(aliceId, bobId, 15n * unit);
-assertAmount(await abc.allowance(aliceId, bobId), 15n * unit, "allowance after approve");
+await applied(await alice.approve(assetId, bobOwner, 15n * unit), "APPROVE");
+assertAmount(await abc.allowance(aliceOwner, bobOwner), 15n * unit, "allowance after approve");
 console.log("APPROVE=PASS");
 
-await alice.rotateOwner(aliceId, aliceB.publicKey);
-const rotated = await alice.getIdentity(aliceId);
-assert.ok(rotated);
-assert.deepEqual(Array.from(rotated.owner.payload), Array.from(aliceB.publicKey));
-assertAmount(await abc.balanceOf(aliceId), 80n * unit, "balance stable across rotation");
-assertAmount(await abc.allowance(aliceId, bobId), 15n * unit, "allowance stable across rotation");
-const rotatedAsset = await alice.getAsset(assetId);
-assert.ok(rotatedAsset);
-assert.deepEqual(Array.from(rotatedAsset.issuer), Array.from(aliceId));
-console.log("ROTATE_OWNER=PASS");
-console.log("OWNER_ROTATION_BALANCE_STABLE=PASS");
-console.log("OWNER_ROTATION_ALLOWANCE_STABLE=PASS");
-console.log("OWNER_ROTATION_ISSUER_STABLE=PASS");
-
-const currentAliceNonce = await aliceNew.identityNonce(aliceId);
-await submitExpected(
-  signerFor(aliceA),
-  "transfer",
-  { fromId: aliceId, nonce: currentAliceNonce, assetId, toId: carolId, amount: 1n * unit },
-  "failed",
-  1004,
-);
-console.log("OLD_OWNER_REJECTED=PASS");
-
-await rotatedAbc.transfer(aliceId, bobId, 10n * unit);
-assertAmount(await abc.balanceOf(aliceId), 70n * unit, "Alice after new-owner transfer");
-assertAmount(await abc.balanceOf(bobId), 30n * unit, "Bob after new-owner transfer");
-console.log("NEW_OWNER_ACCEPTED=PASS");
-
-await bob.asset(assetId).transferFrom(bobId, aliceId, carolId, 7n * unit);
-assertAmount(await abc.balanceOf(aliceId), 63n * unit, "Alice after transferFrom");
-assertAmount(await abc.balanceOf(bobId), 30n * unit, "Bob after transferFrom");
-assertAmount(await abc.balanceOf(carolId), 7n * unit, "Carol after transferFrom");
-assertAmount(await abc.allowance(aliceId, bobId), 8n * unit, "allowance after transferFrom");
+await applied(await bob.transferFrom(assetId, aliceOwner, carolOwner, 7n * unit), "TRANSFER_FROM");
+assertAmount(await abc.balanceOf(aliceOwner), 73n * unit, "Alice after transferFrom");
+assertAmount(await abc.balanceOf(carolOwner), 7n * unit, "Carol after transferFrom");
+assertAmount(await abc.allowance(aliceOwner, bobOwner), 8n * unit, "allowance after transferFrom");
 console.log("TRANSFER_FROM=PASS");
 
-await rotatedAbc.mint(aliceId, bobId, 10n * unit);
-assertAmount(await abc.balanceOf(bobId), 40n * unit, "Bob after mint");
+await submitExpected(bob, bobSigner, "mint", { assetId, to: bobOwner, amount: 1n * unit }, 2007);
+console.log("NON_ISSUER_REJECTED=PASS");
+
+await applied(await alice.mint(assetId, bobOwner, 10n * unit), "MINT");
+assertAmount(await abc.balanceOf(bobOwner), 30n * unit, "Bob after mint");
 assertAmount(await abc.totalSupply(), 110n * unit, "supply after mint");
 console.log("MINT=PASS");
 
-await rotatedAbc.burn(aliceId, 3n * unit);
-assertAmount(await abc.balanceOf(aliceId), 60n * unit, "Alice after burn");
+await applied(await alice.burn(assetId, 3n * unit), "BURN");
+assertAmount(await abc.balanceOf(aliceOwner), 70n * unit, "Alice after burn");
 assertAmount(await abc.totalSupply(), 107n * unit, "supply after burn");
 console.log("BURN=PASS");
 
-const staleNonce = (await aliceNew.identityNonce(aliceId)) - 1n;
-await submitExpected(
-  signerFor(aliceB),
-  "transfer",
-  { fromId: aliceId, nonce: staleNonce, assetId, toId: carolId, amount: 1n * unit },
-  "failed",
-  1007,
-);
-console.log("IDENTITY_REPLAY_REJECTED=PASS");
-
-const wideSupply = 1000000000000000000000000000000n;
-const wideTransfer = 100000000000000000000000000000n;
-const wide = aliceNew.asset(wideAssetId);
-await aliceNew.createAsset(aliceId, wideAssetId, "Wide Asset", "WIDE", 0, wideSupply);
-await wide.transfer(aliceId, bobId, wideTransfer);
-assertAmount(await wide.balanceOf(aliceId), wideSupply - wideTransfer, "wide Alice balance");
-assertAmount(await wide.balanceOf(bobId), wideTransfer, "wide Bob balance");
+const wideSupply = 1000000000000000000000000000n;
+const wideTransfer = 100000000000000000000000000n;
+const wide = alice.asset(wideAssetId);
+await applied(await alice.createAsset(wideAssetId, "Wide Asset", "WIDE", 0, wideSupply), "U128_WIDE_AMOUNT");
+await applied(await alice.transfer(wideAssetId, bobOwner, wideTransfer), "wide transfer");
+assertAmount(await wide.balanceOf(aliceOwner), wideSupply - wideTransfer, "wide Alice balance");
+assertAmount(await wide.balanceOf(bobOwner), wideTransfer, "wide Bob balance");
 assertAmount(await wide.totalSupply(), wideSupply, "wide supply");
 console.log("U128_WIDE_AMOUNT=PASS");
 
 assertAmount(
-  (await abc.balanceOf(aliceId)) + (await abc.balanceOf(bobId)) + (await abc.balanceOf(carolId)),
+  (await abc.balanceOf(aliceOwner)) + (await abc.balanceOf(bobOwner)) + (await abc.balanceOf(carolOwner)),
   await abc.totalSupply(),
   "ABC balance sum equals supply",
 );
 console.log("BALANCE_SUM_EQUALS_SUPPLY=PASS");
-console.log("REAL_MINIJAM_E2E=PASS");
-console.log("LOCUS_V0_1=PASS");
+console.log("LOCUS_REAL_MINIJAM_E2E=PASS");
+console.log("LOCUS_V0_2=PASS");
