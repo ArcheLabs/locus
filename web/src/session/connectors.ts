@@ -121,6 +121,7 @@ async function solanaAccounts(): Promise<BrowserAccountOption[]> {
 }
 
 export async function listBrowserAccounts(kind: SessionKind): Promise<BrowserAccountOption[]> {
+  if (kind === "matrix") throw new Error("Matrix uses its login dialog rather than a browser wallet account picker.");
   if (kind === "evm") return evmAccounts();
   if (kind === "polkadot") return (await polkadotAccounts()).map(({ option }) => option);
   return solanaAccounts();
@@ -136,6 +137,7 @@ async function connectEvm(selectedId: string): Promise<LocusWebSession> {
   return {
     kind: "evm",
     owner: asOwnership(await signer.getController()),
+    controller: asOwnership(await signer.getController()),
     ownershipSession: { signer },
     label: `EVM ${shortAddress(address)}`,
     address,
@@ -164,6 +166,7 @@ async function connectPolkadot(selectedId: string): Promise<LocusWebSession> {
   return {
     kind: "polkadot",
     owner: asOwnership(await signer.getController()),
+    controller: asOwnership(await signer.getController()),
     ownershipSession: { signer },
     label: `Polkadot ${shortAddress(account.address)}`,
     address: account.address,
@@ -191,6 +194,7 @@ async function connectSolana(selectedId: string): Promise<LocusWebSession> {
   return {
     kind: "solana",
     owner: asOwnership(await signer.getController()),
+    controller: asOwnership(await signer.getController()),
     ownershipSession: { signer },
     label: `Solana ${shortAddress(account.address)}`,
     address: account.address,
@@ -199,6 +203,7 @@ async function connectSolana(selectedId: string): Promise<LocusWebSession> {
 }
 
 export async function connectBrowserSession(kind: SessionKind, selectedId: string): Promise<LocusWebSession> {
+  if (kind === "matrix") throw new Error("Matrix sessions must be created through the Matrix login dialog.");
   if (kind === "evm") return connectEvm(selectedId);
   if (kind === "polkadot") return connectPolkadot(selectedId);
   return connectSolana(selectedId);

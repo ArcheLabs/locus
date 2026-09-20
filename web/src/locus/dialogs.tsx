@@ -94,7 +94,7 @@ export function CreateAssetDialog({ open, locus, session, onClose, onCreated }: 
   return (
     <Modal open={open} title="Create asset" onClose={onClose} footer={<><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="button" className="primary modal-primary" disabled={working || !locus} onClick={create}>{working ? "Creating…" : "Create asset"}</button></>}>
       <p className="modal-lead">The connected Ownership becomes the issuer.</p>
-      {session && <div className="issuer-card"><span className={`wallet-mark ${session.kind}`}>{session.kind.toUpperCase()}</span><span><small>Owner / Issuer</small><strong>{session.label}</strong><code>{session.address}</code></span></div>}
+      {session && <div className="issuer-card"><span className={`wallet-mark ${session.kind}`}>{session.kind === "matrix" ? "M" : session.kind.toUpperCase()}</span><span><small>Owner / Issuer</small><strong>{session.label}</strong><code>{formatLocusId(session.owner)}</code>{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; actions use actAs master Ownership</small>}</span></div>}
       <div className="form-grid">
         <label>Name<input value={name} placeholder="Dot Token" onChange={(event) => setName(event.target.value)} /></label>
         <label>Symbol<input value={symbol} placeholder="DOT" onChange={(event) => setSymbol(event.target.value.toUpperCase())} /></label>

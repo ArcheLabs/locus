@@ -13,3 +13,5 @@ echo "SDK_TYPECHECK=PASS"
 echo "LOCAL_MODEL_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-network.test.mjs
 echo "WEB_NETWORK_TESTS=PASS"
+"${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-interaction.test.mjs
+echo "WEB_INTERACTION_TESTS=PASS"

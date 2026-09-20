@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
+import { ArrowRight } from "lucide-react";
 import { Modal } from "../components/Modal.js";
 import { connectBrowserSession, connectorInfo, hasEvmWallet, hasSolanaWallet, listBrowserAccounts, type BrowserAccountOption } from "./connectors.js";
 import type { LocusWebSession, SessionKind } from "./types.js";
+import { MatrixLoginDialog } from "../matrix/MatrixLoginDialog.js";
+import { SiEthereum, SiMatrix, SiPolkadot, SiSolana } from "react-icons/si";
+import type { IconType } from "react-icons";
 
 type Props = {
   open: boolean;
@@ -21,6 +25,7 @@ export function ConnectDialog({ open, onClose, onConnected }: Props) {
   const [accountOptions, setAccountOptions] = useState<BrowserAccountOption[]>([]);
   const [selectedKind, setSelectedKind] = useState<SessionKind | null>(null);
   const [selectedAccount, setSelectedAccount] = useState("");
+  const [matrixOpen, setMatrixOpen] = useState(false);
   const options = useMemo(() => connectorInfo.map((entry) => ({ ...entry, available: available(entry.kind) })), []);
 
   useEffect(() => {
@@ -33,6 +38,11 @@ export function ConnectDialog({ open, onClose, onConnected }: Props) {
   }, [open]);
 
   async function chooseConnector(kind: SessionKind) {
+    if (kind === "matrix") {
+      onClose();
+      setMatrixOpen(true);
+      return;
+    }
     setConnecting(kind);
     setSelectedKind(null);
     setAccountOptions([]);
@@ -53,6 +63,9 @@ export function ConnectDialog({ open, onClose, onConnected }: Props) {
     }
   }
 
+  const matrixEntry = { kind: "matrix" as const, label: "Matrix", description: "Use a verified Matrix device controller", available: true };
+  const displayOptions = [matrixEntry, ...options];
+
   async function connect(kind: SessionKind, accountId: string) {
     setConnecting(kind);
     setError("");
@@ -67,14 +80,15 @@ export function ConnectDialog({ open, onClose, onConnected }: Props) {
   }
 
   return (
+    <>
     <Modal open={open} title="Connect" onClose={onClose}>
       <p className="modal-lead">Choose an Ownership signer. This does not select an execution network.</p>
       <div className="connect-options">
-        {options.map((entry) => (
+        {displayOptions.map((entry) => (
           <button key={entry.kind} type="button" className="connect-option" disabled={connecting !== null || !entry.available} onClick={() => chooseConnector(entry.kind)}>
-            <span className={`wallet-mark ${entry.kind}`} aria-hidden="true">{entry.kind === "evm" ? "EVM" : entry.kind === "polkadot" ? "DOT" : "SOL"}</span>
+            <span className={`wallet-mark ${entry.kind}`} aria-hidden="true"><ConnectorIcon kind={entry.kind} /></span>
             <span><strong>{entry.label}</strong><small>{connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}</small></span>
-            <span className="connect-arrow" aria-hidden="true">→</span>
+            <ArrowRight className="connect-arrow" size={18} aria-hidden="true" />
           </button>
         ))}
       </div>
@@ -88,5 +102,13 @@ export function ConnectDialog({ open, onClose, onConnected }: Props) {
       {error && <div className="transaction-error">{error}</div>}
       <p className="modal-note">Locus keeps assets attached to Ownership. Wallets only authorize actions.</p>
     </Modal>
+    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onConnected={onConnected} />
+    </>
   );
+}
+
+function ConnectorIcon({ kind }: { kind: SessionKind }) {
+  const icons: Record<SessionKind, IconType> = { matrix: SiMatrix, evm: SiEthereum, polkadot: SiPolkadot, solana: SiSolana };
+  const Icon = icons[kind];
+  return <Icon size={18} aria-hidden="true" />;
 }

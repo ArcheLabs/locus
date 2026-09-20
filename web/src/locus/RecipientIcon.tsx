@@ -1,15 +1,16 @@
-import { AtSign, CircleDot, Code, Hash, Hexagon, Mail, MessageSquare, Send, Sparkles, type LucideProps } from "lucide-react";
+import { Hash, Mail, type LucideProps } from "lucide-react";
+import { SiEthereum, SiGithub, SiMatrix, SiPolkadot, SiSolana, SiTelegram } from "react-icons/si";
 import type { ComponentType } from "react";
 import type { RecipientType } from "./recipients.js";
 
 const icons: Record<RecipientType, ComponentType<LucideProps>> = {
-  matrix: MessageSquare,
-  telegram: Send,
+  matrix: SiMatrix,
+  telegram: SiTelegram,
   email: Mail,
-  github: Code,
-  evm: Hexagon,
-  polkadot: CircleDot,
-  solana: Sparkles,
+  github: SiGithub,
+  evm: SiEthereum,
+  polkadot: SiPolkadot,
+  solana: SiSolana,
   locus: Hash,
 };
 

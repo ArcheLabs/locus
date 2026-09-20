@@ -70,21 +70,40 @@ until a canonical public descriptor is published. Network Mode never falls
 back to Demo Mode.
 
 In Network Mode, `Connect` uses a browser-provided EVM EIP-1193 wallet, the
-official Polkadot extension-dapp adapter, or the official Solana Wallet
-Standard registry. If a wallet exposes multiple accounts, the account is
-selected explicitly. A Polkadot account without a reliable `ed25519`,
-`sr25519`, or `ecdsa` scheme is rejected rather than guessed. Transfers show
-a review step before signing. The Assets page is the default page, supports
-searchable network-asset selection, can create an asset with the connected
-Ownership as issuer, and can display a canonical `locus:` Receive identifier.
-Demo Mode remains mock-only and never submits these actions.
+official Polkadot extension-dapp adapter, the official Solana Wallet Standard
+registry, or the Matrix login flow. If a wallet exposes multiple accounts, the
+account is selected explicitly. A Polkadot account without a reliable
+`ed25519`, `sr25519`, or `ecdsa` scheme is rejected rather than guessed.
+Transfers show a review step before signing. The Assets page is the default
+page, supports searchable network-asset selection, can create an asset with
+the connected Ownership as issuer, and can display a canonical `locus:` Receive
+identifier. Demo Mode remains mock-only and never submits these actions.
 
-The browser stores only the selected wallet kind and account identifier so a
-previous session can be restored when the wallet still authorizes it. EVM
-account changes invalidate the old signer immediately. Matrix login and
-recipient resolution remain outside this release's browser scope; browser
-wallet E2E requires the corresponding wallet extension or Wallet Standard
+Matrix uses the cross-signing master key as the stable owner and the current
+device Ed25519 key as the controller. The web adapter uses the public
+`matrix-js-sdk` login/API surface and a single `OlmMachine` crypto engine; it
+does not call `initRustCrypto()`, access private SDK fields, persist passwords,
+or hash Matrix IDs into Ownership. `/keys/query` evidence is encoded through
+the JamScript Matrix proof codec and a recipient resolves to the master key,
+never to a device key.
+
+The browser stores ordinary wallet session identifiers in local storage and
+Matrix access/refresh credentials in session storage only. EVM account changes
+invalidate the old signer immediately. Radix Dialog, DropdownMenu, and
+Popover provide Escape, focus, restore, and outside-click behavior. The
+deterministic mock signer tests run with `npm test`; real browser wallet smoke
+tests still require the corresponding wallet extension or Wallet Standard
 provider to be installed.
+
+The current JamScript source now contains the Matrix proof codec and TS/Rust
+parity vector. The web adapter delegates to that optional public client
+surface and reports `JAMSCRIPT_CLIENT_MATRIX_CODEC_UNAVAILABLE` if an older
+published package is used; the next client prerelease must be published to
+activate Matrix proof generation in a clean consumer checkout. In addition,
+the current JamScript source has no executable chain ControlClaim bootstrap
+RPC/transaction ingress: the web adapter therefore fails explicitly with
+`CONTROL_CLAIM_FAILED` instead of presenting an unregistered `actAs` session as
+authorized. This is a platform release blocker, not a Locus Service change.
 
 Stop the Vite preview with `Ctrl-C`. If it was started in the Docker preview
 container used by this checkout, stop it with:

@@ -98,7 +98,8 @@ export class LocusClient {
     input: Record<string, LocusValue>,
   ): Promise<SubmitActionResult> {
     try {
-      return await this.jamClient.submitOwnershipAction(actionName, input, this.requireSession().signer);
+      const session = this.requireSession();
+      return await this.jamClient.submitOwnershipAction(actionName, input, session.signer, { actAs: session.actAs });
     } catch (error) {
       throw normalizeLocusError(error) ?? error;
     }

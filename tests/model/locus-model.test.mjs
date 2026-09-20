@@ -92,6 +92,20 @@ test("SDK uses Ownership auth and canonical ownership keys", async () => {
   assert.equal(key(submitted[0].input.to), key(bob));
 });
 
+test("SDK forwards controller delegation as actAs", async () => {
+  const calls = [];
+  const adapter = {
+    async submitOwnershipAction(...args) { calls.push(args); return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
+    async queryLatest() { return { value: null }; },
+    async waitForAction() { return { status: "applied" }; },
+  };
+  const controller = owner(51);
+  const subject = owner(52);
+  const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
+  await new LocusClient(adapter, { signer, actAs: subject }).transfer(assetId, bob, 1n);
+  assert.deepEqual(calls[0][3], { actAs: subject });
+});
+
 test("SDK surfaces mapped application errors", async () => {
   const client = new LocusClient({
     async submitOwnershipAction() {
