@@ -9,7 +9,7 @@ if [[ "${LOCUS_RUN_REAL_MINIJAM:-0}" != "1" ]]; then
   exit 0
 fi
 
-required=(LOCUS_E2E_SERVICE_ID LOCUS_E2E_GENESIS_HASH JAMSCRIPT_CLIENT_ROOT)
+required=(LOCUS_E2E_SERVICE_ID LOCUS_E2E_GENESIS_HASH)
 for name in "${required[@]}"; do
   if [[ -z "${!name:-}" ]]; then
     echo "${name} is required" >&2

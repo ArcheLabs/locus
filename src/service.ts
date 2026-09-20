@@ -1,7 +1,7 @@
 import {
   action,
   abort,
-  wallet,
+  ownership,
   state,
   stateMap,
   query,
@@ -11,25 +11,15 @@ import {
   u8,
   u64,
   u128,
+  ownershipKey,
 } from "jam";
 
-const IdentityId = fixedBytes(32);
 const AssetId = fixedBytes(32);
+const OwnerKey = fixedBytes(32);
 
-const OwnerV1 = record({
+const AssetV2 = record({
   version: u8,
-  scheme: u8,
-  payload: bytes(65),
-});
-
-const IdentityV1 = record({
-  version: u8,
-  owner: OwnerV1,
-});
-
-const AssetV1 = record({
-  version: u8,
-  issuer: IdentityId,
+  issuer: ownership,
   name: bytes(64),
   symbol: bytes(16),
   decimals: u8,
@@ -38,63 +28,40 @@ const AssetV1 = record({
 
 const BalanceKey = record({
   assetId: AssetId,
-  identityId: IdentityId,
+  ownerKey: OwnerKey,
 });
 
 const AllowanceKey = record({
   assetId: AssetId,
-  ownerId: IdentityId,
-  spenderId: IdentityId,
-});
-
-const identities = stateMap({
-  schema: "locus.identity.v1",
-  key: IdentityId,
-  value: IdentityV1,
-});
-
-const identityNonces = stateMap({
-  schema: "locus.identity-nonce.v1",
-  key: IdentityId,
-  value: u64,
-});
-
-const identityCount = state({
-  schema: "locus.identity-count.v1",
-  value: u64,
-});
-
-const identityByIndex = stateMap({
-  schema: "locus.identity-index.v1",
-  key: u64,
-  value: IdentityId,
+  ownerKey: OwnerKey,
+  spenderKey: OwnerKey,
 });
 
 const assets = stateMap({
-  schema: "locus.asset.v1",
+  schema: "locus.asset.v2",
   key: AssetId,
-  value: AssetV1,
+  value: AssetV2,
 });
 
 const assetCount = state({
-  schema: "locus.asset-count.v1",
+  schema: "locus.asset-count.v2",
   value: u64,
 });
 
 const assetByIndex = stateMap({
-  schema: "locus.asset-index.v1",
+  schema: "locus.asset-index.v2",
   key: u64,
   value: AssetId,
 });
 
 const balances = stateMap({
-  schema: "locus.balance.v1",
+  schema: "locus.balance.v2",
   key: BalanceKey,
   value: u128,
 });
 
 const allowances = stateMap({
-  schema: "locus.allowance.v1",
+  schema: "locus.allowance.v2",
   key: AllowanceKey,
   value: u128,
 });
@@ -107,6 +74,12 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return true;
 }
 
+function sameOwnership(left: JamOwnership, right: JamOwnership): boolean {
+  return left.version === right.version
+    && left.kind === right.kind
+    && sameBytes(left.public, right.public);
+}
+
 function isZeroBytes(value: Uint8Array): boolean {
   for (let index = 0; index < value.length; index += 1) {
     if (value[index] !== 0) return false;
@@ -114,91 +87,38 @@ function isZeroBytes(value: Uint8Array): boolean {
   return true;
 }
 
-// This is the only ownership check used by identity-authorized actions.
-// The identity nonce is intentionally separate from the OwnerV1 record.
-function requireOwner(identityId: Uint8Array, expectedNonce: u64, sender: Uint8Array): void {
-  const identity = identities.get(identityId);
-  if (!identity) abort(1001);
-  if (identity.version !== 1) abort(9001);
-
-  const storedNonce = identityNonces.get(identityId) ?? 0n;
-  if (storedNonce !== expectedNonce) abort(1007);
-
-  const owner = identity.owner;
-  if (owner.version !== 1) abort(9001);
-  if (owner.scheme !== 0) abort(1005);
-  if (owner.payload.length !== 32) abort(1006);
-  if (sender.length !== 32 || !sameBytes(owner.payload, sender)) abort(1004);
+function requireAssetId(assetId: Uint8Array): void {
+  if (isZeroBytes(assetId)) abort(2003);
 }
 
-// Call only after all action-specific checks have succeeded. A failed action
-// therefore cannot consume the identity-level nonce.
-function consumeIdentityNonce(identityId: Uint8Array, nonce: u64): void {
-  const storedNonce = identityNonces.get(identityId) ?? 0n;
-  if (storedNonce !== nonce) abort(1007);
-  if (nonce === 18446744073709551615n) abort(3003);
-  identityNonces.set(identityId, nonce + 1n);
+function checkedAdd(left: u128, right: u128): u128 {
+  if (right > 340282366920938463463374607431768211455n - left) abort(3003);
+  return left + right;
 }
 
-export const createIdentity = action({
-  auth: wallet(),
-  input: { identityId: IdentityId },
-  execute(ctx, input) {
-    if (isZeroBytes(input.identityId)) abort(1003);
-    if (identities.has(input.identityId)) abort(1002);
+function ownerKey(owner: JamOwnership): Uint8Array {
+  return ownershipKey(owner);
+}
 
-    identities.set(input.identityId, {
-      version: 1,
-      owner: {
-        version: 1,
-        scheme: 0,
-        payload: ctx.sender,
-      },
-    });
-    identityNonces.set(input.identityId, 0n);
+function balanceKey(assetId: Uint8Array, owner: JamOwnership) {
+  return { assetId, ownerKey: ownerKey(owner) };
+}
 
-    const count = identityCount.get() ?? 0n;
-    if (count === 18446744073709551615n) abort(3003);
-    identityByIndex.set(count, input.identityId);
-    identityCount.set(count + 1n);
-  },
-});
-
-export const rotateOwner = action({
-  auth: wallet(),
-  input: {
-    identityId: IdentityId,
-    nonce: u64,
-    newOwnerScheme: u8,
-    newOwnerPayload: bytes(65),
-  },
-  execute(ctx, input) {
-    requireOwner(input.identityId, input.nonce, ctx.sender);
-
-    if (input.newOwnerScheme !== 0) abort(1005);
-    if (input.newOwnerPayload.length !== 32 || isZeroBytes(input.newOwnerPayload)) abort(1006);
-
-    const identity = identities.get(input.identityId);
-    if (!identity || identity.version !== 1) abort(9001);
-    if (sameBytes(identity.owner.payload, input.newOwnerPayload)) abort(1008);
-
-    identities.set(input.identityId, {
-      version: 1,
-      owner: {
-        version: 1,
-        scheme: 0,
-        payload: input.newOwnerPayload,
-      },
-    });
-    consumeIdentityNonce(input.identityId, input.nonce);
-  },
-});
+function allowanceKey(
+  assetId: Uint8Array,
+  owner: JamOwnership,
+  spender: JamOwnership,
+) {
+  return {
+    assetId,
+    ownerKey: ownerKey(owner),
+    spenderKey: ownerKey(spender),
+  };
+}
 
 export const createAsset = action({
-  auth: wallet(),
+  auth: ownership(),
   input: {
-    issuerId: IdentityId,
-    nonce: u64,
     assetId: AssetId,
     name: bytes(64),
     symbol: bytes(16),
@@ -206,17 +126,15 @@ export const createAsset = action({
     initialSupply: u128,
   },
   execute(ctx, input) {
-    requireOwner(input.issuerId, input.nonce, ctx.sender);
-
-    if (isZeroBytes(input.assetId)) abort(2003);
+    requireAssetId(input.assetId);
     if (assets.has(input.assetId)) abort(2002);
     if (input.name.length === 0) abort(2004);
     if (input.symbol.length === 0) abort(2005);
     if (input.decimals > 38) abort(2006);
 
     assets.set(input.assetId, {
-      version: 1,
-      issuer: input.issuerId,
+      version: 2,
+      issuer: ctx.owner,
       name: input.name,
       symbol: input.symbol,
       decimals: input.decimals,
@@ -224,183 +142,139 @@ export const createAsset = action({
     });
 
     if (input.initialSupply > 0n) {
-      balances.set({ assetId: input.assetId, identityId: input.issuerId }, input.initialSupply);
+      balances.set(balanceKey(input.assetId, ctx.owner), input.initialSupply);
     }
 
     const count = assetCount.get() ?? 0n;
     if (count === 18446744073709551615n) abort(3003);
     assetByIndex.set(count, input.assetId);
     assetCount.set(count + 1n);
-    consumeIdentityNonce(input.issuerId, input.nonce);
-  },
-});
-
-export const mint = action({
-  auth: wallet(),
-  input: {
-    issuerId: IdentityId,
-    nonce: u64,
-    assetId: AssetId,
-    toId: IdentityId,
-    amount: u128,
-  },
-  execute(ctx, input) {
-    requireOwner(input.issuerId, input.nonce, ctx.sender);
-
-    const asset = assets.get(input.assetId);
-    if (!asset) abort(2001);
-    if (!sameBytes(asset.issuer, input.issuerId)) abort(2007);
-    if (!identities.has(input.toId)) abort(3001);
-
-    const balanceKey = { assetId: input.assetId, identityId: input.toId };
-    const currentBalance = balances.get(balanceKey) ?? 0n;
-    if (input.amount > 340282366920938463463374607431768211455n - asset.totalSupply) abort(3003);
-    if (input.amount > 340282366920938463463374607431768211455n - currentBalance) abort(3003);
-    const nextSupply = asset.totalSupply + input.amount;
-    const nextBalance = currentBalance + input.amount;
-
-    assets.set(input.assetId, {
-      version: 1,
-      issuer: asset.issuer,
-      name: asset.name,
-      symbol: asset.symbol,
-      decimals: asset.decimals,
-      totalSupply: nextSupply,
-    });
-    balances.set(balanceKey, nextBalance);
-    consumeIdentityNonce(input.issuerId, input.nonce);
   },
 });
 
 export const transfer = action({
-  auth: wallet(),
+  auth: ownership(),
   input: {
-    fromId: IdentityId,
-    nonce: u64,
     assetId: AssetId,
-    toId: IdentityId,
+    to: ownership,
     amount: u128,
   },
   execute(ctx, input) {
-    requireOwner(input.fromId, input.nonce, ctx.sender);
+    const asset = assets.get(input.assetId);
+    if (!asset) abort(2001);
 
-    if (!assets.has(input.assetId)) abort(2001);
-    if (!identities.has(input.toId)) abort(3001);
-
-    const fromKey = { assetId: input.assetId, identityId: input.fromId };
+    const fromKey = balanceKey(input.assetId, ctx.owner);
     const fromBalance = balances.get(fromKey) ?? 0n;
     if (fromBalance < input.amount) abort(3002);
 
-    if (!sameBytes(input.fromId, input.toId)) {
-      const toKey = { assetId: input.assetId, identityId: input.toId };
+    if (!sameOwnership(ctx.owner, input.to)) {
+      const toKey = balanceKey(input.assetId, input.to);
       const toBalance = balances.get(toKey) ?? 0n;
-      if (input.amount > 340282366920938463463374607431768211455n - toBalance) abort(3003);
       balances.set(fromKey, fromBalance - input.amount);
-      balances.set(toKey, toBalance + input.amount);
+      balances.set(toKey, checkedAdd(toBalance, input.amount));
     }
-    consumeIdentityNonce(input.fromId, input.nonce);
+  },
+});
+
+export const approve = action({
+  auth: ownership(),
+  input: {
+    assetId: AssetId,
+    spender: ownership,
+    amount: u128,
+  },
+  execute(ctx, input) {
+    if (!assets.has(input.assetId)) abort(2001);
+    allowances.set(allowanceKey(input.assetId, ctx.owner, input.spender), input.amount);
+  },
+});
+
+export const transferFrom = action({
+  auth: ownership(),
+  input: {
+    assetId: AssetId,
+    from: ownership,
+    to: ownership,
+    amount: u128,
+  },
+  execute(ctx, input) {
+    if (!assets.has(input.assetId)) abort(2001);
+
+    const fromOwnerKey = ownerKey(input.from);
+    const controllerOwnerKey = ownerKey(ctx.owner);
+    const key = {
+      assetId: input.assetId,
+      ownerKey: fromOwnerKey,
+      spenderKey: controllerOwnerKey,
+    };
+    const allowance = allowances.get(key) ?? 0n;
+    if (allowance < input.amount) abort(4002);
+
+    const fromKey = { assetId: input.assetId, ownerKey: fromOwnerKey };
+    const fromBalance = balances.get(fromKey) ?? 0n;
+    if (fromBalance < input.amount) abort(3002);
+
+    if (!sameOwnership(input.from, input.to)) {
+      const toKey = balanceKey(input.assetId, input.to);
+      const toBalance = balances.get(toKey) ?? 0n;
+      balances.set(fromKey, fromBalance - input.amount);
+      balances.set(toKey, checkedAdd(toBalance, input.amount));
+    }
+    allowances.set(key, allowance - input.amount);
+  },
+});
+
+export const mint = action({
+  auth: ownership(),
+  input: {
+    assetId: AssetId,
+    to: ownership,
+    amount: u128,
+  },
+  execute(ctx, input) {
+    const asset = assets.get(input.assetId);
+    if (!asset) abort(2001);
+    if (!sameOwnership(asset.issuer, ctx.owner)) abort(2007);
+
+    const key = balanceKey(input.assetId, input.to);
+    const balance = balances.get(key) ?? 0n;
+    assets.set(input.assetId, {
+      version: 2,
+      issuer: asset.issuer,
+      name: asset.name,
+      symbol: asset.symbol,
+      decimals: asset.decimals,
+      totalSupply: checkedAdd(asset.totalSupply, input.amount),
+    });
+    balances.set(key, checkedAdd(balance, input.amount));
   },
 });
 
 export const burn = action({
-  auth: wallet(),
+  auth: ownership(),
   input: {
-    fromId: IdentityId,
-    nonce: u64,
     assetId: AssetId,
     amount: u128,
   },
   execute(ctx, input) {
-    requireOwner(input.fromId, input.nonce, ctx.sender);
-
     const asset = assets.get(input.assetId);
     if (!asset) abort(2001);
-    const balanceKey = { assetId: input.assetId, identityId: input.fromId };
-    const balance = balances.get(balanceKey) ?? 0n;
-    if (balance < input.amount) abort(3002);
-    if (asset.totalSupply < input.amount) abort(9001);
+    const key = balanceKey(input.assetId, ctx.owner);
+    const balance = balances.get(key) ?? 0n;
+    if (balance < input.amount || asset.totalSupply < input.amount) abort(3002);
 
-    balances.set(balanceKey, balance - input.amount);
+    balances.set(key, balance - input.amount);
     assets.set(input.assetId, {
-      version: 1,
+      version: 2,
       issuer: asset.issuer,
       name: asset.name,
       symbol: asset.symbol,
       decimals: asset.decimals,
       totalSupply: asset.totalSupply - input.amount,
     });
-    consumeIdentityNonce(input.fromId, input.nonce);
   },
 });
 
-export const approve = action({
-  auth: wallet(),
-  input: {
-    ownerId: IdentityId,
-    nonce: u64,
-    assetId: AssetId,
-    spenderId: IdentityId,
-    amount: u128,
-  },
-  execute(ctx, input) {
-    requireOwner(input.ownerId, input.nonce, ctx.sender);
-
-    if (!assets.has(input.assetId)) abort(2001);
-    if (!identities.has(input.spenderId)) abort(4001);
-    allowances.set({
-      assetId: input.assetId,
-      ownerId: input.ownerId,
-      spenderId: input.spenderId,
-    }, input.amount);
-    consumeIdentityNonce(input.ownerId, input.nonce);
-  },
-});
-
-export const transferFrom = action({
-  auth: wallet(),
-  input: {
-    spenderId: IdentityId,
-    nonce: u64,
-    assetId: AssetId,
-    fromId: IdentityId,
-    toId: IdentityId,
-    amount: u128,
-  },
-  execute(ctx, input) {
-    requireOwner(input.spenderId, input.nonce, ctx.sender);
-
-    if (!assets.has(input.assetId)) abort(2001);
-    if (!identities.has(input.fromId)) abort(1001);
-    if (!identities.has(input.toId)) abort(3001);
-
-    const allowanceKey = {
-      assetId: input.assetId,
-      ownerId: input.fromId,
-      spenderId: input.spenderId,
-    };
-    const allowance = allowances.get(allowanceKey) ?? 0n;
-    if (allowance < input.amount) abort(4002);
-
-    const fromKey = { assetId: input.assetId, identityId: input.fromId };
-    const fromBalance = balances.get(fromKey) ?? 0n;
-    if (fromBalance < input.amount) abort(3002);
-
-    if (!sameBytes(input.fromId, input.toId)) {
-      const toKey = { assetId: input.assetId, identityId: input.toId };
-      const toBalance = balances.get(toKey) ?? 0n;
-      if (input.amount > 340282366920938463463374607431768211455n - toBalance) abort(3003);
-      balances.set(fromKey, fromBalance - input.amount);
-      balances.set(toKey, toBalance + input.amount);
-    }
-    allowances.set(allowanceKey, allowance - input.amount);
-    consumeIdentityNonce(input.spenderId, input.nonce);
-  },
-});
-
-export const getIdentity = query(identities);
-export const getIdentityNonce = query(identityNonces);
-export const getIdentityCount = query(identityCount);
-export const getIdentityByIndex = query(identityByIndex);
 export const getAsset = query(assets);
 export const getAssetCount = query(assetCount);
 export const getAssetByIndex = query(assetByIndex);

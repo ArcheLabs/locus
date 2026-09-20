@@ -1,15 +1,15 @@
+import { ownershipKey, encodeOwnership, type Ownership, type SubmitActionResult } from "@jamscript/client";
 import { assertId } from "./ids.js";
 import { encodeAssetName, encodeAssetSymbol, decodeAssetName, decodeAssetSymbol } from "./metadata.js";
 import { LOCUS_ERROR_CODES, locusError, normalizeLocusError } from "./errors.js";
 import type {
   Amount,
+  Asset,
   AssetId,
-  AssetV1,
-  IdentityId,
-  IdentityV1,
   JamScriptLikeClient,
   LocusRecord,
   LocusValue,
+  OwnershipSession,
 } from "./types.js";
 
 function asBigInt(value: LocusValue | null, label: string): bigint {
@@ -22,17 +22,33 @@ function asBytes(value: LocusValue | null, label: string): Uint8Array {
   return value;
 }
 
-function asIdentity(value: LocusValue | null): IdentityV1 | null {
-  return value as IdentityV1 | null;
+function asOwnership(value: LocusValue): Ownership {
+  if (!value || typeof value !== "object" || value instanceof Uint8Array || Array.isArray(value) || !(value.public instanceof Uint8Array)) {
+    throw new Error("asset issuer query did not return Ownership");
+  }
+  return value as Ownership;
 }
 
-function asAsset(value: LocusValue | null): AssetV1 | null {
-  return value as AssetV1 | null;
+function asAsset(value: LocusValue | null): Asset | null {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("asset query did not return a record");
+  }
+  const asset = value as Record<string, LocusValue>;
+  if (typeof asset.version !== "number" || asset.version !== 2) throw new Error("unsupported asset version");
+  return {
+    version: 2,
+    issuer: asOwnership(asset.issuer),
+    name: asBytes(asset.name, "asset name"),
+    symbol: asBytes(asset.symbol, "asset symbol"),
+    decimals: typeof asset.decimals === "number" ? asset.decimals : Number(asset.decimals),
+    totalSupply: asBigInt(asset.totalSupply, "total supply"),
+  };
 }
 
 function assertAmount(amount: Amount, label = "amount"): void {
-  if (typeof amount !== "bigint" || amount < 0n) {
-    throw new Error(`${label} must be a non-negative bigint`);
+  if (typeof amount !== "bigint" || amount < 0n || amount >= 1n << 128n) {
+    throw new Error(`${label} must be a u128 bigint`);
   }
 }
 
@@ -42,24 +58,41 @@ function assertDecimals(decimals: number): void {
   }
 }
 
-export class LocusClient {
-  constructor(readonly jamClient: JamScriptLikeClient) {}
+function assertOwnership(owner: Ownership, label: string): void {
+  try {
+    encodeOwnership(owner);
+  } catch (error) {
+    throw new Error(`${label} is not a valid Ownership`, { cause: error });
+  }
+}
 
-  private async submit(actionName: string, input: Record<string, LocusValue>): Promise<unknown> {
+function balanceQueryKey(assetId: AssetId, owner: Ownership): LocusRecord {
+  return { assetId, ownerKey: ownershipKey(owner) };
+}
+
+function allowanceQueryKey(assetId: AssetId, owner: Ownership, spender: Ownership): LocusRecord {
+  return {
+    assetId,
+    ownerKey: ownershipKey(owner),
+    spenderKey: ownershipKey(spender),
+  };
+}
+
+export class LocusClient {
+  constructor(
+    readonly jamClient: JamScriptLikeClient,
+    readonly session: OwnershipSession,
+  ) {}
+
+  private async submit(
+    actionName: string,
+    input: Record<string, LocusValue>,
+  ): Promise<SubmitActionResult> {
     try {
-      return await this.jamClient.submitAction(actionName, input);
+      return await this.jamClient.submitOwnershipAction(actionName, input, this.session.signer);
     } catch (error) {
       throw normalizeLocusError(error) ?? error;
     }
-  }
-
-  private async submitForIdentity(
-    actionName: string,
-    identityId: IdentityId,
-    input: Record<string, LocusValue>,
-  ): Promise<unknown> {
-    const nonce = await this.identityNonce(identityId);
-    return this.submit(actionName, { ...input, nonce });
   }
 
   private async queryValue(queryName: string, key?: LocusValue): Promise<LocusValue | null> {
@@ -67,39 +100,17 @@ export class LocusClient {
     return result.value;
   }
 
-  async createIdentity(identityId: IdentityId): Promise<unknown> {
-    assertId(identityId, "identityId");
-    return this.submit("createIdentity", { identityId });
-  }
-
-  async rotateOwner(
-    identityId: IdentityId,
-    newOwnerPayload: Uint8Array,
-    newOwnerScheme = 0,
-  ): Promise<unknown> {
-    assertId(identityId, "identityId");
-    if (!(newOwnerPayload instanceof Uint8Array) || newOwnerPayload.length !== 32 || newOwnerPayload.every((byte) => byte === 0)) {
-      throw locusError(LOCUS_ERROR_CODES.INVALID_OWNER);
-    }
-    if (!Number.isInteger(newOwnerScheme) || newOwnerScheme < 0 || newOwnerScheme > 255) {
-      throw locusError(LOCUS_ERROR_CODES.UNSUPPORTED_OWNER_SCHEME);
-    }
-    return this.submitForIdentity("rotateOwner", identityId, {
-      identityId,
-      newOwnerScheme,
-      newOwnerPayload,
-    });
+  async waitForAction(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }) {
+    return this.jamClient.waitForAction(transactionId, options);
   }
 
   async createAsset(
-    issuerId: IdentityId,
     assetId: AssetId,
     name: string | Uint8Array,
     symbol: string | Uint8Array,
     decimals: number,
     initialSupply: Amount,
-  ): Promise<unknown> {
-    assertId(issuerId, "issuerId");
+  ): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
     assertDecimals(decimals);
     assertAmount(initialSupply, "initialSupply");
@@ -111,8 +122,7 @@ export class LocusClient {
     if (!(symbolBytes instanceof Uint8Array) || symbolBytes.length === 0 || symbolBytes.length > 16) {
       throw locusError(LOCUS_ERROR_CODES.INVALID_ASSET_SYMBOL);
     }
-    return this.submitForIdentity("createAsset", issuerId, {
-      issuerId,
+    return this.submit("createAsset", {
       assetId,
       name: nameBytes,
       symbol: symbolBytes,
@@ -121,88 +131,64 @@ export class LocusClient {
     });
   }
 
-  async mint(issuerId: IdentityId, assetId: AssetId, toId: IdentityId, amount: Amount): Promise<unknown> {
-    assertId(issuerId, "issuerId");
+  async transfer(assetId: AssetId, to: Ownership, amount: Amount): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
-    assertId(toId, "toId");
+    assertOwnership(to, "to");
     assertAmount(amount);
-    return this.submitForIdentity("mint", issuerId, { issuerId, assetId, toId, amount });
+    return this.submit("transfer", { assetId, to, amount });
   }
 
-  async transfer(fromId: IdentityId, assetId: AssetId, toId: IdentityId, amount: Amount): Promise<unknown> {
-    assertId(fromId, "fromId");
+  async approve(assetId: AssetId, spender: Ownership, amount: Amount): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
-    assertId(toId, "toId");
+    assertOwnership(spender, "spender");
     assertAmount(amount);
-    return this.submitForIdentity("transfer", fromId, { fromId, assetId, toId, amount });
+    return this.submit("approve", { assetId, spender, amount });
   }
 
-  async burn(fromId: IdentityId, assetId: AssetId, amount: Amount): Promise<unknown> {
-    assertId(fromId, "fromId");
+  async transferFrom(
+    assetId: AssetId,
+    from: Ownership,
+    to: Ownership,
+    amount: Amount,
+  ): Promise<SubmitActionResult> {
+    assertId(assetId, "assetId");
+    assertOwnership(from, "from");
+    assertOwnership(to, "to");
+    assertAmount(amount);
+    return this.submit("transferFrom", { assetId, from, to, amount });
+  }
+
+  async mint(assetId: AssetId, to: Ownership, amount: Amount): Promise<SubmitActionResult> {
+    assertId(assetId, "assetId");
+    assertOwnership(to, "to");
+    assertAmount(amount);
+    return this.submit("mint", { assetId, to, amount });
+  }
+
+  async burn(assetId: AssetId, amount: Amount): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
     assertAmount(amount);
-    return this.submitForIdentity("burn", fromId, { fromId, assetId, amount });
+    return this.submit("burn", { assetId, amount });
   }
 
-  async approve(ownerId: IdentityId, assetId: AssetId, spenderId: IdentityId, amount: Amount): Promise<unknown> {
-    assertId(ownerId, "ownerId");
-    assertId(assetId, "assetId");
-    assertId(spenderId, "spenderId");
-    assertAmount(amount);
-    return this.submitForIdentity("approve", ownerId, { ownerId, assetId, spenderId, amount });
-  }
-
-  async transferFrom(spenderId: IdentityId, assetId: AssetId, fromId: IdentityId, toId: IdentityId, amount: Amount): Promise<unknown> {
-    assertId(spenderId, "spenderId");
-    assertId(assetId, "assetId");
-    assertId(fromId, "fromId");
-    assertId(toId, "toId");
-    assertAmount(amount);
-    return this.submitForIdentity("transferFrom", spenderId, { spenderId, assetId, fromId, toId, amount });
-  }
-
-  async getIdentity(identityId: IdentityId): Promise<IdentityV1 | null> {
-    assertId(identityId, "identityId");
-    return asIdentity(await this.queryValue("getIdentity", identityId));
-  }
-
-  async identityNonce(identityId: IdentityId): Promise<bigint> {
-    assertId(identityId, "identityId");
-    if ((await this.getIdentity(identityId)) === null) {
-      throw locusError(LOCUS_ERROR_CODES.IDENTITY_NOT_FOUND);
-    }
-    return asBigInt(await this.queryValue("getIdentityNonce", identityId), "identity nonce");
-  }
-
-  async getAsset(assetId: AssetId): Promise<AssetV1 | null> {
+  async getAsset(assetId: AssetId): Promise<Asset | null> {
     assertId(assetId, "assetId");
     return asAsset(await this.queryValue("getAsset", assetId));
   }
 
-  async balanceOf(assetId: AssetId, identityId: IdentityId): Promise<Amount> {
+  async balanceOf(assetId: AssetId, owner: Ownership): Promise<Amount> {
     assertId(assetId, "assetId");
-    assertId(identityId, "identityId");
-    const key: LocusRecord = { assetId, identityId };
-    const value = await this.queryValue("getBalance", key);
+    assertOwnership(owner, "owner");
+    const value = await this.queryValue("getBalance", balanceQueryKey(assetId, owner));
     return value === null ? 0n : asBigInt(value, "balance");
   }
 
-  async allowance(assetId: AssetId, ownerId: IdentityId, spenderId: IdentityId): Promise<Amount> {
+  async allowance(assetId: AssetId, owner: Ownership, spender: Ownership): Promise<Amount> {
     assertId(assetId, "assetId");
-    assertId(ownerId, "ownerId");
-    assertId(spenderId, "spenderId");
-    const key: LocusRecord = { assetId, ownerId, spenderId };
-    const value = await this.queryValue("getAllowance", key);
+    assertOwnership(owner, "owner");
+    assertOwnership(spender, "spender");
+    const value = await this.queryValue("getAllowance", allowanceQueryKey(assetId, owner, spender));
     return value === null ? 0n : asBigInt(value, "allowance");
-  }
-
-  async listIdentities(): Promise<IdentityId[]> {
-    const count = asBigInt(await this.queryValue("getIdentityCount"), "identity count");
-    const result: IdentityId[] = [];
-    for (let index = 0n; index < count; index += 1n) {
-      result.push(asBytes(await this.queryValue("getIdentityByIndex", index), "identity index"));
-    }
-    return result;
   }
 
   async listAssets(): Promise<AssetId[]> {
@@ -223,7 +209,7 @@ export class LocusClient {
 export class BoundAsset {
   constructor(private readonly client: LocusClient, readonly assetId: AssetId) {}
 
-  private async metadata(): Promise<AssetV1> {
+  private async metadata(): Promise<Asset> {
     const asset = await this.client.getAsset(this.assetId);
     if (!asset) throw locusError(LOCUS_ERROR_CODES.ASSET_NOT_FOUND);
     return asset;
@@ -241,35 +227,39 @@ export class BoundAsset {
     return (await this.metadata()).decimals;
   }
 
+  async issuer(): Promise<Ownership> {
+    return (await this.metadata()).issuer;
+  }
+
   async totalSupply(): Promise<Amount> {
     return (await this.metadata()).totalSupply;
   }
 
-  balanceOf(identityId: IdentityId): Promise<Amount> {
-    return this.client.balanceOf(this.assetId, identityId);
+  balanceOf(owner: Ownership): Promise<Amount> {
+    return this.client.balanceOf(this.assetId, owner);
   }
 
-  transfer(fromId: IdentityId, toId: IdentityId, amount: Amount): Promise<unknown> {
-    return this.client.transfer(fromId, this.assetId, toId, amount);
+  transfer(to: Ownership, amount: Amount): Promise<SubmitActionResult> {
+    return this.client.transfer(this.assetId, to, amount);
   }
 
-  approve(ownerId: IdentityId, spenderId: IdentityId, amount: Amount): Promise<unknown> {
-    return this.client.approve(ownerId, this.assetId, spenderId, amount);
+  approve(spender: Ownership, amount: Amount): Promise<SubmitActionResult> {
+    return this.client.approve(this.assetId, spender, amount);
   }
 
-  allowance(ownerId: IdentityId, spenderId: IdentityId): Promise<Amount> {
-    return this.client.allowance(this.assetId, ownerId, spenderId);
+  allowance(owner: Ownership, spender: Ownership): Promise<Amount> {
+    return this.client.allowance(this.assetId, owner, spender);
   }
 
-  transferFrom(spenderId: IdentityId, fromId: IdentityId, toId: IdentityId, amount: Amount): Promise<unknown> {
-    return this.client.transferFrom(spenderId, this.assetId, fromId, toId, amount);
+  transferFrom(from: Ownership, to: Ownership, amount: Amount): Promise<SubmitActionResult> {
+    return this.client.transferFrom(this.assetId, from, to, amount);
   }
 
-  mint(issuerId: IdentityId, toId: IdentityId, amount: Amount): Promise<unknown> {
-    return this.client.mint(issuerId, this.assetId, toId, amount);
+  mint(to: Ownership, amount: Amount): Promise<SubmitActionResult> {
+    return this.client.mint(this.assetId, to, amount);
   }
 
-  burn(fromId: IdentityId, amount: Amount): Promise<unknown> {
-    return this.client.burn(fromId, this.assetId, amount);
+  burn(amount: Amount): Promise<SubmitActionResult> {
+    return this.client.burn(this.assetId, amount);
   }
 }

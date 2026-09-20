@@ -1,63 +1,56 @@
-# Locus
+# Locus v0.2
 
-Identity-native multi-asset infrastructure built with JamScript.
-
-Locus v0.1 manages local user-created assets. Assets belong to stable
-identities, not wallet addresses:
+Locus is an Ownership-native multi-asset service for JamScript. Assets are
+owned directly by canonical JamScript `Ownership` values; Locus does not
+create application identities, wallet accounts, or bridge destinations.
 
 ```text
-Asset → Identity → Owner
+Asset → Ownership
 ```
 
-Public keys authenticate actions. An `IdentityId` is an opaque 32-byte logical
-identifier, while the current sr25519 owner is replaceable. Rotating that owner
-changes authorization without moving balances, allowances, or issuer
-relationships.
+The service uses JamScript Ownership authentication and receives the effective
+owner from `ctx.owner`. Controllers and ControlClaims are verified by the
+JamScript platform. Locus does not implement signature verification, EIP-712,
+Matrix cross-signing, or external wallet protocols.
 
-## v0.1 surface
+## Consumer-mode development
 
-The service provides `createIdentity`, owner rotation, user-created assets,
-mint, burn, transfer, and ERC-20-like `approve` / `allowance` /
-`transferFrom` semantics. This is semantic compatibility at the SDK level, not
-EVM ABI compatibility. The only supported owner scheme is sr25519, authenticated
-by JamScript's wallet action layer and exposed to the service as `ctx.sender`.
-
-Amounts and supplies are JamScript `u128` values and must be passed as
-JavaScript `bigint`; they are never converted through `number`.
-
-Locus v0.1 does not account for native JAM, bridge external assets, execute
-EVM/Solana transactions, provide external identity claims, or include a
-production UI. Locus is an independent service, not an official JAM component.
-
-## Build and test
-
-The service requires JamScript language 0.3, ABI version 1, and the pinned
-revision in [`deps/jamscript.lock`](deps/jamscript.lock). With the `jams` CLI
-available:
+Locus is built as an external JamScript consumer. A clean checkout uses only
+the published `jams` binary, its managed toolchain bundle, and the published
+`@jamscript/client` package. It does not require a JamScript source checkout,
+ScriptC invocation, or a local MiniJAM source tree.
 
 ```bash
+npm install
 jams check .
 jams abi .
-jams build . --output dist
-```
-
-The local reference-model and SDK tests can be run with:
-
-```bash
+jams build . --output ./dist
 npm test
+npm run build:web
 ```
 
-They use fixed deterministic identifiers. SDK callers should use
-`randomIdentityId()` and `randomAssetId()` for application-generated IDs.
+The pinned release baseline is recorded in [`releases.lock`](releases.lock).
+MiniJAM is consumed from the independent `ArcheLabs/minijam-client`
+`stage1-v0.2.0` release image.
 
-## Real MiniJAM
+## Protocol surface
 
-Network deployment uses JamScript's current deployment and client paths; Locus
-does not ship an RPC backend, signed-action codec, wallet nonce implementation,
-managed-state database, or PVM runner. Configure a named MiniJAM network, build
-the artifact, deploy it, and run [`scripts/test-minijam.sh`](scripts/test-minijam.sh).
-The real-network test is intentionally separate from ordinary local tests.
+The service exposes `createAsset`, `transfer`, `approve`, `transferFrom`,
+`mint`, and `burn`. Recipient Ownership values do not need to be registered.
+Balances use a canonical `ownershipKey(owner)` state key, while the public SDK
+continues to accept and return `Ownership` values. All quantities remain
+`bigint`/JamScript `u128` values.
 
-See [`docs/protocol-v0.1.md`](docs/protocol-v0.1.md),
-[`docs/ownership.md`](docs/ownership.md), and
-[`docs/state-layout.md`](docs/state-layout.md) for the frozen protocol surface.
+The SDK is in [`sdk/src`](sdk/src), the service is [`src/service.ts`](src/service.ts),
+and the React/Vite prototype is in [`web`](web). Network Mode never falls back
+to mock data; Demo Mode is explicit and is only for the frontend prototype.
+
+## Published platform baseline
+
+The consumer baseline uses the published [JamScript
+`v0.1.0-rc.7`](https://github.com/ArcheLabs/JamScript/releases/tag/v0.1.0-rc.7)
+CLI/toolchain and [Backend
+`backend-v0.1.0-rc.7`](https://github.com/ArcheLabs/JamScript/releases/tag/backend-v0.1.0-rc.7).
+The published npm client is pinned separately in `releases.lock`. Locus does
+not reproduce JamScript compiler, runtime, or Ownership protocol features
+locally.
