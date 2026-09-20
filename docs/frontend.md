@@ -34,11 +34,19 @@ option but is not configured until a canonical public descriptor is published.
 
 The web app owns the session boundary only. It does not implement EVM proof,
 Polkadot proof, Matrix verification, SignedAction encoding, or MiniJAM
-transaction logic. A future browser wallet or injected test session can be
-provided as `OwnershipSession`; read-only asset access does not require one.
+transaction logic. Network Mode can connect browser-provided EVM EIP-1193,
+Polkadot extension, and Solana Wallet Standard sessions; each is wrapped by
+the published JamScript Ownership signer. Read-only asset access does not
+require a session.
 
-Network-mode transfers resolve EVM and Polkadot destinations through the SDK,
-parse amounts as exact `bigint` u128 values, call `LocusClient.transfer()`,
-wait for `transactionId` finalization, and show the receipt. Matrix, Telegram,
-Email, GitHub, and Locus ID remain visible but report that their resolver is
-not configured.
+Network-mode transfers resolve EVM, Polkadot, and Locus ID destinations through
+the SDK, parse amounts as exact `bigint` u128 values, show a review step, call
+`LocusClient.transfer()`, wait for `transactionId` finalization, and show the
+receipt. Matrix, Telegram, Email, and GitHub remain visible as resolver
+extension points until a corresponding resolver is published.
+
+The Assets page exposes real `createAsset` and `Receive` flows when Network
+Mode is connected. Receive shares the canonical `locus:` Ownership identifier;
+it does not invent a chain address. Recent successful transfers are stored as
+device-local activity and are labelled as such rather than presented as a
+chain-wide index.

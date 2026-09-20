@@ -3,9 +3,11 @@ import { formatUnits, parseUnits, type LocusClient } from "@archelabs/locus";
 import { useNetwork } from "./network/NetworkProvider.js";
 import { NetworkSwitcher } from "./network/NetworkSwitcher.js";
 import { loadAssets, displayAmount, type AssetView } from "./locus/assets.js";
-import { recipientHints, recipientIcon, recipientLabels, resolveRecipient, type RecipientType } from "./locus/recipients.js";
+import { recipientHints, recipientIcon, recipientLabels, resolveRecipient, detectRecipientType, type RecipientType } from "./locus/recipients.js";
 import { transferAndWait, type SendState } from "./locus/transaction.js";
 import { useSession } from "./session/SessionProvider.js";
+import { ConnectDialog } from "./session/ConnectDialog.js";
+import { CreateAssetDialog, ReceiveDialog, ReviewDialog } from "./locus/dialogs.js";
 
 type Page = "send" | "assets" | "activity";
 type DemoAsset = { symbol: string; name: string; balance: bigint; decimals: number; value: string; color: string };
@@ -27,7 +29,7 @@ const demoActivity: ActivityItem[] = [
 
 const recipientTypes: RecipientType[] = ["matrix", "telegram", "email", "github", "evm", "polkadot", "locus"];
 
-function isNetworkRecipient(type: RecipientType): boolean { return type === "evm" || type === "polkadot"; }
+function isNetworkRecipient(type: RecipientType): boolean { return type === "evm" || type === "polkadot" || type === "locus"; }
 
 function networkErrorMessage(error: Error | null, endpoint?: string): string {
   if (!error) return "";
@@ -36,7 +38,7 @@ function networkErrorMessage(error: Error | null, endpoint?: string): string {
 
 export function App() {
   const network = useNetwork();
-  const { session } = useSession();
+  const { session, setSession } = useSession();
   const networkMode = network.mode === "network";
   const [page, setPage] = useState<Page>("send");
   const [demoAssetIndex, setDemoAssetIndex] = useState(0);
@@ -54,6 +56,10 @@ export function App() {
   const [sendState, setSendState] = useState<SendState>({ status: "idle" });
   const [sessionActivity, setSessionActivity] = useState<ActivityItem[]>([]);
   const [refreshToken, setRefreshToken] = useState(0);
+  const [connectOpen, setConnectOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [receiveAsset, setReceiveAsset] = useState<AssetView | DemoAsset | null>(null);
+  const [createAssetOpen, setCreateAssetOpen] = useState(false);
   const networkIdRef = useRef(network.networkId);
   networkIdRef.current = network.networkId;
 
@@ -63,8 +69,21 @@ export function App() {
   useEffect(() => {
     setSelectedAssetId(null);
     setSendState({ status: "idle" });
-    setSessionActivity([]);
   }, [network.networkId]);
+
+  useEffect(() => {
+    if (!networkMode || !session) {
+      setSessionActivity([]);
+      return;
+    }
+    const key = `locus.activity.v1.${network.networkId}.${session.label}`;
+    try {
+      const stored = window.localStorage.getItem(key);
+      setSessionActivity(stored ? JSON.parse(stored) as ActivityItem[] : []);
+    } catch {
+      setSessionActivity([]);
+    }
+  }, [network.networkId, networkMode, session]);
 
   useEffect(() => {
     if (!networkMode || network.status !== "ready" || !network.locus) {
@@ -106,12 +125,18 @@ export function App() {
     if (networkMode && !isNetworkRecipient(type)) notify(`${recipientLabels[type]} resolver is not configured yet.`);
   }
 
+  function changeRecipient(value: string) {
+    setRecipient(value);
+    const detected = detectRecipientType(value);
+    if (detected) setRecipientType(detected);
+  }
+
   function chooseNetworkAsset(asset: AssetView) {
     setSelectedAssetId(asset.assetIdHex);
     setPage("send");
   }
 
-  async function continueSend() {
+  function continueSend() {
     const assetForSend = networkMode ? currentNetworkAsset : currentDemoAsset;
     if (!assetForSend) { notify("No asset is available on this network."); return; }
     if (!recipient.trim() || !amount.trim()) { notify("Enter a recipient and amount."); return; }
@@ -122,7 +147,17 @@ export function App() {
     if (!currentResolution.valid || !currentResolution.ownership) { notify(currentResolution.message); return; }
     let parsedAmount: bigint;
     try { parsedAmount = parseUnits(amount, assetForSend.decimals); } catch (error) { notify(error instanceof Error ? error.message : "Invalid amount."); return; }
+    if (assetForSend.balance === null || parsedAmount <= 0n || parsedAmount > assetForSend.balance) { notify("Amount exceeds the available balance."); return; }
+    setReviewOpen(true);
+  }
+
+  async function confirmSend() {
+    const assetForSend = currentNetworkAsset;
+    if (!assetForSend || !locus || !session || !currentResolution.ownership) return;
+    let parsedAmount: bigint;
+    try { parsedAmount = parseUnits(amount, assetForSend.decimals); } catch (error) { notify(error instanceof Error ? error.message : "Invalid amount."); return; }
     const submittedNetwork = network.networkId;
+    setReviewOpen(false);
     try {
       setSendState({ status: "awaiting-signature" });
       setSendState({ status: "submitting" });
@@ -131,7 +166,9 @@ export function App() {
       });
       if (networkIdRef.current !== submittedNetwork) return;
       setSendState(applied);
-      setSessionActivity((rows) => [{ direction: "sent", asset: assetForSend.symbol, recipient, amount: `${formatUnits(parsedAmount, assetForSend.decimals)} ${assetForSend.symbol}`, date: "Just now", transactionId: applied.transactionId }, ...rows]);
+      const nextActivity = [{ direction: "sent" as const, asset: assetForSend.symbol, recipient, amount: `${formatUnits(parsedAmount, assetForSend.decimals)} ${assetForSend.symbol}`, date: "Just now", transactionId: applied.transactionId }, ...sessionActivity];
+      setSessionActivity(nextActivity);
+      window.localStorage.setItem(`locus.activity.v1.${submittedNetwork}.${session.label}`, JSON.stringify(nextActivity));
       setRefreshToken((value) => value + 1);
       notify("Sent");
     } catch (error) {
@@ -163,9 +200,9 @@ export function App() {
       <main className="main">
         <header className="topbar">
           {networkMode && <div className={`mode-pill ${network.status}`}><span className={`status-dot ${network.status}`} />{readyLabel}</div>}
-          <div className="profile-pill">
-            {networkMode && !session ? <><span className="neutral-mark">○</span><span>No signer</span></> : <><span className="matrix-mark">[m]</span><span>{networkMode ? session?.label ?? "Connected" : "@alice:matrix.org"}</span></>}
-          </div>
+          <button type="button" className="profile-pill profile-button" onClick={() => session ? setSession(null) : setConnectOpen(true)}>
+            {session ? <><span className={`wallet-mark ${session.kind}`}>{session.kind === "evm" ? "◇" : session.kind === "polkadot" ? "◎" : "S"}</span><span>{session.label}</span><small>{session ? "Disconnect" : "Connect"}</small></> : <><span className="neutral-mark">○</span><span>Connect</span></>}
+          </button>
         </header>
 
         {networkMode && network.status !== "ready" && (
@@ -175,11 +212,15 @@ export function App() {
           </section>
         )}
 
-        {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} recipientType={recipientType} recipient={recipient} amount={amount} typeOpen={typeOpen} resolution={currentResolution} sendState={sendState} onChooseType={chooseType} onToggleTypes={() => setTypeOpen((value) => !value)} onRecipient={setRecipient} onAmount={setAmount} onMax={() => setAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : "")} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => setRecipient("")} />}
-        {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} selected={currentAsset} search={search} setSearch={setSearch} onSelect={networkMode ? (asset) => { if ("assetId" in asset) chooseNetworkAsset(asset); } : (asset) => { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); setPage("send"); }} />}
+        {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} recipientType={recipientType} recipient={recipient} amount={amount} typeOpen={typeOpen} resolution={currentResolution} sendState={sendState} onChooseType={chooseType} onToggleTypes={() => setTypeOpen((value) => !value)} onRecipient={changeRecipient} onAmount={setAmount} onMax={() => setAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : "")} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => changeRecipient("")} />}
+        {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} selected={currentAsset} search={search} setSearch={setSearch} onCreate={() => setCreateAssetOpen(true)} onReceive={(asset) => setReceiveAsset(asset)} onSelect={networkMode ? (asset) => { if ("assetId" in asset) chooseNetworkAsset(asset); } : (asset) => { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); setPage("send"); }} />}
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>
       {toast && <div className="toast" role="status">{toast}</div>}
+      <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} onConnected={setSession} />
+      {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={currentResolution} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
+      <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
+      <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} onClose={() => setCreateAssetOpen(false)} onCreated={() => setRefreshToken((value) => value + 1)} />
     </div>
   );
 }
@@ -199,14 +240,14 @@ function Receipt({ state }: { state: Extract<SendState, { status: "submitted" | 
   return <div className="receipt"><strong>{state.status === "applied" ? "Transaction applied" : "Transaction submitted"}</strong><span>Network: {state.networkId}</span><span>Status: {state.status}</span><code>{state.transactionId}</code>{state.actionHash && <code>{state.actionHash}</code>}</div>;
 }
 
-function AssetsPage({ networkMode, loading, error, assets, selected, search, setSearch, onSelect }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; selected: AssetView | DemoAsset | null; search: string; setSearch: (value: string) => void; onSelect: (asset: AssetView | DemoAsset) => void }) {
-  return <section className="page"><h1>Assets</h1><div className="assets-layout"><div><div className="card summary"><div><small>Total Assets</small><strong>{loading ? "…" : assets.length}</strong></div><div><small>{networkMode ? "Portfolio Value" : "Total Balance (USD)"}</small><strong>{networkMode ? "Unavailable" : "≈ $1,842.50"}</strong></div></div><input className="search" value={search} placeholder="Search assets…" onChange={(event) => setSearch(event.target.value)} />{error && <div className="empty-state">{error}</div>}{!error && !loading && assets.length === 0 && <div className="empty-state">No assets found on this network.</div>}<div className="card asset-list">{assets.map((entry) => { const view = entry; const id = "assetIdHex" in view ? view.assetIdHex : view.symbol; return <div className="asset-row" key={id} onClick={() => onSelect(view)}><span className="coin small-coin" style={{ background: view.color }}>{view.symbol[0]}</span><strong>{view.name}</strong><span>{view.symbol}</span><span>{displayAmount(view.balance, view.decimals)} {view.symbol}</span><button type="button" className="secondary" onClick={(event) => { event.stopPropagation(); onSelect(view); }}>Send</button></div>; })}</div></div><AssetDetail asset={selected} networkMode={networkMode} /></div></section>;
+function AssetsPage({ networkMode, loading, error, assets, selected, search, setSearch, onSelect, onCreate, onReceive }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; selected: AssetView | DemoAsset | null; search: string; setSearch: (value: string) => void; onSelect: (asset: AssetView | DemoAsset) => void; onCreate: () => void; onReceive: (asset: AssetView | DemoAsset) => void }) {
+  return <section className="page"><div className="page-heading"><h1>Assets</h1>{networkMode && <button type="button" className="secondary" onClick={onCreate}>＋ Create asset</button>}</div><div className="assets-layout"><div><div className="card summary"><div><small>Total Assets</small><strong>{loading ? "…" : assets.length}</strong></div><div><small>{networkMode ? "Portfolio Value" : "Total Balance (USD)"}</small><strong>{networkMode ? "Unavailable" : "≈ $1,842.50"}</strong></div></div><input className="search" value={search} placeholder="Search assets…" onChange={(event) => setSearch(event.target.value)} />{error && <div className="empty-state">{error}</div>}{!error && !loading && assets.length === 0 && <div className="empty-state">No assets found on this network.</div>}<div className="card asset-list">{assets.map((entry) => { const view = entry; const id = "assetIdHex" in view ? view.assetIdHex : view.symbol; return <div className="asset-row" key={id} onClick={() => onSelect(view)}><span className="coin small-coin" style={{ background: view.color }}>{view.symbol[0]}</span><strong>{view.name}</strong><span>{view.symbol}</span><span>{displayAmount(view.balance, view.decimals)} {view.symbol}</span><button type="button" className="secondary" onClick={(event) => { event.stopPropagation(); onSelect(view); }}>Send</button></div>; })}</div></div><AssetDetail asset={selected} networkMode={networkMode} onReceive={onReceive} /></div></section>;
 }
 
-function AssetDetail({ asset, networkMode }: { asset: AssetView | DemoAsset | null; networkMode: boolean }) {
+function AssetDetail({ asset, networkMode, onReceive }: { asset: AssetView | DemoAsset | null; networkMode: boolean; onReceive: (asset: AssetView | DemoAsset) => void }) {
   if (!asset) return <div className="card detail empty-state">Select an asset to view details.</div>;
   const totalSupply = "totalSupply" in asset ? formatUnits(asset.totalSupply, asset.decimals) : "—";
-  return <div className="card detail"><span className="coin detail-coin" style={{ background: asset.color }}>{asset.symbol[0]}</span><h2>{asset.symbol}</h2><p className="muted">{asset.name}</p><dl><div><dt>Decimals</dt><dd>{asset.decimals}</dd></div><div><dt>Balance</dt><dd>{displayAmount(asset.balance, asset.decimals)} {asset.symbol}</dd></div><div><dt>Total supply</dt><dd>{totalSupply} {asset.symbol}</dd></div><div><dt>Estimated value</dt><dd>{networkMode ? "Unavailable" : "≈ $623.40"}</dd></div></dl><button type="button" className="secondary full">Receive</button></div>;
+  return <div className="card detail"><span className="coin detail-coin" style={{ background: asset.color }}>{asset.symbol[0]}</span><h2>{asset.symbol}</h2><p className="muted">{asset.name}</p><dl><div><dt>Decimals</dt><dd>{asset.decimals}</dd></div><div><dt>Balance</dt><dd>{displayAmount(asset.balance, asset.decimals)} {asset.symbol}</dd></div><div><dt>Total supply</dt><dd>{totalSupply} {asset.symbol}</dd></div><div><dt>Estimated value</dt><dd>{networkMode ? "Unavailable" : "≈ $623.40"}</dd></div></dl><button type="button" className="secondary full" onClick={() => onReceive(asset)}>Receive</button></div>;
 }
 
 function ActivityPage({ networkMode, filter, setFilter, rows }: { networkMode: boolean; filter: "all" | "sent" | "received"; setFilter: (value: "all" | "sent" | "received") => void; rows: ActivityItem[] }) {

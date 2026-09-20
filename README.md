@@ -69,6 +69,13 @@ Service deployment. Testnet is shown as an option but remains Not configured
 until a canonical public descriptor is published. Network Mode never falls
 back to Demo Mode.
 
+In Network Mode, `Connect` uses a browser-provided EVM EIP-1193 wallet,
+Polkadot extension, or Solana Wallet Standard wallet as an Ownership session.
+Transfers show a review step before signing. The Assets page can create an
+asset with the connected Ownership as issuer and can display a canonical
+`locus:` Receive identifier. Demo Mode remains mock-only and never submits
+these actions.
+
 Stop the Vite preview with `Ctrl-C`. If it was started in the Docker preview
 container used by this checkout, stop it with:
 

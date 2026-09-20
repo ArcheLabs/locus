@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import test from "node:test";
-import { formatUnits, parseUnits, evmOwnership, polkadotOwnership } from "../dist/sdk/index.js";
+import { formatUnits, parseUnits, evmOwnership, polkadotOwnership, formatLocusId, parseLocusId } from "../dist/sdk/index.js";
 import { encodeAddress } from "@polkadot/util-crypto";
 import { selectNetwork } from "../web/src/network/selection.ts";
 
@@ -25,6 +25,15 @@ test("network recipient resolution uses canonical ownership decoders", () => {
   assert.throws(() => evmOwnership("0x1234"));
   assert.equal(polkadotOwnership(encodeAddress(new Uint8Array(32).fill(1))).public.length, 32);
   assert.throws(() => polkadotOwnership("not-an-address"));
+});
+
+test("Locus IDs round-trip the canonical Ownership encoding", () => {
+  const owner = evmOwnership("0x0000000000000000000000000000000000000001");
+  const locusId = formatLocusId(owner);
+  const decoded = parseLocusId(locusId);
+  assert.equal(locusId.startsWith("locus:"), true);
+  assert.deepEqual(decoded, owner);
+  assert.throws(() => parseLocusId("locus:not-valid"));
 });
 
 test("network amounts remain exact bigint values", () => {
