@@ -26,3 +26,6 @@ export function formatAmount(amount: bigint, decimals: number): string {
   if (fraction === 0n) return whole.toString();
   return `${whole}.${fraction.toString().padStart(decimals, "0").replace(/0+$/, "")}`;
 }
+
+export const parseUnits = parseAmount;
+export const formatUnits = formatAmount;

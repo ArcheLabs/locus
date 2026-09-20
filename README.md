@@ -42,7 +42,7 @@ continues to accept and return `Ownership` values. All quantities remain
 `bigint`/JamScript `u128` values.
 
 The SDK is in [`sdk/src`](sdk/src), the service is [`src/service.ts`](src/service.ts),
-and the React/Vite prototype is in [`web`](web). Network Mode never falls back
+and the React/Vite web client is in [`web`](web). Network Mode never falls back
 to mock data; Demo Mode is explicit and is only for the frontend prototype.
 
 ## Published platform baseline

@@ -81,15 +81,24 @@ function allowanceQueryKey(assetId: AssetId, owner: Ownership, spender: Ownershi
 export class LocusClient {
   constructor(
     readonly jamClient: JamScriptLikeClient,
-    readonly session: OwnershipSession,
+    readonly session?: OwnershipSession | null,
   ) {}
+
+  withSession(session: OwnershipSession | null): LocusClient {
+    return new LocusClient(this.jamClient, session);
+  }
+
+  private requireSession(): OwnershipSession {
+    if (!this.session) throw locusError(LOCUS_ERROR_CODES.NO_OWNERSHIP_SESSION, "an Ownership session is required for this action");
+    return this.session;
+  }
 
   private async submit(
     actionName: string,
     input: Record<string, LocusValue>,
   ): Promise<SubmitActionResult> {
     try {
-      return await this.jamClient.submitOwnershipAction(actionName, input, this.session.signer);
+      return await this.jamClient.submitOwnershipAction(actionName, input, this.requireSession().signer);
     } catch (error) {
       throw normalizeLocusError(error) ?? error;
     }
