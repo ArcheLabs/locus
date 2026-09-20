@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "defaultNetwork": "local",
+  "networks": {
+    "local": {
+      "label": "Local",
+      "backendUrl": "http://127.0.0.1:8090",
+      "deploymentUrl": "/deployments/local.json"
+    },
+    "testnet": {
+      "label": "Testnet",
+      "backendUrl": null,
+      "deploymentUrl": null
+    }
+  }
+}

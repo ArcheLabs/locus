@@ -1,14 +1,44 @@
 # Frontend
 
-The web prototype has three product surfaces: Send, Assets, and Activity.
+The React/Vite web client has three product surfaces: Send, Assets, and Activity.
 Recipient selection identifies the destination Ownership, not a network or
 bridge route.
+
+The application has two explicit modes:
+
+- `VITE_LOCUS_MODE=demo` keeps the visual prototype data for UI development.
+- `VITE_LOCUS_MODE=network` loads `/locus-networks.json`, fetches the selected
+  deployment descriptor, creates the published `JamScriptClient`, calls
+  `validateDeployment()`, and then reads through `LocusClient`.
+
+Network selection is persisted under `locus.network.v1`. The URL `?network=`
+selection takes precedence over local storage, followed by
+`VITE_LOCUS_DEFAULT_NETWORK` and the runtime config default. Switching networks
+clears network-specific assets, activity, and pending transaction UI before the
+new client is bootstrapped. Stale bootstrap responses cannot overwrite the
+currently selected network.
 
 Production-priority recipient forms are Matrix, EVM Address, Polkadot Account,
 and Locus ID. Telegram, Email, and GitHub remain preview/extension-point
 entries until a corresponding cryptographic resolver is published.
 
-Demo Mode is explicit and uses the visual prototype data. Network Mode must be
-connected to a real published JamScript client, an Ownership signer, and a
-deployed Locus descriptor. It reports missing resolver/signer configuration;
-it never silently displays Demo Mode data as network state.
+Demo Mode is explicit and uses the visual prototype data. Network Mode reads
+real asset metadata and balances from the selected deployed Locus service. It
+does not use demo assets, fake balances, fake USD values, or mock activity. A
+network without a descriptor is shown as Not configured rather than falling
+back to Local or Demo.
+
+The current Local descriptor points to the published rc.7 backend and the
+validated local MiniJAM deployment. Testnet remains an explicit, visible
+option but is not configured until a canonical public descriptor is published.
+
+The web app owns the session boundary only. It does not implement EVM proof,
+Polkadot proof, Matrix verification, SignedAction encoding, or MiniJAM
+transaction logic. A future browser wallet or injected test session can be
+provided as `OwnershipSession`; read-only asset access does not require one.
+
+Network-mode transfers resolve EVM and Polkadot destinations through the SDK,
+parse amounts as exact `bigint` u128 values, call `LocusClient.transfer()`,
+wait for `transactionId` finalization, and show the receipt. Matrix, Telegram,
+Email, GitHub, and Locus ID remain visible but report that their resolver is
+not configured.
