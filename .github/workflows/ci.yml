@@ -37,7 +37,7 @@ jobs:
           git -C "$RUNNER_TEMP/jamscript" checkout --detach FETCH_HEAD
           npm --prefix "$RUNNER_TEMP/jamscript/packages/client" ci --ignore-scripts --no-audit --no-fund
           mkdir -p "$RUNNER_TEMP/jamscript-client"
-          npm --prefix "$RUNNER_TEMP/jamscript/packages/client" pack --pack-destination "$RUNNER_TEMP/jamscript-client"
+          (cd "$RUNNER_TEMP/jamscript/packages/client" && npm pack --pack-destination "$RUNNER_TEMP/jamscript-client")
           CLIENT_TARBALL="$(find "$RUNNER_TEMP/jamscript-client" -maxdepth 1 -type f -name 'jamscript-client-*.tgz' -print -quit)"
           test -n "$CLIENT_TARBALL"
           echo "JAMSCRIPT_CLIENT_TARBALL=$CLIENT_TARBALL" >> "$GITHUB_ENV"
