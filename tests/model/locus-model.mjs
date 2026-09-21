@@ -118,6 +118,26 @@ export class LocusModel {
     this.assetIndex.push(clone(assetId));
   }
 
+  createAssetAs(controller, subject, assetId, name, symbol, decimals, initialSupply) {
+    this.requireController(subject, controller);
+    this.createAsset(subject, assetId, name, symbol, decimals, initialSupply);
+  }
+
+  transferAs(controller, subject, assetId, to, value) {
+    this.requireController(subject, controller);
+    this.transfer(subject, assetId, to, value);
+  }
+
+  mintAs(controller, subject, assetId, to, value) {
+    this.requireController(subject, controller);
+    this.mint(subject, assetId, to, value);
+  }
+
+  burnAs(controller, subject, assetId, value) {
+    this.requireController(subject, controller);
+    this.burn(subject, assetId, value);
+  }
+
   mint(issuer, assetId, to, value) {
     const asset = this.asset(assetId);
     if (!asset) abort(2001);
