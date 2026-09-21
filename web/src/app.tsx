@@ -100,7 +100,7 @@ export function App() {
     } catch {
       window.localStorage.removeItem("locus.session.v1");
     }
-  }, [network.network, network.protocolClient, session, setSession]);
+  }, [network.locus, network.network, session, setSession]);
 
   useEffect(() => {
     if (!session) {
