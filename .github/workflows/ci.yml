@@ -61,7 +61,7 @@ jobs:
 
       - name: Build frontend prototype
         run: |
-          npm --prefix web install --ignore-scripts --no-audit --no-fund
+          npm --prefix web install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false "$JAMSCRIPT_CLIENT_TARBALL"
           npm run build:web
 
       - name: Consumer service check and ABI validation
