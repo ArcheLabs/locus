@@ -17,14 +17,7 @@ import {
 
 const AssetId = fixedBytes(32);
 const OwnerKey = fixedBytes(32);
-const MAX_MATRIX_PROOF = 4096;
 
-const CONTROLLER_NOT_AUTHORIZED = 5001;
-const CONTROLLER_ALREADY_ACTIVE = 5002;
-const CONTROLLER_REVOKED = 5003;
-const MATRIX_BOOTSTRAP_USED = 5004;
-const MATRIX_PROOF_INVALID = 5005;
-const CONTROLLER_NOT_ACTIVE = 5006;
 
 const AssetV2 = record({
   version: u8,
@@ -158,7 +151,7 @@ function requireController(
 ): void {
   if (sameOwnership(subject, controller)) return;
   const grant = controllerGrants.get(controllerKey(subject, controller)) ?? 0;
-  if (grant !== 1) abort(CONTROLLER_NOT_AUTHORIZED);
+  if (grant !== 1) abort(5001);
 }
 
 function requireActiveController(
@@ -166,7 +159,7 @@ function requireActiveController(
   controller: JamOwnership,
 ): void {
   if ((controllerGrants.get(controllerKey(subject, controller)) ?? 0) !== 1) {
-    abort(CONTROLLER_NOT_ACTIVE);
+    abort(5006);
   }
 }
 
@@ -174,13 +167,13 @@ export const bootstrapMatrixController = action({
   auth: ownership(),
   input: {
     subject: ownership,
-    proof: bytes(MAX_MATRIX_PROOF),
+    proof: bytes(4096),
   },
   execute(ctx, input) {
     const subjectKey = ownerKey(input.subject);
-    if ((matrixBootstrapUsed.get(subjectKey) ?? 0) === 1) abort(MATRIX_BOOTSTRAP_USED);
-    if (input.subject.kind !== 0 || ctx.controller.kind !== 0) abort(MATRIX_PROOF_INVALID);
-    if (!verifyMatrixCrossSigning(input.subject, ctx.controller, input.proof)) abort(MATRIX_PROOF_INVALID);
+    if ((matrixBootstrapUsed.get(subjectKey) ?? 0) === 1) abort(5004);
+    if (input.subject.kind !== 0 || ctx.controller.kind !== 0) abort(5005);
+    if (!verifyMatrixCrossSigning(input.subject, ctx.controller, input.proof)) abort(5005);
 
     matrixBootstrapUsed.set(subjectKey, 1);
     controllerGrants.set(controllerKey(input.subject, ctx.controller), 1);
@@ -196,8 +189,8 @@ export const addController = action({
   execute(ctx, input) {
     requireController(input.subject, ctx.controller);
     const key = controllerKey(input.subject, input.controller);
-    if ((controllerGrants.get(key) ?? 0) === 1) abort(CONTROLLER_ALREADY_ACTIVE);
-    if (controllerGrants.has(key)) abort(CONTROLLER_REVOKED);
+    if ((controllerGrants.get(key) ?? 0) === 1) abort(5002);
+    if (controllerGrants.has(key)) abort(5003);
     controllerGrants.set(key, 1);
   },
 });
