@@ -78,6 +78,19 @@ function allowanceQueryKey(assetId: AssetId, owner: Ownership, spender: Ownershi
   };
 }
 
+function controllerGrantQueryKey(subject: Ownership, controller: Ownership): LocusRecord {
+  return {
+    subjectKey: ownershipKey(subject),
+    controllerKey: ownershipKey(controller),
+  };
+}
+
+function asFlag(value: LocusValue | null, label: string): boolean {
+  if (typeof value === "bigint") return value === 1n;
+  if (typeof value === "number") return value === 1;
+  throw new Error(`${label} query did not return u8`);
+}
+
 export class LocusClient {
   constructor(
     readonly jamClient: JamScriptLikeClient,
@@ -99,7 +112,11 @@ export class LocusClient {
   ): Promise<SubmitActionResult> {
     try {
       const session = this.requireSession();
-      return await this.jamClient.submitOwnershipAction(actionName, input, session.signer, { actAs: session.actAs });
+      return await this.jamClient.submitOwnershipAction(
+        actionName,
+        { subject: session.subject, ...input },
+        session.signer,
+      );
     } catch (error) {
       throw normalizeLocusError(error) ?? error;
     }
@@ -179,6 +196,36 @@ export class LocusClient {
     assertId(assetId, "assetId");
     assertAmount(amount);
     return this.submit("burn", { assetId, amount });
+  }
+
+  async bootstrapMatrixController(proof: Uint8Array): Promise<SubmitActionResult> {
+    if (!(proof instanceof Uint8Array) || proof.length === 0 || proof.length > 4096) {
+      throw new Error("Matrix bootstrap proof must be between 1 and 4096 bytes");
+    }
+    return this.submit("bootstrapMatrixController", { proof });
+  }
+
+  async addController(controller: Ownership): Promise<SubmitActionResult> {
+    assertOwnership(controller, "controller");
+    return this.submit("addController", { controller });
+  }
+
+  async revokeController(controller: Ownership): Promise<SubmitActionResult> {
+    assertOwnership(controller, "controller");
+    return this.submit("revokeController", { controller });
+  }
+
+  async isControllerActive(subject: Ownership, controller: Ownership): Promise<boolean> {
+    assertOwnership(subject, "subject");
+    assertOwnership(controller, "controller");
+    const value = await this.queryValue("getControllerGrant", controllerGrantQueryKey(subject, controller));
+    return asFlag(value, "controller grant");
+  }
+
+  async hasMatrixBootstrapCompleted(subject: Ownership = this.requireSession().subject): Promise<boolean> {
+    assertOwnership(subject, "subject");
+    const value = await this.queryValue("getMatrixBootstrapUsed", ownershipKey(subject));
+    return asFlag(value, "Matrix bootstrap");
   }
 
   async getAsset(assetId: AssetId): Promise<Asset | null> {
