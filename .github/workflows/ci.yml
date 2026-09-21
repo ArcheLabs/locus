@@ -51,6 +51,10 @@ jobs:
             | bash -s -- --version "${JAMSCRIPT_VERSION}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Install pinned source ScriptC dependencies
+        working-directory: ${{ runner.temp }}/jamscript/toolchains/scriptc
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
       - name: Verify published toolchain
         run: |
           jams --version
@@ -92,6 +96,10 @@ jobs:
 
       - name: Consumer PVM artifact build
         run: |
+          export JAMSCRIPT_DEV_TOOLCHAIN=1
+          export JAMSCRIPT_GUEST_BUILD_MODE=cargo
+          export JAMSCRIPT_CLANG="$(command -v clang)"
+          export JAMSCRIPT_LLVM_AR="$(command -v llvm-ar || command -v ar)"
           "$JAMSCRIPT_SOURCE_CLI" build . --output ./dist
 
   consumer-registry:
