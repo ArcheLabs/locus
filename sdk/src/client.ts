@@ -115,7 +115,7 @@ export class LocusClient {
       const session = this.requireSession();
       return await this.jamClient.submitOwnershipAction(
         actionName,
-        { subject: session.subject, ...input },
+        { ...input, subject: session.subject },
         session.signer,
       );
     } catch (error) {
