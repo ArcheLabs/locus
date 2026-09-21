@@ -15,7 +15,8 @@
   },
   "dependencies": {
     "@jamscript/client": "0.1.0-rc.2",
-    "@polkadot/util-crypto": "^14.0.1"
+    "@polkadot/util-crypto": "^14.0.1",
+    "@scure/base": "^2.4.0"
   },
   "devDependencies": {
     "typescript": "^5.9.2"

@@ -7,6 +7,7 @@ import {
   toHex,
   type Ownership,
 } from "@jamscript/client";
+import { base58 } from "@scure/base";
 import { decodeAddress } from "@polkadot/util-crypto";
 
 export {
@@ -46,29 +47,16 @@ export function matrixOwnership(masterEd25519PublicKey: Uint8Array): Ownership {
   };
 }
 
-const BASE58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
-
 /** Decode a Solana base58 public key into the canonical ED25519 Ownership form. */
 export function solanaOwnership(address: string): Ownership {
   const normalized = address.trim();
   if (!normalized) throw new Error("Solana address is empty");
-  const bytes: number[] = [];
-  for (const character of normalized) {
-    const value = BASE58_ALPHABET.indexOf(character);
-    if (value < 0) throw new Error("Solana address is not valid base58");
-    let carry = value;
-    for (let index = 0; index < bytes.length; index += 1) {
-      const next = bytes[index] * 58 + carry;
-      bytes[index] = next & 0xff;
-      carry = next >> 8;
-    }
-    while (carry > 0) {
-      bytes.push(carry & 0xff);
-      carry >>= 8;
-    }
+  let bytes: Uint8Array;
+  try {
+    bytes = base58.decode(normalized);
+  } catch (cause) {
+    throw new Error("Solana address is not valid base58", { cause });
   }
-  for (let index = 0; index < normalized.length && normalized[index] === "1"; index += 1) bytes.push(0);
-  bytes.reverse();
   if (bytes.length !== 32) throw new Error("Solana address must decode to 32 bytes");
   return {
     version: 1,
