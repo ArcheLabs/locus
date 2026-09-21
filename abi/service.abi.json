@@ -7,6 +7,82 @@
   },
   "actions": [
     {
+      "name": "bootstrapMatrixController",
+      "selector": "0x38c5f96bcde5449e",
+      "auth": {
+        "kind": "ownership",
+        "version": 1
+      },
+      "input": [
+        {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
+        {
+          "name": "proof",
+          "type": {
+            "kind": "bytes",
+            "max": 4096
+          }
+        }
+      ],
+      "executeOutput": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "addController",
+      "selector": "0x316b85eabaaca808",
+      "auth": {
+        "kind": "ownership",
+        "version": 1
+      },
+      "input": [
+        {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
+        {
+          "name": "controller",
+          "type": {
+            "kind": "ownership"
+          }
+        }
+      ],
+      "executeOutput": {
+        "kind": "unit"
+      }
+    },
+    {
+      "name": "revokeController",
+      "selector": "0x835526f7db01f5cb",
+      "auth": {
+        "kind": "ownership",
+        "version": 1
+      },
+      "input": [
+        {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
+        {
+          "name": "controller",
+          "type": {
+            "kind": "ownership"
+          }
+        }
+      ],
+      "executeOutput": {
+        "kind": "unit"
+      }
+    },
+    {
       "name": "createAsset",
       "selector": "0x492700a56770ded7",
       "auth": {
@@ -14,6 +90,12 @@
         "version": 1
       },
       "input": [
+        {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
         {
           "name": "assetId",
           "type": {
@@ -61,6 +143,12 @@
       },
       "input": [
         {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
+        {
           "name": "assetId",
           "type": {
             "kind": "fixedBytes",
@@ -93,6 +181,12 @@
       },
       "input": [
         {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
+        {
           "name": "assetId",
           "type": {
             "kind": "fixedBytes",
@@ -124,6 +218,12 @@
         "version": 1
       },
       "input": [
+        {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
         {
           "name": "assetId",
           "type": {
@@ -163,6 +263,12 @@
       },
       "input": [
         {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
+        {
           "name": "assetId",
           "type": {
             "kind": "fixedBytes",
@@ -194,6 +300,12 @@
         "version": 1
       },
       "input": [
+        {
+          "name": "subject",
+          "type": {
+            "kind": "ownership"
+          }
+        },
         {
           "name": "assetId",
           "type": {
@@ -361,6 +473,51 @@
       "output": {
         "type": {
           "kind": "u128"
+        },
+        "nullable": true
+      }
+    },
+    {
+      "name": "getControllerGrant",
+      "kind": "state_get",
+      "state": "controllerGrants",
+      "keyType": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "subjectKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "controllerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
+      },
+      "output": {
+        "type": {
+          "kind": "u8"
+        },
+        "nullable": true
+      }
+    },
+    {
+      "name": "getMatrixBootstrapUsed",
+      "kind": "state_get",
+      "state": "matrixBootstrapUsed",
+      "keyType": {
+        "kind": "fixedBytes",
+        "len": 32
+      },
+      "output": {
+        "type": {
+          "kind": "u8"
         },
         "nullable": true
       }
@@ -532,6 +689,60 @@
       "descriptor": {
         "kind": "unit"
       }
+    },
+    "Record<controllerKey:FixedBytes<32>,subjectKey:FixedBytes<32>>": {
+      "kind": "record",
+      "max": null,
+      "descriptor": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "subjectKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "controllerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
+      }
+    },
+    "Record<subjectKey:FixedBytes<32>,controllerKey:FixedBytes<32>>": {
+      "kind": "record",
+      "max": null,
+      "descriptor": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "subjectKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "controllerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
+      }
+    },
+    "Bytes<4096>": {
+      "kind": "bytes",
+      "max": 4096,
+      "descriptor": {
+        "kind": "bytes",
+        "max": 4096
+      }
     }
   },
   "state": [
@@ -669,6 +880,45 @@
       },
       "valueType": {
         "kind": "u128"
+      }
+    },
+    {
+      "name": "controllerGrants",
+      "schema": "locus.controller-grant.v1",
+      "kind": "map",
+      "keyType": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "subjectKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "controllerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
+      },
+      "valueType": {
+        "kind": "u8"
+      }
+    },
+    {
+      "name": "matrixBootstrapUsed",
+      "schema": "locus.matrix-bootstrap.v1",
+      "kind": "map",
+      "keyType": {
+        "kind": "fixedBytes",
+        "len": 32
+      },
+      "valueType": {
+        "kind": "u8"
       }
     }
   ]
