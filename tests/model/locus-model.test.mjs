@@ -180,6 +180,20 @@ test("SDK injects the stable subject and does not use actAs", async () => {
   assert.equal(calls[0].length, 3);
 });
 
+test("SDK treats missing controller state as inactive", async () => {
+  const subject = owner(74);
+  const controller = owner(75);
+  const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
+  const adapter = {
+    async submitOwnershipAction() { return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
+    async queryLatest() { return { value: null }; },
+    async waitForAction() { return { status: "applied" }; },
+  };
+  const client = new LocusClient(adapter, { signer, subject });
+  assert.equal(await client.isControllerActive(subject, controller), false);
+  assert.equal(await client.hasMatrixBootstrapCompleted(subject), false);
+});
+
 test("SDK surfaces mapped application errors", async () => {
   const client = new LocusClient({
     async submitOwnershipAction() {
