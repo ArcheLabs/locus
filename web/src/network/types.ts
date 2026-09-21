@@ -14,17 +14,7 @@ export type RuntimeNetwork = {
   label: string;
   backendUrl: string | null;
   deploymentUrl: string | null;
-  controlClaim?: ControlClaimDeploymentDescriptor;
   matrixResolverUrl?: string;
-};
-
-/** Network-scoped Ownership Control service, when the network publishes one. */
-export type ControlClaimDeploymentDescriptor = {
-  genesisHash: string;
-  networkDomain: string;
-  serviceKey: string;
-  serviceId: number;
-  codeHash: string;
 };
 
 export type RuntimeNetworkConfig = {
