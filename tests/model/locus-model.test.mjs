@@ -118,7 +118,7 @@ test("SDK surfaces mapped application errors", async () => {
     },
     async queryLatest() { return { value: null }; },
     async waitForAction() { return {}; },
-  }, { signer: { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } } });
+  }, { signer: { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } }, subject: alice });
   await assert.rejects(() => client.mint(assetId, bob, 1n), (error) => error instanceof LocusError && error.code === 2007);
 });
 
