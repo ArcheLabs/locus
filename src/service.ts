@@ -12,10 +12,19 @@ import {
   u64,
   u128,
   ownershipKey,
+  verifyMatrixCrossSigning,
 } from "jam";
 
 const AssetId = fixedBytes(32);
 const OwnerKey = fixedBytes(32);
+const MAX_MATRIX_PROOF = 4096;
+
+const CONTROLLER_NOT_AUTHORIZED = 5001;
+const CONTROLLER_ALREADY_ACTIVE = 5002;
+const CONTROLLER_REVOKED = 5003;
+const MATRIX_BOOTSTRAP_USED = 5004;
+const MATRIX_PROOF_INVALID = 5005;
+const CONTROLLER_NOT_ACTIVE = 5006;
 
 const AssetV2 = record({
   version: u8,
@@ -35,6 +44,11 @@ const AllowanceKey = record({
   assetId: AssetId,
   ownerKey: OwnerKey,
   spenderKey: OwnerKey,
+});
+
+const ControllerGrantKey = record({
+  subjectKey: OwnerKey,
+  controllerKey: OwnerKey,
 });
 
 const assets = stateMap({
@@ -64,6 +78,18 @@ const allowances = stateMap({
   schema: "locus.allowance.v2",
   key: AllowanceKey,
   value: u128,
+});
+
+const controllerGrants = stateMap({
+  schema: "locus.controller-grant.v1",
+  key: ControllerGrantKey,
+  value: u8,
+});
+
+const matrixBootstrapUsed = stateMap({
+  schema: "locus.matrix-bootstrap.v1",
+  key: OwnerKey,
+  value: u8,
 });
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -116,9 +142,83 @@ function allowanceKey(
   };
 }
 
+function controllerKey(
+  subject: JamOwnership,
+  controller: JamOwnership,
+) {
+  return {
+    subjectKey: ownerKey(subject),
+    controllerKey: ownerKey(controller),
+  };
+}
+
+function requireController(
+  subject: JamOwnership,
+  controller: JamOwnership,
+): void {
+  if (sameOwnership(subject, controller)) return;
+  const grant = controllerGrants.get(controllerKey(subject, controller)) ?? 0;
+  if (grant !== 1) abort(CONTROLLER_NOT_AUTHORIZED);
+}
+
+function requireActiveController(
+  subject: JamOwnership,
+  controller: JamOwnership,
+): void {
+  if ((controllerGrants.get(controllerKey(subject, controller)) ?? 0) !== 1) {
+    abort(CONTROLLER_NOT_ACTIVE);
+  }
+}
+
+export const bootstrapMatrixController = action({
+  auth: ownership(),
+  input: {
+    subject: ownership,
+    proof: bytes(MAX_MATRIX_PROOF),
+  },
+  execute(ctx, input) {
+    const subjectKey = ownerKey(input.subject);
+    if ((matrixBootstrapUsed.get(subjectKey) ?? 0) === 1) abort(MATRIX_BOOTSTRAP_USED);
+    if (input.subject.kind !== 0 || ctx.controller.kind !== 0) abort(MATRIX_PROOF_INVALID);
+    if (!verifyMatrixCrossSigning(input.subject, ctx.controller, input.proof)) abort(MATRIX_PROOF_INVALID);
+
+    matrixBootstrapUsed.set(subjectKey, 1);
+    controllerGrants.set(controllerKey(input.subject, ctx.controller), 1);
+  },
+});
+
+export const addController = action({
+  auth: ownership(),
+  input: {
+    subject: ownership,
+    controller: ownership,
+  },
+  execute(ctx, input) {
+    requireController(input.subject, ctx.controller);
+    const key = controllerKey(input.subject, input.controller);
+    if ((controllerGrants.get(key) ?? 0) === 1) abort(CONTROLLER_ALREADY_ACTIVE);
+    if (controllerGrants.has(key)) abort(CONTROLLER_REVOKED);
+    controllerGrants.set(key, 1);
+  },
+});
+
+export const revokeController = action({
+  auth: ownership(),
+  input: {
+    subject: ownership,
+    controller: ownership,
+  },
+  execute(ctx, input) {
+    requireController(input.subject, ctx.controller);
+    requireActiveController(input.subject, input.controller);
+    controllerGrants.set(controllerKey(input.subject, input.controller), 0);
+  },
+});
+
 export const createAsset = action({
   auth: ownership(),
   input: {
+    subject: ownership,
     assetId: AssetId,
     name: bytes(64),
     symbol: bytes(16),
@@ -126,6 +226,7 @@ export const createAsset = action({
     initialSupply: u128,
   },
   execute(ctx, input) {
+    requireController(input.subject, ctx.controller);
     requireAssetId(input.assetId);
     if (assets.has(input.assetId)) abort(2002);
     if (input.name.length === 0) abort(2004);
@@ -134,7 +235,7 @@ export const createAsset = action({
 
     assets.set(input.assetId, {
       version: 2,
-      issuer: ctx.owner,
+      issuer: input.subject,
       name: input.name,
       symbol: input.symbol,
       decimals: input.decimals,
@@ -142,7 +243,7 @@ export const createAsset = action({
     });
 
     if (input.initialSupply > 0n) {
-      balances.set(balanceKey(input.assetId, ctx.owner), input.initialSupply);
+      balances.set(balanceKey(input.assetId, input.subject), input.initialSupply);
     }
 
     const count = assetCount.get() ?? 0n;
@@ -155,19 +256,21 @@ export const createAsset = action({
 export const transfer = action({
   auth: ownership(),
   input: {
+    subject: ownership,
     assetId: AssetId,
     to: ownership,
     amount: u128,
   },
   execute(ctx, input) {
+    requireController(input.subject, ctx.controller);
     const asset = assets.get(input.assetId);
     if (!asset) abort(2001);
 
-    const fromKey = balanceKey(input.assetId, ctx.owner);
+    const fromKey = balanceKey(input.assetId, input.subject);
     const fromBalance = balances.get(fromKey) ?? 0n;
     if (fromBalance < input.amount) abort(3002);
 
-    if (!sameOwnership(ctx.owner, input.to)) {
+    if (!sameOwnership(input.subject, input.to)) {
       const toKey = balanceKey(input.assetId, input.to);
       const toBalance = balances.get(toKey) ?? 0n;
       balances.set(fromKey, fromBalance - input.amount);
@@ -179,33 +282,37 @@ export const transfer = action({
 export const approve = action({
   auth: ownership(),
   input: {
+    subject: ownership,
     assetId: AssetId,
     spender: ownership,
     amount: u128,
   },
   execute(ctx, input) {
+    requireController(input.subject, ctx.controller);
     if (!assets.has(input.assetId)) abort(2001);
-    allowances.set(allowanceKey(input.assetId, ctx.owner, input.spender), input.amount);
+    allowances.set(allowanceKey(input.assetId, input.subject, input.spender), input.amount);
   },
 });
 
 export const transferFrom = action({
   auth: ownership(),
   input: {
+    subject: ownership,
     assetId: AssetId,
     from: ownership,
     to: ownership,
     amount: u128,
   },
   execute(ctx, input) {
+    requireController(input.subject, ctx.controller);
     if (!assets.has(input.assetId)) abort(2001);
 
     const fromOwnerKey = ownerKey(input.from);
-    const controllerOwnerKey = ownerKey(ctx.owner);
+    const spenderKey = ownerKey(input.subject);
     const key = {
       assetId: input.assetId,
       ownerKey: fromOwnerKey,
-      spenderKey: controllerOwnerKey,
+      spenderKey,
     };
     const allowance = allowances.get(key) ?? 0n;
     if (allowance < input.amount) abort(4002);
@@ -227,14 +334,16 @@ export const transferFrom = action({
 export const mint = action({
   auth: ownership(),
   input: {
+    subject: ownership,
     assetId: AssetId,
     to: ownership,
     amount: u128,
   },
   execute(ctx, input) {
+    requireController(input.subject, ctx.controller);
     const asset = assets.get(input.assetId);
     if (!asset) abort(2001);
-    if (!sameOwnership(asset.issuer, ctx.owner)) abort(2007);
+    if (!sameOwnership(asset.issuer, input.subject)) abort(2007);
 
     const key = balanceKey(input.assetId, input.to);
     const balance = balances.get(key) ?? 0n;
@@ -253,13 +362,15 @@ export const mint = action({
 export const burn = action({
   auth: ownership(),
   input: {
+    subject: ownership,
     assetId: AssetId,
     amount: u128,
   },
   execute(ctx, input) {
+    requireController(input.subject, ctx.controller);
     const asset = assets.get(input.assetId);
     if (!asset) abort(2001);
-    const key = balanceKey(input.assetId, ctx.owner);
+    const key = balanceKey(input.assetId, input.subject);
     const balance = balances.get(key) ?? 0n;
     if (balance < input.amount || asset.totalSupply < input.amount) abort(3002);
 
@@ -280,3 +391,5 @@ export const getAssetCount = query(assetCount);
 export const getAssetByIndex = query(assetByIndex);
 export const getBalance = query(balances);
 export const getAllowance = query(allowances);
+export const getControllerGrant = query(controllerGrants);
+export const getMatrixBootstrapUsed = query(matrixBootstrapUsed);
