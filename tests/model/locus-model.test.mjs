@@ -18,6 +18,37 @@ function setup() {
   return model;
 }
 
+test("local controller grants are non-transitive and replay-safe", () => {
+  const model = new LocusModel();
+  const master = owner(60);
+  const device1 = owner(61);
+  const device2 = owner(62);
+
+  expectCode(5001, () => model.requireController(master, device1));
+  model.bootstrapMatrixController(master, device1);
+  assert.equal(model.matrixBootstrapCompleted(master), true);
+  assert.equal(model.controllerGrant(master, device1), 1);
+
+  model.addController(device1, master, device2);
+  assert.equal(model.controllerGrant(master, device2), 1);
+  expectCode(5001, () => model.requireController(master, owner(63)));
+
+  model.revokeController(device1, master, device1);
+  assert.equal(model.controllerGrant(master, device1), 0);
+  expectCode(5001, () => model.requireController(master, device1));
+  expectCode(5004, () => model.bootstrapMatrixController(master, device1));
+  expectCode(5003, () => model.addController(device1, master, device1));
+});
+
+test("direct owner needs no registration to manage identity", () => {
+  const model = new LocusModel();
+  const subject = owner(64);
+  const controller = owner(65);
+  model.requireController(subject, subject);
+  model.addController(subject, subject, controller);
+  assert.equal(model.controllerGrant(subject, controller), 1);
+});
+
 test("ownership-native ERC-20 scenario preserves issuer and allowance", () => {
   const model = setup();
   model.transfer(alice, assetId, bob, 20n);
