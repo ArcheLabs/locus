@@ -83,7 +83,7 @@ test("SDK uses Ownership auth and canonical ownership keys", async () => {
     async waitForAction() { return { status: "applied" }; },
   };
   const signer = { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } };
-  const client = new LocusClient(adapter, { signer });
+  const client = new LocusClient(adapter, { signer, subject: alice });
   await client.transfer(assetId, bob, 3n);
   assert.equal(submitted[0].actionName, "transfer");
   assert.deepEqual(submitted[0].input.to, bob);
@@ -92,7 +92,7 @@ test("SDK uses Ownership auth and canonical ownership keys", async () => {
   assert.equal(key(submitted[0].input.to), key(bob));
 });
 
-test("SDK forwards controller delegation as actAs", async () => {
+test("SDK injects the stable subject and does not use actAs", async () => {
   const calls = [];
   const adapter = {
     async submitOwnershipAction(...args) { calls.push(args); return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
@@ -102,8 +102,11 @@ test("SDK forwards controller delegation as actAs", async () => {
   const controller = owner(51);
   const subject = owner(52);
   const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
-  await new LocusClient(adapter, { signer, actAs: subject }).transfer(assetId, bob, 1n);
-  assert.deepEqual(calls[0][3], { actAs: subject });
+  await new LocusClient(adapter, { signer, subject }).transfer(assetId, bob, 1n);
+  assert.equal(calls[0][0], "transfer");
+  assert.equal(calls[0][2], signer);
+  assert.deepEqual(calls[0][1].subject, subject);
+  assert.equal(calls[0].length, 3);
 });
 
 test("SDK surfaces mapped application errors", async () => {
