@@ -16,6 +16,17 @@ export type MatrixStoredSession = {
 
 const MATRIX_SESSION_KEY = "locus.matrix.session.v1";
 
+function stableDeviceId(homeserver: string, userId: string): string {
+  const key = `locus.matrix.device.v1.${homeserver}|${userId}`;
+  const existing = window.sessionStorage.getItem(key);
+  if (existing && /^[A-Z0-9_-]{1,255}$/.test(existing)) return existing;
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  const created = `LOCUS-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  window.sessionStorage.setItem(key, created);
+  return created;
+}
+
 function homeserverFromUserId(userId: string): string {
   const separator = userId.indexOf(":");
   if (separator < 2 || separator === userId.length - 1) throw new MatrixConnectorError("INVALID_LOGIN", "Enter a valid Matrix ID such as @alice:example.org");
@@ -37,9 +48,9 @@ export async function discoverHomeserver(userId: string, configured?: string): P
 }
 
 function authenticatedHttp(homeserver: string, accessToken: string) {
-  return async (path: string, body: string): Promise<string> => {
+  return async (path: string, body: string, method: "POST" | "PUT" = "POST"): Promise<string> => {
     const response = await fetch(`${homeserver.replace(/\/$/, "")}${path}`, {
-      method: "POST",
+      method,
       headers: { authorization: `Bearer ${accessToken}`, "content-type": "application/json" },
       body,
     });
@@ -68,10 +79,12 @@ export async function connectMatrixSession(userId: string, password: string, con
   }
   let login: Awaited<ReturnType<MatrixClient["loginRequest"]>>;
   try {
+    const deviceId = stableDeviceId(homeserver, userId);
     login = await loginClient.loginRequest({
       type: "m.login.password",
       identifier: { type: "m.id.user", user: userId },
       password,
+      device_id: deviceId,
       initial_device_display_name: "Locus",
       refresh_token: true,
     });

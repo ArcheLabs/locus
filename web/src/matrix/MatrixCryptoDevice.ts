@@ -2,16 +2,19 @@ import {
   DeviceId,
   initAsync,
   KeysClaimRequest,
+  KeysBackupRequest,
   KeysQueryRequest,
   KeysUploadRequest,
   OlmMachine,
+  RoomMessageRequest,
   RequestType,
   SignatureUploadRequest,
+  ToDeviceRequest,
   UserId,
 } from "@matrix-org/matrix-sdk-crypto-wasm";
 import { MatrixConnectorError } from "./MatrixErrors.js";
 
-type MatrixHttp = (path: string, body: string) => Promise<string>;
+type MatrixHttp = (path: string, body: string, method?: "POST" | "PUT") => Promise<string>;
 
 let wasmReady: Promise<void> | null = null;
 function ensureWasm(): Promise<void> {
@@ -19,16 +22,28 @@ function ensureWasm(): Promise<void> {
   return wasmReady;
 }
 
-function endpoint(type: RequestType): string {
-  if (type === RequestType.KeysUpload) return "/_matrix/client/v3/keys/upload";
-  if (type === RequestType.KeysQuery) return "/_matrix/client/v3/keys/query";
-  if (type === RequestType.SignatureUpload) return "/_matrix/client/v3/keys/signatures/upload";
-  if (type === RequestType.KeysClaim) return "/_matrix/client/v3/keys/claim";
+function requestEndpoint(request: KeysUploadRequest | KeysQueryRequest | SignatureUploadRequest | KeysClaimRequest | ToDeviceRequest | RoomMessageRequest | KeysBackupRequest): { path: string; method: "POST" | "PUT" } {
+  const type = request.type;
+  if (type === RequestType.KeysUpload) return { path: "/_matrix/client/v3/keys/upload", method: "POST" };
+  if (type === RequestType.KeysQuery) return { path: "/_matrix/client/v3/keys/query", method: "POST" };
+  if (type === RequestType.SignatureUpload) return { path: "/_matrix/client/v3/keys/signatures/upload", method: "POST" };
+  if (type === RequestType.KeysClaim) return { path: "/_matrix/client/v3/keys/claim", method: "POST" };
+  if (request instanceof ToDeviceRequest) {
+    return { path: `/_matrix/client/v3/sendToDevice/${encodeURIComponent(request.event_type)}/${encodeURIComponent(request.txn_id)}`, method: "PUT" };
+  }
+  if (request instanceof RoomMessageRequest) {
+    return { path: `/_matrix/client/v3/rooms/${encodeURIComponent(request.room_id)}/send/${encodeURIComponent(request.event_type)}/${encodeURIComponent(request.txn_id)}`, method: "PUT" };
+  }
+  if (request instanceof KeysBackupRequest) {
+    return { path: `/_matrix/client/v3/room_keys/keys/${encodeURIComponent(request.version)}`, method: "PUT" };
+  }
   throw new MatrixConnectorError("UNSUPPORTED_MATRIX_CRYPTO_REQUEST", `Unsupported Matrix crypto request type ${type}`);
 }
 
-function isKnownRequest(value: unknown): value is KeysUploadRequest | KeysQueryRequest | SignatureUploadRequest | KeysClaimRequest {
-  return value instanceof KeysUploadRequest || value instanceof KeysQueryRequest || value instanceof SignatureUploadRequest || value instanceof KeysClaimRequest;
+type SupportedRequest = KeysUploadRequest | KeysQueryRequest | SignatureUploadRequest | KeysClaimRequest | ToDeviceRequest | RoomMessageRequest | KeysBackupRequest;
+
+function isKnownRequest(value: unknown): value is SupportedRequest {
+  return value instanceof KeysUploadRequest || value instanceof KeysQueryRequest || value instanceof SignatureUploadRequest || value instanceof KeysClaimRequest || value instanceof ToDeviceRequest || value instanceof RoomMessageRequest || value instanceof KeysBackupRequest;
 }
 
 export class MatrixCryptoDevice {
@@ -49,7 +64,8 @@ export class MatrixCryptoDevice {
   private async flush(http: MatrixHttp): Promise<void> {
     for (const request of await this.machine.outgoingRequests()) {
       if (!isKnownRequest(request)) throw new MatrixConnectorError("UNSUPPORTED_MATRIX_CRYPTO_REQUEST", `Unsupported Matrix crypto request ${String(request)}`);
-      const response = await http(endpoint(request.type), request.body);
+      const endpoint = requestEndpoint(request);
+      const response = await http(endpoint.path, request.body, endpoint.method);
       if (!request.id) throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", "Matrix crypto request did not provide a request ID");
       await this.machine.markRequestAsSent(request.id, request.type, response);
     }

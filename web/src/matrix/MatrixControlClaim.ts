@@ -10,6 +10,7 @@ export type MatrixControlClaimMaterial = {
 };
 
 export function buildMatrixControlClaimMaterial(keys: MatrixDiscoveredKeys): MatrixControlClaimMaterial {
+  if (!keys.encodedProof) throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Verify this Matrix device before creating a ControlClaim");
   return {
     subject: matrixOwnership(keys.masterPublicKey),
     controller: matrixOwnership(keys.deviceEd25519Key),
