@@ -86,6 +86,7 @@ function controllerGrantQueryKey(subject: Ownership, controller: Ownership): Loc
 }
 
 function asFlag(value: LocusValue | null, label: string): boolean {
+  if (value === null) return false;
   if (typeof value === "bigint") return value === 1n;
   if (typeof value === "number") return value === 1;
   throw new Error(`${label} query did not return u8`);
