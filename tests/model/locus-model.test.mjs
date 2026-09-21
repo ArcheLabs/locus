@@ -49,6 +49,46 @@ test("direct owner needs no registration to manage identity", () => {
   assert.equal(model.controllerGrant(subject, controller), 1);
 });
 
+test("controller grants are non-transitive", () => {
+  const model = new LocusModel();
+  const master = owner(66);
+  const device1 = owner(67);
+  const device2 = owner(68);
+  model.bootstrapMatrixController(master, device1);
+  model.addController(device1, device1, device2);
+  expectCode(5001, () => model.requireController(master, device2));
+});
+
+test("Matrix controller operates on the master subject without moving asset ownership", () => {
+  const model = new LocusModel();
+  const master = owner(69);
+  const device = owner(70);
+  const recipient = owner(71);
+  const matrixAsset = id(11);
+
+  model.bootstrapMatrixController(master, device);
+  model.createAssetAs(device, master, matrixAsset, encodeAssetName("Matrix Token"), encodeAssetSymbol("MTRX"), 0, 100n);
+  assert.deepEqual(model.asset(matrixAsset).issuer, master);
+  assert.equal(model.balance(matrixAsset, master), 100n);
+  assert.equal(model.balance(matrixAsset, device), 0n);
+
+  model.transferAs(device, master, matrixAsset, recipient, 25n);
+  assert.equal(model.balance(matrixAsset, master), 75n);
+  assert.equal(model.balance(matrixAsset, recipient), 25n);
+
+  model.revokeController(device, master, device);
+  expectCode(5001, () => model.transferAs(device, master, matrixAsset, recipient, 1n));
+});
+
+test("invalid Matrix proof never consumes the bootstrap tombstone", () => {
+  const model = new LocusModel();
+  const master = owner(72);
+  const device = owner(73);
+  expectCode(5005, () => model.bootstrapMatrixController(master, device, false));
+  assert.equal(model.matrixBootstrapCompleted(master), false);
+  assert.equal(model.controllerGrant(master, device), null);
+});
+
 test("ownership-native ERC-20 scenario preserves issuer and allowance", () => {
   const model = setup();
   model.transfer(alice, assetId, bob, 20n);
