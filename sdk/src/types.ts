@@ -38,7 +38,7 @@ export interface JamScriptLikeClient {
     actionName: string,
     input: Record<string, CodecValue>,
     signer: OwnershipSigner,
-    options?: { actAs?: Ownership; ttl?: bigint; extrinsics?: Uint8Array[] },
+    options?: { ttl?: bigint; extrinsics?: Uint8Array[] },
   ): Promise<SubmitActionResult>;
   queryLatest(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
   waitForAction(
