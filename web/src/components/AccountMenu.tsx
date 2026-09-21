@@ -17,7 +17,7 @@ export function AccountMenu({ session, onConnect, onDisconnect }: { session: Loc
     <DropdownMenu.Portal><DropdownMenu.Content className="account-menu" sideOffset={8} align="end">
       <div className="account-heading"><strong>{session.label}</strong><small>{session.kind === "matrix" ? "Matrix Ownership" : "Ownership session"}</small></div>
       <div className="account-detail"><small>Owner</small><code>{locusId}</code></div>
-      {session.kind === "matrix" && <div className="account-detail"><small>Controller</small><code>Device {session.matrix?.deviceId}</code><span className="account-status">ControlClaim required</span></div>}
+      {session.kind === "matrix" && <div className="account-detail"><small>Controller</small><code>Device {session.matrix?.deviceId}</code><span className="account-status">Local controller authorization</span></div>}
       <DropdownMenu.Item className="account-action" onSelect={() => void copy()}><Copy size={15} aria-hidden="true" /> Copy Locus ID</DropdownMenu.Item>
       <DropdownMenu.Item className="account-action danger" onSelect={disconnect}><LogOut size={15} aria-hidden="true" /> Disconnect</DropdownMenu.Item>
     </DropdownMenu.Content></DropdownMenu.Portal>
