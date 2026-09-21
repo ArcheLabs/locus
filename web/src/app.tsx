@@ -80,6 +80,7 @@ export function App() {
 
   useEffect(() => {
     if (sessionRestoreAttempted.current || session) return;
+    if (networkMode && (network.status !== "ready" || !network.locus)) return;
     sessionRestoreAttempted.current = true;
     try {
       const matrixStored = readStoredMatrixSession();
@@ -100,7 +101,7 @@ export function App() {
     } catch {
       window.localStorage.removeItem("locus.session.v1");
     }
-  }, [network.locus, network.network, session, setSession]);
+  }, [network.locus, network.network, network.status, networkMode, session, setSession]);
 
   useEffect(() => {
     if (!session) {
