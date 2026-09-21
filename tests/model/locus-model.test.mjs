@@ -37,7 +37,7 @@ test("local controller grants are non-transitive and replay-safe", () => {
   assert.equal(model.controllerGrant(master, device1), 0);
   expectCode(5001, () => model.requireController(master, device1));
   expectCode(5004, () => model.bootstrapMatrixController(master, device1));
-  expectCode(5003, () => model.addController(device1, master, device1));
+  expectCode(5001, () => model.addController(device1, master, device1));
 });
 
 test("direct owner needs no registration to manage identity", () => {
