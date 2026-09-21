@@ -4,13 +4,75 @@ on:
   push:
   pull_request:
   workflow_dispatch:
+    inputs:
+      registry_consumer:
+        description: Validate the published npm client from the registry
+        required: false
+        default: false
+        type: boolean
 
 env:
   JAMSCRIPT_VERSION: v0.1.0-rc.7
+  JAMSCRIPT_CLIENT_REF: c78167c2e223c81a68f08044f60e8e1fcd451905
   NODE_VERSION: 24.15.0
 
 jobs:
-  consumer:
+  consumer-prepublish:
+    name: Consumer CI (source tarball)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+
+      - name: Pack JamScript client from pinned source
+        env:
+          JAMSCRIPT_CLIENT_REF: ${{ env.JAMSCRIPT_CLIENT_REF }}
+        run: |
+          git clone --no-checkout https://github.com/ArcheLabs/JamScript.git "$RUNNER_TEMP/jamscript"
+          git -C "$RUNNER_TEMP/jamscript" fetch --depth=1 origin "$JAMSCRIPT_CLIENT_REF"
+          git -C "$RUNNER_TEMP/jamscript" checkout --detach FETCH_HEAD
+          npm --prefix "$RUNNER_TEMP/jamscript/packages/client" ci --ignore-scripts --no-audit --no-fund
+          mkdir -p "$RUNNER_TEMP/jamscript-client"
+          npm --prefix "$RUNNER_TEMP/jamscript/packages/client" pack --pack-destination "$RUNNER_TEMP/jamscript-client"
+          CLIENT_TARBALL="$(find "$RUNNER_TEMP/jamscript-client" -maxdepth 1 -type f -name 'jamscript-client-*.tgz' -print -quit)"
+          test -n "$CLIENT_TARBALL"
+          echo "JAMSCRIPT_CLIENT_TARBALL=$CLIENT_TARBALL" >> "$GITHUB_ENV"
+
+      - name: Install source tarball consumer dependencies
+        run: npm install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false "$JAMSCRIPT_CLIENT_TARBALL"
+
+      - name: Install published JamScript CLI
+        run: |
+          curl -fsSL "https://raw.githubusercontent.com/ArcheLabs/JamScript/${JAMSCRIPT_VERSION}/install.sh" \
+            | bash -s -- --version "${JAMSCRIPT_VERSION}"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify published toolchain
+        run: |
+          jams --version
+          jams toolchain verify
+
+      - name: SDK and ownership model tests
+        run: npm test
+
+      - name: Build frontend prototype
+        run: |
+          npm --prefix web install --ignore-scripts --no-audit --no-fund
+          npm run build:web
+
+      - name: Consumer service check and ABI validation
+        run: jams check .
+
+      - name: Consumer PVM artifact build
+        run: jams build . --output ./dist
+
+  consumer-registry:
+    name: Consumer CI (published registry)
+    if: github.event_name == 'workflow_dispatch' && inputs.registry_consumer == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -21,7 +83,10 @@ jobs:
           cache: npm
 
       - name: Install published consumer dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Verify registry client
+        run: npm ls @jamscript/client --depth=0
 
       - name: Install published JamScript CLI
         run: |
