@@ -13,8 +13,8 @@ import { CreateAssetDialog, ReceiveDialog, ReviewDialog } from "./locus/dialogs.
 import { AssetPicker } from "./locus/AssetPicker.js";
 import { RecipientTypeMenu } from "./locus/RecipientTypeMenu.js";
 import { AccountMenu } from "./components/AccountMenu.js";
-import { discoverHomeserver, readStoredMatrixSession, restoreMatrixSession } from "./matrix/MatrixConnector.js";
-import { resolveMatrixMasterOwnership } from "./matrix/MatrixKeysQuery.js";
+import { readStoredMatrixSession, restoreMatrixSession } from "./matrix/MatrixConnector.js";
+import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
 
 type Page = "send" | "assets" | "activity";
 type DemoAsset = { symbol: string; name: string; balance: bigint; decimals: number; value: string; color: string };
@@ -86,8 +86,8 @@ export function App() {
       if (matrixStored) {
         const matrixControlClaim = network.network?.controlClaim && network.protocolClient ? { client: network.protocolClient, deployment: network.network.controlClaim } : undefined;
         restoreMatrixSession(matrixStored, matrixControlClaim).then((connected) => {
-          if (connected.bootstrapper) setSession(connected.session);
-          else connected.crypto.dispose();
+          if (connected.state === "READY") setSession(connected.session);
+          else connected.session.cleanup?.();
         }).catch(() => undefined);
         return;
       }
@@ -177,7 +177,7 @@ export function App() {
     let cancelled = false;
     setMatrixRecipientOwnership(null);
     setMatrixRecipientError("Resolving Matrix master Ownership…");
-    discoverHomeserver(recipient.trim()).then((homeserver) => resolveMatrixMasterOwnership(recipient.trim(), homeserver)).then((ownership) => {
+    resolveMatrixRecipient(recipient.trim(), { resolverUrl: network.network?.matrixResolverUrl }).then((ownership) => {
       if (!cancelled) { setMatrixRecipientOwnership(ownership); setMatrixRecipientError(""); }
     }).catch((error) => { if (!cancelled) { setMatrixRecipientOwnership(null); setMatrixRecipientError(error instanceof Error ? error.message : "Matrix master Ownership could not be resolved."); } });
     return () => { cancelled = true; };

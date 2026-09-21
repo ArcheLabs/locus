@@ -1,6 +1,7 @@
-import { matrixOwnership, type Ownership } from "@archelabs/locus";
-import { encodeMatrixControlClaimProofV1, type MatrixControlClaimProofV1 } from "./JamScriptMatrixCodec.js";
-import { MatrixConnectorError } from "./MatrixErrors.js";
+import { matrixOwnership } from "../../../sdk/src/ownership.ts";
+import type { Ownership } from "../../../sdk/src/types.ts";
+import { encodeMatrixControlClaimProofV1, type MatrixControlClaimProofV1 } from "@jamscript/client";
+import { MatrixConnectorError } from "./MatrixErrors.ts";
 
 type MatrixSignedKey = {
   keys?: Record<string, string>;
@@ -62,10 +63,10 @@ function validUserId(value: string): void {
   if (!/^@[^\s:]+:[^\s:]+$/.test(value)) throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", "Invalid Matrix User ID");
 }
 
-async function matrixJson<T>(homeserver: string, accessToken: string | undefined, path: string, body: unknown): Promise<T> {
+async function matrixJson<T>(homeserver: string, accessToken: string | undefined, path: string, body: unknown, fetchImpl: typeof fetch = fetch): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${homeserver.replace(/\/$/, "")}${path}`, {
+    response = await fetchImpl(`${homeserver.replace(/\/$/, "")}${path}`, {
       method: "POST",
       headers: { ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}), "content-type": "application/json" },
       body: JSON.stringify(body),
@@ -86,9 +87,9 @@ async function matrixJson<T>(homeserver: string, accessToken: string | undefined
 }
 
 /** Query M→S→D public evidence. The homeserver `verified` flag is intentionally ignored. */
-export async function queryMatrixKeys(userId: string, deviceId: string, homeserver: string, accessToken: string): Promise<MatrixDiscoveredKeys> {
+export async function queryMatrixKeys(userId: string, deviceId: string, homeserver: string, accessToken: string, fetchImpl: typeof fetch = fetch): Promise<MatrixDiscoveredKeys> {
   validUserId(userId);
-  const response = await matrixJson<KeysQueryResponse>(homeserver, accessToken, "/_matrix/client/v3/keys/query", { device_keys: { [userId]: [] } });
+  const response = await matrixJson<KeysQueryResponse>(homeserver, accessToken, "/_matrix/client/v3/keys/query", { device_keys: { [userId]: [] } }, fetchImpl);
   const master = response.master_keys?.[userId];
   const selfSigning = response.self_signing_keys?.[userId];
   const device = response.device_keys?.[userId]?.[deviceId];

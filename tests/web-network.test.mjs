@@ -4,6 +4,11 @@ import test from "node:test";
 import { formatUnits, parseUnits, evmOwnership, polkadotOwnership, solanaOwnership, formatLocusId, parseLocusId } from "../dist/sdk/index.js";
 import { encodeAddress } from "@polkadot/util-crypto";
 import { selectNetwork } from "../web/src/network/selection.ts";
+import { queryMatrixKeys } from "../web/src/matrix/MatrixKeysQuery.ts";
+
+function matrixB64(bytes) {
+  return Buffer.from(bytes).toString("base64url");
+}
 
 test("network selection prefers URL, then storage, env, config, and local", () => {
   assert.equal(selectNetwork("testnet", "local", "local", "local"), "testnet");
@@ -43,4 +48,33 @@ test("network amounts remain exact bigint values", () => {
   assert.equal(formatUnits(12345n, 3), "12.345");
   assert.throws(() => parseUnits("1e3", 0));
   assert.throws(() => parseUnits("1.234", 2));
+});
+
+test("Matrix pending-device lookup reuses the same device ID until cross-signing appears", async () => {
+  const userId = "@alice:example.org";
+  const deviceId = "LOCUS-TEST";
+  const master = new Uint8Array(32).fill(1);
+  const selfSigning = new Uint8Array(32).fill(2);
+  const curve = new Uint8Array(32).fill(3);
+  const device = new Uint8Array(32).fill(4);
+  const signature = new Uint8Array(64).fill(5);
+  let verified = false;
+  const fetchImpl = async () => ({
+    ok: true,
+    async text() {
+      return JSON.stringify({
+        master_keys: { [userId]: { keys: { "ed25519:MASTER": matrixB64(master) } } },
+        self_signing_keys: { [userId]: { keys: { "ed25519:SELF": matrixB64(selfSigning) }, signatures: { [userId]: { "ed25519:MASTER": matrixB64(signature) } } } },
+        device_keys: { [userId]: { [deviceId]: { algorithms: ["m.olm.v1.curve25519-aes-sha2"], keys: { [`curve25519:${deviceId}`]: matrixB64(curve), [`ed25519:${deviceId}`]: matrixB64(device) }, signatures: verified ? { [userId]: { "ed25519:SELF": matrixB64(signature) } } : {} } } },
+      });
+    },
+  });
+  const pending = await queryMatrixKeys(userId, deviceId, "https://example.org", "token", fetchImpl);
+  assert.equal(pending.verification, "pending");
+  assert.equal(pending.deviceId, deviceId);
+  verified = true;
+  const ready = await queryMatrixKeys(userId, deviceId, "https://example.org", "token", fetchImpl);
+  assert.equal(ready.verification, "verified");
+  assert.equal(ready.deviceId, deviceId);
+  assert.deepEqual(ready.masterPublicKey, master);
 });

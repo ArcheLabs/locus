@@ -11,10 +11,11 @@
     "build": "bash scripts/build.sh",
     "test": "bash scripts/test-local.sh",
     "build:web": "npm --prefix web run build",
-    "dev": "npm --prefix web run dev"
+    "dev": "npm --prefix web run dev",
+    "test:matrix-resolver": "node --test apps/matrix-resolver/test.mjs"
   },
   "dependencies": {
-    "@jamscript/client": "0.1.0-rc.2",
+    "@jamscript/client": "0.1.0-rc.3",
     "@polkadot/util-crypto": "^14.0.1",
     "@scure/base": "^2.4.0"
   },

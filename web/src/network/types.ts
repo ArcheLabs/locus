@@ -15,6 +15,7 @@ export type RuntimeNetwork = {
   backendUrl: string | null;
   deploymentUrl: string | null;
   controlClaim?: ControlClaimDeploymentDescriptor;
+  matrixResolverUrl?: string;
 };
 
 /** Network-scoped Ownership Control service, when the network publishes one. */

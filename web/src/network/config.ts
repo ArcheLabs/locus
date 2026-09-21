@@ -34,6 +34,7 @@ function asRuntimeConfig(value: unknown): RuntimeNetworkConfig {
     if (typeof candidate.label !== "string") throw new Error(`${id} label is invalid`);
     if (candidate.backendUrl !== null && typeof candidate.backendUrl !== "string") throw new Error(`${id} backendUrl is invalid`);
     if (candidate.deploymentUrl !== null && typeof candidate.deploymentUrl !== "string") throw new Error(`${id} deploymentUrl is invalid`);
+    if (candidate.matrixResolverUrl !== undefined && candidate.matrixResolverUrl !== null && typeof candidate.matrixResolverUrl !== "string") throw new Error(`${id} matrixResolverUrl is invalid`);
     const controlClaim = candidate.controlClaim === undefined || candidate.controlClaim === null
       ? undefined
       : asControlClaimDeployment(candidate.controlClaim, id);
@@ -41,6 +42,7 @@ function asRuntimeConfig(value: unknown): RuntimeNetworkConfig {
       label: candidate.label,
       backendUrl: candidate.backendUrl as string | null,
       deploymentUrl: candidate.deploymentUrl as string | null,
+      ...(typeof candidate.matrixResolverUrl === "string" ? { matrixResolverUrl: candidate.matrixResolverUrl } : {}),
       ...(controlClaim ? { controlClaim } : {}),
     };
   }

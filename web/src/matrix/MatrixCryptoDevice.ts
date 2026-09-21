@@ -16,6 +16,7 @@ import {
 import { MatrixConnectorError } from "./MatrixErrors.js";
 
 type MatrixHttp = (path: string, body: string, method?: "POST" | "PUT") => Promise<string>;
+type MatrixFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 let wasmReady: Promise<void> | null = null;
 function ensureWasm(): Promise<void> {
@@ -59,17 +60,22 @@ export class MatrixCryptoDevice {
       await device.flush(http);
       return device;
     } catch (cause) {
+      if (cause instanceof MatrixConnectorError) throw cause;
       throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", "Unable to initialize or upload Matrix device keys", { cause });
     }
   }
 
   private async flush(http: MatrixHttp): Promise<void> {
-    for (const request of await this.machine.outgoingRequests()) {
-      if (!isKnownRequest(request)) throw new MatrixConnectorError("UNSUPPORTED_MATRIX_CRYPTO_REQUEST", `Unsupported Matrix crypto request ${String(request)}`);
-      const endpoint = requestEndpoint(request);
-      const response = await http(endpoint.path, request.body, endpoint.method);
-      if (!request.id) throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", "Matrix crypto request did not provide a request ID");
-      await this.machine.markRequestAsSent(request.id, request.type, response);
+    for (;;) {
+      const requests = await this.machine.outgoingRequests();
+      if (requests.length === 0) return;
+      for (const request of requests) {
+        if (!isKnownRequest(request)) throw new MatrixConnectorError("UNSUPPORTED_MATRIX_CRYPTO_REQUEST", `Unsupported Matrix crypto request ${String(request)}`);
+        const endpoint = requestEndpoint(request);
+        const response = await http(endpoint.path, request.body, endpoint.method);
+        if (!request.id) throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", "Matrix crypto request did not provide a request ID");
+        await this.machine.markRequestAsSent(request.id, request.type, response);
+      }
     }
   }
 
@@ -81,7 +87,7 @@ export class MatrixCryptoDevice {
    * Keep the standalone OlmMachine fed from Matrix `/sync` without starting
    * matrix-js-sdk's private Rust crypto integration on the same device.
    */
-  startSync(homeserver: string, accessToken: string, http: MatrixHttp): void {
+  startSync(homeserver: string, fetchImpl: MatrixFetch, http: MatrixHttp): void {
     if (this.syncAbort) return;
     const abort = new AbortController();
     this.syncAbort = abort;
@@ -92,10 +98,7 @@ export class MatrixCryptoDevice {
         if (since) query.set("since", since);
         let response: Response;
         try {
-          response = await fetch(`${homeserver.replace(/\/$/, "")}/_matrix/client/v3/sync?${query.toString()}`, {
-            headers: { authorization: `Bearer ${accessToken}` },
-            signal: abort.signal,
-          });
+          response = await fetchImpl(`${homeserver.replace(/\/$/, "")}/_matrix/client/v3/sync?${query.toString()}`, { signal: abort.signal });
           const payload = await response.json() as {
             next_batch?: string;
             to_device?: { events?: unknown[] };
