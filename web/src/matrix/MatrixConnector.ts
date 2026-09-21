@@ -1,7 +1,6 @@
 import { createClient, type MatrixClient } from "matrix-js-sdk";
-import { MatrixDeviceController, type MatrixControlClaimBootstrapper } from "@jamscript/client";
-import { matrixOwnership } from "@archelabs/locus";
-import type { ControlClaimDeploymentDescriptor } from "../network/types.js";
+import { MatrixDeviceController } from "@jamscript/client";
+import { matrixOwnership, type LocusClient } from "@archelabs/locus";
 import type { LocusWebSession } from "../session/types.js";
 import { MatrixConnectorError } from "./MatrixErrors.js";
 import { MatrixCryptoDevice } from "./MatrixCryptoDevice.js";
@@ -21,23 +20,10 @@ export type MatrixConnectionState =
   | "KEYS_UPLOADED"
   | "AWAITING_VERIFICATION"
   | "VERIFIED"
-  | "CONTROL_CLAIM"
   | "READY";
 
-type MatrixControlClaimOptions = {
-  client: unknown;
-  deployment: ControlClaimDeploymentDescriptor;
-};
-
-type ControlClaimClient = {
-  bootstrapMatrixControlClaim?: (input: {
-    deployment: ControlClaimDeploymentDescriptor;
-    subject: ReturnType<typeof matrixOwnership>;
-    controllerSigner: unknown;
-    proof: Uint8Array;
-  }) => Promise<{ transactionId: string; actionHash: string }>;
-  hasBootstrapCompleted?: (deployment: ControlClaimDeploymentDescriptor, subject: ReturnType<typeof matrixOwnership>) => Promise<boolean>;
-  isControllerActive?: (deployment: ControlClaimDeploymentDescriptor, subject: ReturnType<typeof matrixOwnership>, controller: ReturnType<typeof matrixOwnership>) => Promise<boolean>;
+export type MatrixConnectionOptions = {
+  locus: LocusClient | null;
 };
 
 const MATRIX_SESSION_KEY = "locus.matrix.session.v1";
@@ -49,12 +35,12 @@ type MatrixTokenResponse = {
 };
 
 function stableDeviceId(homeserver: string, userId: string): string {
-  const key = `locus.matrix.device.v1.${homeserver}|${userId}`;
+  const key = \`locus.matrix.device.v1.\${homeserver}|\${userId}\`;
   const existing = window.sessionStorage.getItem(key);
   if (existing && /^[A-Z0-9_-]{1,255}$/.test(existing)) return existing;
   const bytes = new Uint8Array(12);
   crypto.getRandomValues(bytes);
-  const created = `LOCUS-${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+  const created = \`LOCUS-\${Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("").toUpperCase()}\`;
   window.sessionStorage.setItem(key, created);
   return created;
 }
@@ -62,7 +48,7 @@ function stableDeviceId(homeserver: string, userId: string): string {
 function homeserverFromUserId(userId: string): string {
   const separator = userId.indexOf(":");
   if (separator < 2 || separator === userId.length - 1) throw new MatrixConnectorError("INVALID_LOGIN", "Enter a valid Matrix ID such as @alice:example.org");
-  return `https://${userId.slice(separator + 1)}`;
+  return \`https://\${userId.slice(separator + 1)}\`;
 }
 
 export async function discoverHomeserver(userId: string, configured?: string): Promise<string> {
@@ -70,7 +56,7 @@ export async function discoverHomeserver(userId: string, configured?: string): P
   if (configured) return fallback;
   const domain = homeserverFromUserId(userId).replace(/^https:\/\//, "");
   try {
-    const response = await fetch(`https://${domain}/.well-known/matrix/client`);
+    const response = await fetch(\`https://\${domain}/.well-known/matrix/client\`);
     if (!response.ok) return fallback;
     const json = await response.json() as { "m.homeserver"?: { base_url?: string } };
     return json["m.homeserver"]?.base_url?.replace(/\/$/, "") || fallback;
@@ -83,7 +69,7 @@ async function refreshMatrixAccessToken(stored: MatrixStoredSession): Promise<vo
   if (!stored.refreshToken) throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "The Matrix session has no refresh token");
   let response: Response;
   try {
-    response = await fetch(`${stored.homeserver.replace(/\/$/, "")}/_matrix/client/v3/refresh`, {
+    response = await fetch(\`\${stored.homeserver.replace(/\/$/, "")}/_matrix/client/v3/refresh\`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ refresh_token: stored.refreshToken }),
@@ -96,7 +82,7 @@ async function refreshMatrixAccessToken(stored: MatrixStoredSession): Promise<vo
     throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "Matrix token refresh returned invalid JSON", { cause });
   }
   if (!response.ok || typeof payload.access_token !== "string") {
-    throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", `Matrix token refresh failed with HTTP ${response.status}`);
+    throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", \`Matrix token refresh failed with HTTP \${response.status}\`);
   }
   stored.accessToken = payload.access_token;
   if (typeof payload.refresh_token === "string") stored.refreshToken = payload.refresh_token;
@@ -126,7 +112,7 @@ function classifyLoginFailure(cause: unknown): MatrixConnectorError {
 async function authenticatedFetch(stored: MatrixStoredSession, input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
   const request = async (): Promise<Response> => {
     const headers = new Headers(init.headers);
-    headers.set("authorization", `Bearer ${stored.accessToken}`);
+    headers.set("authorization", \`Bearer \${stored.accessToken}\`);
     return fetch(input, { ...init, headers });
   };
   await ensureFreshMatrixToken(stored);
@@ -140,75 +126,43 @@ async function authenticatedFetch(stored: MatrixStoredSession, input: RequestInf
 
 function authenticatedHttp(homeserver: string, stored: MatrixStoredSession) {
   return async (path: string, body: string, method: "POST" | "PUT" = "POST"): Promise<string> => {
-    const response = await authenticatedFetch(stored, `${homeserver.replace(/\/$/, "")}${path}`, {
+    const response = await authenticatedFetch(stored, \`\${homeserver.replace(/\/$/, "")}\${path}\`, {
       method,
       headers: { "content-type": "application/json" },
       body,
     });
     const text = await response.text();
-    if (!response.ok) throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", `Matrix request ${path} failed with HTTP ${response.status}: ${text.slice(0, 240)}`);
+    if (!response.ok) throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", \`Matrix request \${path} failed with HTTP \${response.status}: \${text.slice(0, 240)}\`);
     return text || "{}";
   };
 }
 
-function createControlClaimBootstrapper(
-  options: MatrixControlClaimOptions | undefined,
-  controller: MatrixDeviceController,
-  crypto: MatrixCryptoDevice,
-): MatrixControlClaimBootstrapper | null {
-  const client = options?.client as ControlClaimClient & {
-    bootstrapMatrixControlClaim?: (input: {
-      deployment: ControlClaimDeploymentDescriptor;
-      subject: ReturnType<typeof matrixOwnership>;
-      controllerSigner: {
-        getController(): Promise<ReturnType<typeof matrixOwnership>>;
-        signJamScriptAction(request: { message: Uint8Array }): Promise<Uint8Array>;
-        signBootstrapMessage(message: Uint8Array): Promise<Uint8Array>;
-      };
-      proof: Uint8Array;
-    }) => Promise<{ transactionId: string; actionHash: string }>;
-    waitForAction?: (transactionId: string, actionHash: string, options: { intervalMs: number; timeoutMs: number }) => Promise<{ actionReceipt?: { status?: string }; errorCode?: number | null }>;
-  } | undefined;
-  if (!options || typeof client?.bootstrapMatrixControlClaim !== "function") return null;
-  const signer = {
-    getController: () => controller.getController(),
-    signJamScriptAction: (request: { message: Uint8Array }) => controller.signJamScriptAction(request as Parameters<MatrixDeviceController["signJamScriptAction"]>[0]),
-    signBootstrapMessage: (message: Uint8Array) => crypto.sign(message),
-  };
-  return {
-    bootstrap: async (subject, device, proof) => {
-      const submitted = await client.bootstrapMatrixControlClaim!({
-        deployment: options.deployment,
-        subject,
-        controllerSigner: signer,
-        proof,
-      });
-      if (typeof client.waitForAction !== "function") return;
-      const result = await client.waitForAction(submitted.transactionId, submitted.actionHash, { intervalMs: 500, timeoutMs: 180_000 });
-      if (result.actionReceipt?.status !== "applied") throw new Error(`ControlClaim bootstrap failed${result.errorCode == null ? "" : ` (error ${result.errorCode})`}`);
-      void device;
-    },
-  };
-}
-
-async function ensureMatrixControlClaim(
-  options: MatrixControlClaimOptions | undefined,
-  bootstrapper: MatrixControlClaimBootstrapper | null,
+async function ensureMatrixController(
+  locus: LocusClient | null,
   subject: ReturnType<typeof matrixOwnership>,
-  controller: ReturnType<typeof matrixOwnership>,
+  controller: MatrixDeviceController,
   proof: Uint8Array | null,
 ): Promise<void> {
-  if (!bootstrapper || !options) throw new MatrixConnectorError("CONTROL_CLAIM_FAILED", "The selected network has no Ownership Control service");
+  if (!locus) throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The selected network is not ready for Matrix identity authorization");
   if (!proof) throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Verify this Matrix device before authorizing it for Locus");
-  const client = options.client as ControlClaimClient;
-  if (client.hasBootstrapCompleted && client.isControllerActive) {
-    const initialized = await client.hasBootstrapCompleted(options.deployment, subject);
-    if (initialized) {
-      if (!await client.isControllerActive(options.deployment, subject, controller)) throw new MatrixConnectorError("CONTROL_CLAIM_FAILED", "This Matrix device is not an active controller");
-      return;
+  const scoped = locus.withSession({ signer: controller, subject });
+  const initialized = await scoped.hasMatrixBootstrapCompleted(subject);
+  if (initialized) {
+    if (!await scoped.isControllerActive(subject, await controller.getController())) {
+      throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "This Matrix device is not an active controller");
     }
+    return;
   }
-  await bootstrapper.bootstrap(subject, controller, proof);
+  try {
+    const submitted = await scoped.bootstrapMatrixController(proof);
+    const result = await scoped.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+    if (result.actionReceipt.status !== "applied") {
+      throw new Error(\`Matrix controller bootstrap failed\${result.errorCode == null ? "" : \` (error \${result.errorCode})\`}\`);
+    }
+  } catch (cause) {
+    if (cause instanceof MatrixConnectorError) throw cause;
+    throw new MatrixConnectorError("CONTROLLER_BOOTSTRAP_FAILED", "Matrix controller bootstrap was rejected", { cause });
+  }
 }
 
 export type MatrixConnected = {
@@ -216,7 +170,6 @@ export type MatrixConnected = {
   client: MatrixClient;
   crypto: MatrixCryptoDevice;
   keys: Awaited<ReturnType<typeof queryMatrixKeys>>;
-  bootstrapper: MatrixControlClaimBootstrapper | null;
   stored: MatrixStoredSession;
   state: MatrixConnectionState;
   checkVerification: () => Promise<MatrixConnected>;
@@ -226,12 +179,9 @@ function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function connectedState(
-  keys: Awaited<ReturnType<typeof queryMatrixKeys>>,
-  bootstrapper: MatrixControlClaimBootstrapper | null,
-): MatrixConnectionState {
+function connectedState(keys: Awaited<ReturnType<typeof queryMatrixKeys>>, locus: LocusClient | null): MatrixConnectionState {
   if (keys.verification === "pending") return "AWAITING_VERIFICATION";
-  return bootstrapper ? "READY" : "VERIFIED";
+  return locus ? "READY" : "VERIFIED";
 }
 
 async function makeConnected(
@@ -240,20 +190,19 @@ async function makeConnected(
   crypto: MatrixCryptoDevice,
   keys: Awaited<ReturnType<typeof queryMatrixKeys>>,
   controller: MatrixDeviceController,
-  bootstrapper: MatrixControlClaimBootstrapper | null,
-  matrixControlClaim: MatrixControlClaimOptions | undefined,
+  locus: LocusClient | null,
 ): Promise<MatrixConnected> {
   const owner = matrixOwnership(keys.masterPublicKey);
   const currentController = await controller.getController();
-  const state = connectedState(keys, bootstrapper);
+  const state = connectedState(keys, locus);
   const session: LocusWebSession = {
     kind: "matrix",
     owner,
     controller: currentController,
-    ownershipSession: { signer: controller, actAs: owner },
-    label: `Matrix ${stored.userId}`,
+    ownershipSession: { signer: controller, subject: owner },
+    label: \`Matrix \${stored.userId}\`,
     address: stored.userId,
-    connectionId: `${stored.homeserver}|${stored.userId}|${stored.deviceId}`,
+    connectionId: \`\${stored.homeserver}|\${stored.userId}|\${stored.deviceId}\`,
     matrix: { userId: stored.userId, deviceId: stored.deviceId, homeserver: stored.homeserver },
     cleanup: () => { crypto.dispose(); client.stopClient(); clearStoredMatrixSession(); },
   };
@@ -262,7 +211,6 @@ async function makeConnected(
     client,
     crypto,
     keys,
-    bootstrapper,
     stored,
     state,
     checkVerification: async () => {
@@ -277,20 +225,20 @@ async function makeConnected(
         throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "The Matrix device key changed; start a new login");
       }
       if (refreshed.verification === "verified") {
-        if (!bootstrapper || !matrixControlClaim) {
-          throw new MatrixConnectorError("CONTROL_CLAIM_FAILED", "The selected network has no Ownership Control service");
-        }
-        await ensureMatrixControlClaim(matrixControlClaim, bootstrapper, owner, currentController, refreshed.encodedProof);
+        await ensureMatrixController(locus, owner, controller, refreshed.encodedProof);
       }
-      const next = makeConnected(stored, client, crypto, refreshed, controller, bootstrapper, matrixControlClaim);
-      window.sessionStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
-      return next;
+      return makeConnected(stored, client, crypto, refreshed, controller, locus);
     },
   };
   return connected;
 }
 
-export async function connectMatrixSession(userId: string, password: string, configuredHomeserver?: string, matrixControlClaim?: MatrixControlClaimOptions): Promise<MatrixConnected> {
+export async function connectMatrixSession(
+  userId: string,
+  password: string,
+  configuredHomeserver?: string,
+  options: MatrixConnectionOptions = { locus: null },
+): Promise<MatrixConnected> {
   const homeserver = await discoverHomeserver(userId, configuredHomeserver);
   let loginClient: MatrixClient;
   try {
@@ -330,13 +278,15 @@ export async function connectMatrixSession(userId: string, password: string, con
   const keys = await queryMatrixKeys(stored.userId, stored.deviceId, homeserver, stored.accessToken, authFetch);
   const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto.sign(message) });
   const owner = matrixOwnership(keys.masterPublicKey);
-  const bootstrapper = createControlClaimBootstrapper(matrixControlClaim, controller, crypto);
-  if (bootstrapper && keys.verification === "verified") await ensureMatrixControlClaim(matrixControlClaim, bootstrapper, owner, await controller.getController(), keys.encodedProof);
+  if (keys.verification === "verified") await ensureMatrixController(options.locus, owner, controller, keys.encodedProof);
   window.sessionStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
-  return makeConnected(stored, client, crypto, keys, controller, bootstrapper, matrixControlClaim);
+  return makeConnected(stored, client, crypto, keys, controller, options.locus);
 }
 
-export async function restoreMatrixSession(stored: MatrixStoredSession, matrixControlClaim?: MatrixControlClaimOptions): Promise<MatrixConnected> {
+export async function restoreMatrixSession(
+  stored: MatrixStoredSession,
+  options: MatrixConnectionOptions = { locus: null },
+): Promise<MatrixConnected> {
   await ensureFreshMatrixToken(stored);
   const client = createClient({ baseUrl: stored.homeserver, accessToken: stored.accessToken, userId: stored.userId, deviceId: stored.deviceId });
   const cryptoHttp = authenticatedHttp(stored.homeserver, stored);
@@ -346,9 +296,8 @@ export async function restoreMatrixSession(stored: MatrixStoredSession, matrixCo
   const keys = await queryMatrixKeys(stored.userId, stored.deviceId, stored.homeserver, stored.accessToken, authFetch);
   const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto.sign(message) });
   const owner = matrixOwnership(keys.masterPublicKey);
-  const bootstrapper = createControlClaimBootstrapper(matrixControlClaim, controller, crypto);
-  if (bootstrapper && keys.verification === "verified") await ensureMatrixControlClaim(matrixControlClaim, bootstrapper, owner, await controller.getController(), keys.encodedProof);
-  return makeConnected(stored, client, crypto, keys, controller, bootstrapper, matrixControlClaim);
+  if (keys.verification === "verified") await ensureMatrixController(options.locus, owner, controller, keys.encodedProof);
+  return makeConnected(stored, client, crypto, keys, controller, options.locus);
 }
 
 export function readStoredMatrixSession(): MatrixStoredSession | null {
