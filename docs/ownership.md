@@ -1,26 +1,36 @@
 # JamScript Ownership integration
 
-Locus delegates ownership authentication to JamScript:
+Locus keeps stable asset identity and controller authorization in the same
+managed Service state root:
 
-```text
-SignedActionV2
-  ↓
-JamScript Ownership runtime
-  ↓
-ctx.owner / ctx.controller
-  ↓
-Locus ledger
-```
+    SignedActionV2
+      ↓
+    JamScript verifies the cryptographic controller D
+      ↓
+    ctx.controller = D
+      ↓
+    Locus Identity layer
+      ↓
+    requireController(subject M, D)
+      ↓
+    Locus Asset layer
 
-`ctx.owner` is the logical subject that owns balances and assets. `ctx.controller`
-is the controller that supplied the authorization proof. ControlClaim
-delegation and controller replacement are platform concerns; Locus only sees
-the resulting effective owner.
+subject is the stable Ownership that owns assets and balances. controller is the
+Ownership that signed the action. Locus permits a direct owner
+(subject == controller) without registration. Delegated control is represented
+by locus.controller-grant.v1; a revoked pair is final in v1.
 
-Matrix resolves a user ID to its cross-signing master key and represents that
-key as `Ownership(ED25519_KEY, M)`. A device controller can act for that
-subject through a JamScript ControlClaim. EVM addresses use
-`Ownership(SECP256K1_KECCAK20, H160)`, and Polkadot SS58 values decode to
-`Ownership(MULTICRYPTO_ACCOUNT32, AccountId32)`.
+Matrix uses the cross-signing master key as the subject
+Ownership(ED25519_KEY, M) and a verified device key as controller D. The M→S→D
+evidence is checked by JamScript's deterministic
+verifyMatrixCrossSigning primitive during bootstrapMatrixController. The outer
+SignedActionV2 proves possession of D, so the proof payload does not duplicate
+a controller signature.
 
-No Locus code performs signature verification or implements SignedActionV2.
+EVM addresses use Ownership(SECP256K1_KECCAK20, H160), Polkadot SS58 values
+decode to Ownership(MULTICRYPTO_ACCOUNT32, AccountId32), and Solana public
+keys use Ownership(ED25519_KEY, AccountId32).
+
+No Locus code implements SignedActionV2 or network-wide controller state.
+Matrix resolver lookup remains an authenticated MXID → master-key service and
+is independent of controller authorization.
