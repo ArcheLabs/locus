@@ -8,10 +8,12 @@ create application identities, wallet accounts, or bridge destinations.
 Asset → Ownership
 ```
 
-The service uses JamScript Ownership authentication and receives the effective
-owner from `ctx.owner`. Controllers and ControlClaims are verified by the
-JamScript platform. Locus does not implement signature verification, EIP-712,
-Matrix cross-signing, or external wallet protocols.
+JamScript authenticates the cryptographic controller and exposes the pure
+Matrix M→S→D proof verifier. Locus receives the authenticated signer as
+`ctx.controller`, keeps controller grants and Matrix bootstrap tombstones in
+its own managed state, and applies the grant to a stable `subject`. Assets,
+balances, allowances, and identity authorization therefore share one Locus
+state root. Locus does not use a network-scoped Ownership Control service.
 
 ## Consumer-mode development
 
@@ -79,13 +81,15 @@ page, supports searchable network-asset selection, can create an asset with
 the connected Ownership as issuer, and can display a canonical `locus:` Receive
 identifier. Demo Mode remains mock-only and never submits these actions.
 
-Matrix uses the cross-signing master key as the stable owner and the current
-device Ed25519 key as the controller. The web adapter uses the public
+Matrix uses the cross-signing master key as the stable Locus subject and the
+current device Ed25519 key as the controller. The web adapter uses the public
 `matrix-js-sdk` login/API surface and a single `OlmMachine` crypto engine; it
 does not call `initRustCrypto()`, access private SDK fields, persist passwords,
 or hash Matrix IDs into Ownership. `/keys/query` evidence is encoded through
 the JamScript Matrix proof codec and a recipient resolves to the master key,
-never to a device key.
+never to a device key. After Element verification, the Locus client submits
+`bootstrapMatrixController(proof)` once; later devices must be added by an
+active controller through `addController`.
 
 The browser stores ordinary wallet session identifiers in local storage and
 Matrix access/refresh credentials in session storage only. EVM account changes
@@ -95,15 +99,13 @@ deterministic mock signer tests run with `npm test`; real browser wallet smoke
 tests still require the corresponding wallet extension or Wallet Standard
 provider to be installed.
 
-The current JamScript source now contains the Matrix proof codec and TS/Rust
-parity vector. The web adapter delegates to that optional public client
-surface and reports `JAMSCRIPT_CLIENT_MATRIX_CODEC_UNAVAILABLE` if an older
-published package is used; the next client prerelease must be published to
-activate Matrix proof generation in a clean consumer checkout. In addition,
-the current JamScript source has no executable chain ControlClaim bootstrap
-RPC/transaction ingress: the web adapter therefore fails explicitly with
-`CONTROL_CLAIM_FAILED` instead of presenting an unregistered `actAs` session as
-authorized. This is a platform release blocker, not a Locus Service change.
+The current JamScript source contains the Matrix proof codec, TS/Rust parity
+vectors, and the deterministic `verifyMatrixCrossSigning` primitive. The
+next `@jamscript/client@0.1.0-rc.3` prerelease removes platform ControlClaim
+ingress APIs while preserving the proof codec and wallet signers. Locus uses
+its own `LocusClient` identity methods and injects `subject` into business
+payloads; it does not submit `actAs`. A clean consumer checkout must use the
+packed client prerelease before the human npm publish step.
 
 Stop the Vite preview with `Ctrl-C`. If it was started in the Docker preview
 container used by this checkout, stop it with:
@@ -114,8 +116,10 @@ docker rm -f locus-v02-web-preview
 
 ## Protocol surface
 
-The service exposes `createAsset`, `transfer`, `approve`, `transferFrom`,
-`mint`, and `burn`. Recipient Ownership values do not need to be registered.
+The service exposes `bootstrapMatrixController`, `addController`,
+`revokeController`, `createAsset`, `transfer`, `approve`, `transferFrom`,
+`mint`, and `burn`. Controller authorization is local to Locus, and recipient
+Ownership values do not need to be registered.
 Balances use a canonical `ownershipKey(owner)` state key, while the public SDK
 continues to accept and return `Ownership` values. All quantities remain
 `bigint`/JamScript `u128` values.
