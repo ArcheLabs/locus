@@ -2,9 +2,9 @@ import { useState } from "react";
 import { Modal } from "../components/Modal.js";
 import type { LocusWebSession } from "../session/types.js";
 import { connectMatrixSession, type MatrixConnected } from "./MatrixConnector.js";
-import type { ControlClaimDeploymentDescriptor } from "../network/types.js";
+import type { LocusClient } from "@archelabs/locus";
 
-export function MatrixLoginDialog({ open, onClose, onConnected, matrixControlClaim }: { open: boolean; onClose: () => void; onConnected: (session: LocusWebSession) => void; matrixControlClaim?: { client: unknown; deployment: ControlClaimDeploymentDescriptor } }) {
+export function MatrixLoginDialog({ open, onClose, onConnected, locus }: { open: boolean; onClose: () => void; onConnected: (session: LocusWebSession) => void; locus: LocusClient | null }) {
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [homeserver, setHomeserver] = useState("");
@@ -19,13 +19,13 @@ export function MatrixLoginDialog({ open, onClose, onConnected, matrixControlCla
     try {
       const connected = pendingConnection
         ? await pendingConnection.checkVerification()
-        : await connectMatrixSession(userId.trim(), password, advanced ? homeserver.trim() || undefined : undefined, matrixControlClaim);
+        : await connectMatrixSession(userId.trim(), password, advanced ? homeserver.trim() || undefined : undefined, { locus });
       if (connected.state === "AWAITING_VERIFICATION") {
         setPendingConnection(connected);
         setError("DEVICE_AWAITING_VERIFICATION: verify the Locus device in Element, then check again.");
         return;
       }
-      if (connected.state !== "READY") throw new Error("CONTROL_CLAIM_FAILED: the Matrix device is not authorized for this network");
+      if (connected.state !== "READY") throw new Error("CONTROLLER_NOT_AUTHORIZED: the Matrix device is not authorized for this network");
       setPendingConnection(null);
       onConnected(connected.session);
       setPassword("");
@@ -61,7 +61,7 @@ export function MatrixLoginDialog({ open, onClose, onConnected, matrixControlCla
         {advanced && <label>Homeserver URL<input value={homeserver} placeholder="https://matrix.example.org" onChange={(event) => setHomeserver(event.target.value)} /></label>}
       </>}
       {error && <div className="transaction-error">{error}</div>}
-      <p className="modal-note">Your password is used only for login and is never stored. Device verification and ControlClaim authorization are explicit steps.</p>
+      <p className="modal-note">Your password is used only for login and is never stored. Device verification and local controller authorization are explicit steps.</p>
     </Modal>
   );
 }
