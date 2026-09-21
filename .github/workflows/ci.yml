@@ -13,6 +13,7 @@ on:
 
 env:
   JAMSCRIPT_VERSION: v0.1.0-rc.7
+# Pinned source revision is validated by JamScript CI before consumer checks.
   JAMSCRIPT_CLIENT_REF: 4855697974c4ac04ffc7462e22860ac42083990
   NODE_VERSION: 24.15.0
 
