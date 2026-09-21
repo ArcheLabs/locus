@@ -84,7 +84,8 @@ export function App() {
     try {
       const matrixStored = readStoredMatrixSession();
       if (matrixStored) {
-        restoreMatrixSession(matrixStored).then((connected) => {
+        const matrixControlClaim = network.network?.controlClaim && network.protocolClient ? { client: network.protocolClient, deployment: network.network.controlClaim } : undefined;
+        restoreMatrixSession(matrixStored, matrixControlClaim).then((connected) => {
           if (connected.bootstrapper) setSession(connected.session);
           else connected.crypto.dispose();
         }).catch(() => undefined);
@@ -100,7 +101,7 @@ export function App() {
     } catch {
       window.localStorage.removeItem("locus.session.v1");
     }
-  }, [session, setSession]);
+  }, [network.network, network.protocolClient, session, setSession]);
 
   useEffect(() => {
     if (!session) {
@@ -282,7 +283,7 @@ export function App() {
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>
       {toast && <div className="toast" role="status">{toast}</div>}
-      <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} onConnected={setSession} />
+      <ConnectDialog open={connectOpen} onClose={() => setConnectOpen(false)} onConnected={setSession} matrixControlClaim={network.network?.controlClaim && network.protocolClient ? { client: network.protocolClient, deployment: network.network.controlClaim } : undefined} />
       {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={resolvedRecipient} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
       <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
       <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} onClose={() => setCreateAssetOpen(false)} onCreated={() => setRefreshToken((value) => value + 1)} />

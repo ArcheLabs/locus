@@ -2,8 +2,9 @@ import { useState } from "react";
 import { Modal } from "../components/Modal.js";
 import type { LocusWebSession } from "../session/types.js";
 import { connectMatrixSession } from "./MatrixConnector.js";
+import type { ControlClaimDeploymentDescriptor } from "../network/types.js";
 
-export function MatrixLoginDialog({ open, onClose, onConnected }: { open: boolean; onClose: () => void; onConnected: (session: LocusWebSession) => void }) {
+export function MatrixLoginDialog({ open, onClose, onConnected, matrixControlClaim }: { open: boolean; onClose: () => void; onConnected: (session: LocusWebSession) => void; matrixControlClaim?: { client: unknown; deployment: ControlClaimDeploymentDescriptor } }) {
   const [userId, setUserId] = useState("");
   const [password, setPassword] = useState("");
   const [homeserver, setHomeserver] = useState("");
@@ -15,7 +16,7 @@ export function MatrixLoginDialog({ open, onClose, onConnected }: { open: boolea
     setWorking(true);
     setError("");
     try {
-      const connected = await connectMatrixSession(userId.trim(), password, advanced ? homeserver.trim() || undefined : undefined);
+      const connected = await connectMatrixSession(userId.trim(), password, advanced ? homeserver.trim() || undefined : undefined, matrixControlClaim);
       // The current JamScript release exposes the proof codec and SignedActionV2
       // actAs field, but does not yet expose a chain ControlClaim bootstrap ingress.
       // Do not present a local session as authorized when the on-chain claim cannot

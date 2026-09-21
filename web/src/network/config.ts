@@ -1,4 +1,4 @@
-import { NetworkBootstrapError, type LocusNetworkId, type RuntimeNetworkConfig, type DeploymentDescriptor, type RuntimeNetwork } from "./types.js";
+import { NetworkBootstrapError, type LocusNetworkId, type RuntimeNetworkConfig, type DeploymentDescriptor, type RuntimeNetwork, type ControlClaimDeploymentDescriptor } from "./types.js";
 export { selectNetwork } from "./selection.js";
 
 export const NETWORK_STORAGE_KEY = "locus.network.v1";
@@ -34,13 +34,27 @@ function asRuntimeConfig(value: unknown): RuntimeNetworkConfig {
     if (typeof candidate.label !== "string") throw new Error(`${id} label is invalid`);
     if (candidate.backendUrl !== null && typeof candidate.backendUrl !== "string") throw new Error(`${id} backendUrl is invalid`);
     if (candidate.deploymentUrl !== null && typeof candidate.deploymentUrl !== "string") throw new Error(`${id} deploymentUrl is invalid`);
+    const controlClaim = candidate.controlClaim === undefined || candidate.controlClaim === null
+      ? undefined
+      : asControlClaimDeployment(candidate.controlClaim, id);
     result[id] = {
       label: candidate.label,
       backendUrl: candidate.backendUrl as string | null,
       deploymentUrl: candidate.deploymentUrl as string | null,
+      ...(controlClaim ? { controlClaim } : {}),
     };
   }
   return { version: 1, defaultNetwork: record.defaultNetwork, networks: result };
+}
+
+function asControlClaimDeployment(value: unknown, networkId: LocusNetworkId): ControlClaimDeploymentDescriptor {
+  if (!value || typeof value !== "object") throw new Error(`${networkId} controlClaim is invalid`);
+  const record = value as Record<string, unknown>;
+  for (const field of ["genesisHash", "networkDomain", "serviceKey", "codeHash"]) {
+    if (typeof record[field] !== "string") throw new Error(`${networkId} controlClaim ${field} is invalid`);
+  }
+  if (typeof record.serviceId !== "number" || !Number.isInteger(record.serviceId) || record.serviceId < 0) throw new Error(`${networkId} controlClaim serviceId is invalid`);
+  return record as unknown as ControlClaimDeploymentDescriptor;
 }
 
 export async function loadRuntimeNetworkConfig(fetchImpl: typeof fetch = fetch): Promise<RuntimeNetworkConfig> {
