@@ -28,8 +28,8 @@ export interface LocusQueryResult {
 
 export interface OwnershipSession {
   signer: OwnershipSigner;
-  /** Effective subject Ownership for controller-delegated actions. */
-  actAs?: Ownership;
+  /** Stable Locus identity/asset subject. */
+  subject: Ownership;
 }
 
 /** The subset implemented by the published @jamscript/client package. */
