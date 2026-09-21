@@ -56,6 +56,29 @@ jobs:
           jams --version
           jams toolchain verify
 
+      - name: Set up Rust for the pinned JamScript CLI
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: nightly-2026-05-02
+
+      - name: Install JamScript CLI build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential clang libclang-dev llvm-dev pkg-config
+
+      - name: Build pinned JamScript source CLI
+        working-directory: ${{ runner.temp }}/jamscript
+        env:
+          JAMSCRIPT_RELEASE_VERSION: source-${{ env.JAMSCRIPT_CLIENT_REF }}
+        run: |
+          cargo build --release --locked --bin jams
+          test -x target/release/jams
+          echo "JAMSCRIPT_SOURCE_CLI=$RUNNER_TEMP/jamscript/target/release/jams" >> "$GITHUB_ENV"
+
+      - name: Verify pinned JamScript source CLI
+        run: |
+          "$JAMSCRIPT_SOURCE_CLI" --version
+          "$JAMSCRIPT_SOURCE_CLI" check --help >/dev/null
       - name: SDK and ownership model tests
         run: npm test
 
