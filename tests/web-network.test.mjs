@@ -50,6 +50,18 @@ test("network amounts remain exact bigint values", () => {
   assert.throws(() => parseUnits("1.234", 2));
 });
 
+test("Matrix web sessions keep owner/controller/subject distinct and omit actAs", async () => {
+  const source = await fs.readFile(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
+  assert.match(source, /owner,\n    controller:/);
+  assert.match(source, /ownershipSession: \{ signer: controller, subject: owner \}/);
+  assert.doesNotMatch(source, /actAs/);
+});
+
+test("network descriptors do not publish ControlClaim deployment metadata", async () => {
+  const config = await fs.readFile(new URL("../web/public/locus-networks.json", import.meta.url), "utf8");
+  assert.doesNotMatch(config, /controlClaim|ownershipControlServiceId|codeHash/);
+});
+
 test("Matrix pending-device lookup reuses the same device ID until cross-signing appears", async () => {
   const userId = "@alice:example.org";
   const deviceId = "LOCUS-TEST";
