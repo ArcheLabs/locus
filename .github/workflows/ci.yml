@@ -88,10 +88,10 @@ jobs:
           npm run build:web
 
       - name: Consumer service check and ABI validation
-        run: jams check .
+        run: "$JAMSCRIPT_SOURCE_CLI" check .
 
       - name: Consumer PVM artifact build
-        run: jams build . --output ./dist
+        run: "$JAMSCRIPT_SOURCE_CLI" build . --output ./dist
 
   consumer-registry:
     name: Consumer CI (published registry)
