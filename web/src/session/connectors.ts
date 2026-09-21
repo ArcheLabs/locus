@@ -1,4 +1,4 @@
-import { web3Accounts, web3Enable, web3FromAddress } from "@polkadot/extension-dapp";
+import { web3Accounts, web3AccountsSubscribe, web3Enable, web3FromAddress } from "@polkadot/extension-dapp";
 import { getWallets } from "@wallet-standard/app";
 import {
   EvmOwnershipSigner,
@@ -211,13 +211,39 @@ export async function connectBrowserSession(kind: SessionKind, selectedId: strin
 
 /** Keep a connected browser session from signing with an account that the wallet has replaced. */
 export function watchBrowserSession(session: LocusWebSession, onAccountChanged: (address: string | null) => void): () => void {
-  if (session.kind !== "evm") return () => undefined;
-  const provider = browserWindow().ethereum as EventProvider | undefined;
-  if (!provider?.on) return () => undefined;
-  const listener = (...args: unknown[]) => {
-    const accounts = Array.isArray(args[0]) ? args[0].filter((value): value is string => typeof value === "string") : [];
-    onAccountChanged(accounts[0] ?? null);
-  };
-  provider.on("accountsChanged", listener);
-  return () => provider.removeListener?.("accountsChanged", listener);
+  if (session.kind === "evm") {
+    const provider = browserWindow().ethereum as EventProvider | undefined;
+    if (!provider?.on) return () => undefined;
+    const listener = (...args: unknown[]) => {
+      const accounts = Array.isArray(args[0]) ? args[0].filter((value): value is string => typeof value === "string") : [];
+      onAccountChanged(accounts[0] ?? null);
+    };
+    provider.on("accountsChanged", listener);
+    return () => provider.removeListener?.("accountsChanged", listener);
+  }
+  if (session.kind === "polkadot") {
+    let stopped = false;
+    let unsubscribe: (() => void) | undefined;
+    void web3Enable("Locus").then(() => web3AccountsSubscribe((accounts) => {
+      if (stopped) return;
+      const selected = (accounts as PolkadotAccount[]).some((account) => account.address === session.address);
+      onAccountChanged(selected ? session.address : null);
+    })).then((off) => {
+      if (stopped) off();
+      else unsubscribe = off;
+    }).catch(() => onAccountChanged(null));
+    return () => { stopped = true; unsubscribe?.(); };
+  }
+  if (session.kind === "solana") {
+    const separator = session.connectionId?.indexOf("::") ?? -1;
+    const walletName = separator < 0 ? "" : session.connectionId!.slice(0, separator);
+    const wallet = solanaWallets().find((candidate) => candidate.name === walletName);
+    const events = wallet?.features["standard:events"] as { on?: (event: "change", listener: (properties: { accounts?: readonly WalletAccount[] }) => void) => () => void } | undefined;
+    if (!events?.on) return () => undefined;
+    return events.on("change", (properties) => {
+      const selected = properties.accounts?.some((account) => account.address === session.address) ?? false;
+      onAccountChanged(selected ? session.address : null);
+    });
+  }
+  return () => undefined;
 }
