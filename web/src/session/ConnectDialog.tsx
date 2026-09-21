@@ -6,13 +6,12 @@ import type { LocusWebSession, SessionKind } from "./types.js";
 import { MatrixLoginDialog } from "../matrix/MatrixLoginDialog.js";
 import { SiEthereum, SiMatrix, SiPolkadot, SiSolana } from "react-icons/si";
 import type { IconType } from "react-icons";
-import type { ControlClaimDeploymentDescriptor } from "../network/types.js";
 
 type Props = {
   open: boolean;
   onClose: () => void;
   onConnected: (session: LocusWebSession) => void;
-  matrixControlClaim?: { client: unknown; deployment: ControlClaimDeploymentDescriptor };
+  locus: import("@archelabs/locus").LocusClient | null;
 };
 
 function available(kind: SessionKind): boolean {
@@ -21,7 +20,7 @@ function available(kind: SessionKind): boolean {
   return true;
 }
 
-export function ConnectDialog({ open, onClose, onConnected, matrixControlClaim }: Props) {
+export function ConnectDialog({ open, onClose, onConnected, locus }: Props) {
   const [connecting, setConnecting] = useState<SessionKind | null>(null);
   const [error, setError] = useState("");
   const [accountOptions, setAccountOptions] = useState<BrowserAccountOption[]>([]);
@@ -104,7 +103,7 @@ export function ConnectDialog({ open, onClose, onConnected, matrixControlClaim }
       {error && <div className="transaction-error">{error}</div>}
       <p className="modal-note">Locus keeps assets attached to Ownership. Wallets only authorize actions.</p>
     </Modal>
-    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onConnected={onConnected} matrixControlClaim={matrixControlClaim} />
+    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onConnected={onConnected} locus={locus} />
     </>
   );
 }
