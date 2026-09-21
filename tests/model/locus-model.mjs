@@ -54,12 +54,49 @@ export class LocusModel {
     this.assets = new Map();
     this.balances = new Map();
     this.allowances = new Map();
+    this.controllerGrants = new Map();
+    this.matrixBootstrapUsed = new Map();
     this.assetIndex = [];
   }
 
   asset(assetId) {
     return this.assets.get(key(assetId));
   }
+  controllerGrant(subject, controller) {
+    return this.controllerGrants.get(key(subject) + ":" + key(controller)) ?? null;
+  }
+
+  matrixBootstrapCompleted(subject) {
+    return this.matrixBootstrapUsed.get(key(subject)) === 1;
+  }
+
+  requireController(subject, controller) {
+    if (equal(subject, controller)) return;
+    if (this.controllerGrant(subject, controller) !== 1) abort(5001);
+  }
+
+  bootstrapMatrixController(subject, controller, proofValid = true) {
+    if (this.matrixBootstrapCompleted(subject)) abort(5004);
+    if (subject.kind !== 0 || controller.kind !== 0 || !proofValid) abort(5005);
+    this.matrixBootstrapUsed.set(key(subject), 1);
+    this.controllerGrants.set(key(subject) + ":" + key(controller), 1);
+  }
+
+  addController(caller, subject, controller) {
+    this.requireController(subject, caller);
+    const grantKey = key(subject) + ":" + key(controller);
+    if (this.controllerGrants.get(grantKey) === 1) abort(5002);
+    if (this.controllerGrants.has(grantKey)) abort(5003);
+    this.controllerGrants.set(grantKey, 1);
+  }
+
+  revokeController(caller, subject, controller) {
+    this.requireController(subject, caller);
+    const grantKey = key(subject) + ":" + key(controller);
+    if (this.controllerGrants.get(grantKey) !== 1) abort(5006);
+    this.controllerGrants.set(grantKey, 0);
+  }
+
 
   balance(assetId, ownerValue) {
     return this.balances.get(`${key(assetId)}:${key(ownerValue)}`) ?? 0n;
@@ -146,6 +183,8 @@ export class LocusModel {
     if (name === "getAssetByIndex") return this.assetIndex[Number(queryKey)] ?? null;
     if (name === "getBalance") return this.balances.get(`${key(queryKey.assetId)}:${key(queryKey.ownerKey)}`) ?? 0n;
     if (name === "getAllowance") return this.allowances.get(`${key(queryKey.assetId)}:${key(queryKey.ownerKey)}:${key(queryKey.spenderKey)}`) ?? 0n;
+    if (name === "getControllerGrant") return this.controllerGrants.get(key(queryKey.subjectKey) + ":" + key(queryKey.controllerKey)) ?? null;
+    if (name === "getMatrixBootstrapUsed") return this.matrixBootstrapUsed.get(key(queryKey)) ?? null;
     throw new Error(`unknown query ${name}`);
   }
 }
