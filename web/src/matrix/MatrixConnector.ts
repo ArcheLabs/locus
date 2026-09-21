@@ -173,6 +173,8 @@ export async function connectMatrixSession(userId: string, password: string, con
   const stored: MatrixStoredSession = { accessToken: login.access_token, refreshToken: login.refresh_token, userId: login.user_id, deviceId: login.device_id, homeserver };
   const client = createClient({ baseUrl: homeserver, accessToken: stored.accessToken, userId: stored.userId, deviceId: stored.deviceId });
   const crypto = await MatrixCryptoDevice.initialize(stored.userId, stored.deviceId, authenticatedHttp(homeserver, stored.accessToken));
+  const cryptoHttp = authenticatedHttp(homeserver, stored.accessToken);
+  crypto.startSync(homeserver, stored.accessToken, cryptoHttp);
   const keys = await queryMatrixKeys(stored.userId, stored.deviceId, homeserver, stored.accessToken);
   const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto.sign(message) });
   const owner = matrixOwnership(keys.masterPublicKey);
@@ -202,6 +204,8 @@ export async function connectMatrixSession(userId: string, password: string, con
 export async function restoreMatrixSession(stored: MatrixStoredSession, matrixControlClaim?: MatrixControlClaimOptions): Promise<MatrixConnected> {
   const client = createClient({ baseUrl: stored.homeserver, accessToken: stored.accessToken, userId: stored.userId, deviceId: stored.deviceId });
   const crypto = await MatrixCryptoDevice.initialize(stored.userId, stored.deviceId, authenticatedHttp(stored.homeserver, stored.accessToken));
+  const cryptoHttp = authenticatedHttp(stored.homeserver, stored.accessToken);
+  crypto.startSync(stored.homeserver, stored.accessToken, cryptoHttp);
   const keys = await queryMatrixKeys(stored.userId, stored.deviceId, stored.homeserver, stored.accessToken);
   const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto.sign(message) });
   const owner = matrixOwnership(keys.masterPublicKey);

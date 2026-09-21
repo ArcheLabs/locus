@@ -1,5 +1,6 @@
 import {
   DeviceId,
+  DeviceLists,
   initAsync,
   KeysClaimRequest,
   KeysBackupRequest,
@@ -47,6 +48,7 @@ function isKnownRequest(value: unknown): value is SupportedRequest {
 }
 
 export class MatrixCryptoDevice {
+  private syncAbort: AbortController | null = null;
   private constructor(readonly machine: OlmMachine, readonly deviceId: string) {}
 
   static async initialize(userId: string, deviceId: string, http: MatrixHttp): Promise<MatrixCryptoDevice> {
@@ -75,6 +77,55 @@ export class MatrixCryptoDevice {
     await this.flush(http);
   }
 
+  /**
+   * Keep the standalone OlmMachine fed from Matrix `/sync` without starting
+   * matrix-js-sdk's private Rust crypto integration on the same device.
+   */
+  startSync(homeserver: string, accessToken: string, http: MatrixHttp): void {
+    if (this.syncAbort) return;
+    const abort = new AbortController();
+    this.syncAbort = abort;
+    void (async () => {
+      let since: string | undefined;
+      while (!abort.signal.aborted) {
+        const query = new URLSearchParams({ timeout: "30000" });
+        if (since) query.set("since", since);
+        let response: Response;
+        try {
+          response = await fetch(`${homeserver.replace(/\/$/, "")}/_matrix/client/v3/sync?${query.toString()}`, {
+            headers: { authorization: `Bearer ${accessToken}` },
+            signal: abort.signal,
+          });
+          const payload = await response.json() as {
+            next_batch?: string;
+            to_device?: { events?: unknown[] };
+            device_lists?: { changed?: string[]; left?: string[] };
+            device_one_time_keys_count?: Record<string, number>;
+          };
+          if (!response.ok || typeof payload.next_batch !== "string") throw new Error(`Matrix sync failed with HTTP ${response.status}`);
+          const lists = new DeviceLists(
+            (payload.device_lists?.changed ?? []).map((value) => new UserId(value)),
+            (payload.device_lists?.left ?? []).map((value) => new UserId(value)),
+          );
+          try {
+            await this.machine.receiveSyncChanges(
+              JSON.stringify(payload.to_device?.events ?? []),
+              lists,
+              new Map(Object.entries(payload.device_one_time_keys_count ?? {})),
+            );
+          } finally {
+            lists.free();
+          }
+          since = payload.next_batch;
+          await this.flush(http);
+        } catch (error) {
+          if (abort.signal.aborted) return;
+          await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+        }
+      }
+    })();
+  }
+
   async sign(message: Uint8Array): Promise<Uint8Array> {
     let text: string;
     try {
@@ -101,6 +152,8 @@ export class MatrixCryptoDevice {
   }
 
   dispose(): void {
+    this.syncAbort?.abort();
+    this.syncAbort = null;
     try { this.machine.close(); } finally { this.machine.free(); }
   }
 }
