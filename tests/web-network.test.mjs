@@ -5,7 +5,9 @@ import { formatUnits, parseUnits, evmOwnership, polkadotOwnership, solanaOwnersh
 import { encodeAddress } from "@polkadot/util-crypto";
 import { selectNetwork } from "../web/src/network/selection.ts";
 import { queryMatrixKeys } from "../web/src/matrix/MatrixKeysQuery.ts";
-import { beginMatrixOAuth, completeMatrixAuthCallback, discoverMatrixAuthMetadata, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
+import { beginMatrixOAuth, commitMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, completeMatrixAuthCallback, discoverMatrixAuthMetadata, matrixDeviceId, persistMatrixSession, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
+import { MatrixCryptoDevice } from "../web/src/matrix/MatrixCryptoDevice.ts";
+import { describeMatrixCause } from "../web/src/matrix/MatrixErrors.ts";
 import { createHash } from "node:crypto";
 
 function matrixB64(bytes) {
@@ -103,7 +105,9 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
     assert.equal(authorization.searchParams.get("code_challenge"), createHash("sha256").update(flow.verifier).digest("base64url"));
     assert.deepEqual(registrations[0].redirect_uris, ["https://locus.example/app"]);
     assert.equal(registrations[0].client_uri, "https://locus.example/");
-    assert.equal(window.localStorage.getItem("locus.matrix.device.v1.https://example.org|@alice:example.org"), flow.deviceId);
+    const deviceKey = "locus.matrix.device.v1.https://example.org|@alice:example.org";
+    assert.equal(window.sessionStorage.getItem(deviceKey), flow.deviceId);
+    assert.equal(window.localStorage.getItem(deviceKey), null, "a device ID is provisional until crypto setup succeeds");
     window.location.href = "http://127.0.0.1:5173/";
     await assert.rejects(beginMatrixOAuth("https://example.org", "@alice:example.org"), /requires Locus to be opened over HTTPS/);
     assert.equal(registrations.length, 1, "insecure previews must not register an invalid web client");
@@ -113,7 +117,7 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
   }
 });
 
-test("Matrix OAuth callback persists a durable session and supports refresh and revocation", async () => {
+test("Matrix OAuth callback returns a provisional session; committed sessions support refresh and revocation", async () => {
   const storage = () => {
     const entries = new Map();
     return {
@@ -146,6 +150,10 @@ test("Matrix OAuth callback persists a durable session and supports refresh and 
     assert.equal(stored.userId, "@alice:example.org");
     assert.equal(stored.deviceId, flow.deviceId);
     assert.equal(stored.authType, "oauth");
+    assert.equal(localStorage.getItem("locus.matrix.session.v1"), null, "token acquisition alone must not persist a durable session");
+    await refreshMatrixOAuthToken(stored, false);
+    assert.equal(localStorage.getItem("locus.matrix.session.v1"), null, "refreshing a provisional login must not persist before crypto setup");
+    persistMatrixSession(stored);
     assert.equal(JSON.parse(localStorage.getItem("locus.matrix.session.v1")).refreshToken, "refresh-1");
     await refreshMatrixOAuthToken(stored);
     assert.equal(JSON.parse(localStorage.getItem("locus.matrix.session.v1")).accessToken, "access-1");
@@ -155,6 +163,106 @@ test("Matrix OAuth callback persists a durable session and supports refresh and 
   } finally {
     globalThis.window = originalWindow;
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("Matrix device IDs stay pending in session storage until the crypto setup commit", () => {
+  const storage = () => {
+    const entries = new Map();
+    return { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, String(value)), removeItem: (key) => entries.delete(key) };
+  };
+  const originalWindow = globalThis.window;
+  globalThis.window = { localStorage: storage(), sessionStorage: storage() };
+  try {
+    const deviceId = matrixDeviceId("https://example.org", "@alice:example.org");
+    const key = "locus.matrix.device.v1.https://example.org|@alice:example.org";
+    assert.equal(window.localStorage.getItem(key), null);
+    assert.equal(window.sessionStorage.getItem(key), deviceId);
+    assert.equal(matrixDeviceId("https://example.org", "@alice:example.org"), deviceId);
+    commitMatrixDeviceId("https://example.org", "@alice:example.org", deviceId);
+    assert.equal(window.localStorage.getItem(key), deviceId);
+    assert.equal(window.sessionStorage.getItem(key), null);
+  } finally { globalThis.window = originalWindow; }
+});
+
+test("Matrix crypto initialization reports WASM and store failures separately and preserves safe causes", async () => {
+  const http = async () => "{}";
+  await assert.rejects(
+    MatrixCryptoDevice.initialize("@alice:example.org", "LOCUS-TEST", http, {
+      loadWasm: async () => { throw new Error("WASM TEST ERROR"); },
+      createMachine: async () => { throw new Error("must not initialize store after WASM failure"); },
+    }),
+    (error) => error.code === "CRYPTO_WASM_INIT_FAILED" && error.message.includes("WASM TEST ERROR"),
+  );
+  await assert.rejects(
+    MatrixCryptoDevice.initialize("@alice:example.org", "LOCUS-TEST", http, {
+      loadWasm: async () => undefined,
+      createMachine: async () => { throw new Error("IndexedDB TEST ERROR"); },
+    }),
+    (error) => error.code === "CRYPTO_STORE_INIT_FAILED" && error.message.includes("IndexedDB TEST ERROR") && error.message.includes("locus-matrix-v1-"),
+  );
+  const machine = { outgoingRequests: async () => { throw new Error("OUTGOING TEST ERROR"); }, close() {}, free() {} };
+  await assert.rejects(
+    MatrixCryptoDevice.initialize("@alice:example.org", "LOCUS-TEST", http, {
+      loadWasm: async () => undefined,
+      createMachine: async () => machine,
+    }),
+    (error) => error.code === "CRYPTO_OUTGOING_REQUEST_FAILED" && error.message.includes("OUTGOING TEST ERROR"),
+  );
+  assert.match(describeMatrixCause(new Error("Bearer secret access_token=secret refresh_token=secret password=secret code_verifier=secret")), /\[redacted\]/);
+  assert.doesNotMatch(describeMatrixCause(new Error("Bearer secret access_token=secret refresh_token=secret password=secret code_verifier=secret")), /secret/);
+});
+
+test("Matrix crypto dev optimization is excluded and production build asserts the WASM artifact", async () => {
+  const viteConfig = await fs.readFile(new URL("../web/vite.config.ts", import.meta.url), "utf8");
+  const packageJson = JSON.parse(await fs.readFile(new URL("../web/package.json", import.meta.url), "utf8"));
+  const smoke = await fs.readFile(new URL("../web/scripts/assert-matrix-wasm.mjs", import.meta.url), "utf8");
+  assert.match(viteConfig, /optimizeDeps:\s*\{\s*exclude:\s*\["@matrix-org\/matrix-sdk-crypto-wasm"\]/);
+  assert.match(packageJson.scripts.build, /assert-matrix-wasm\.mjs/);
+  assert.match(smoke, /deepEqual\(emitted, source/);
+});
+
+test("Matrix durable-session commit follows crypto initialization and successful keys/query", async () => {
+  const connector = await fs.readFile(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
+  const oauth = await fs.readFile(new URL("../web/src/matrix/MatrixOAuth.ts", import.meta.url), "utf8");
+  const commit = connector.indexOf("commitMatrixSessionAfterCryptoSetup(stored, async () => {");
+  const cryptoInit = connector.indexOf("await MatrixCryptoDevice.initialize(", commit);
+  const keysQuery = connector.indexOf("await queryMatrixKeys(", cryptoInit);
+  const cryptoCommit = oauth.indexOf("export async function commitMatrixSessionAfterCryptoSetup");
+  const setupAwait = oauth.indexOf("const result = await setup();", cryptoCommit);
+  const deviceCommit = oauth.indexOf("commitMatrixDeviceId(", setupAwait);
+  const sessionCommit = oauth.indexOf("persistMatrixSession(", deviceCommit);
+  assert.ok(commit >= 0 && cryptoInit > commit && keysQuery > cryptoInit);
+  assert.ok(cryptoCommit >= 0 && setupAwait > cryptoCommit && deviceCommit > setupAwait && sessionCommit > deviceCommit);
+});
+
+test("Matrix session and stable device ID commit waits for successful crypto setup and keys/query", async () => {
+  const originalWindow = globalThis.window;
+  const storage = () => {
+    const entries = new Map();
+    return {
+      getItem: (key) => entries.get(key) ?? null,
+      setItem: (key, value) => entries.set(key, String(value)),
+      removeItem: (key) => entries.delete(key),
+    };
+  };
+  const localStorage = storage();
+  const sessionStorage = storage();
+  globalThis.window = { localStorage, sessionStorage };
+  const stored = { accessToken: "token", userId: "@alice:example.org", deviceId: "LOCUS-TEST", homeserver: "https://example.org", authType: "legacy" };
+  const deviceKey = `locus.matrix.device.v1.${stored.homeserver}|${stored.userId}`;
+  try {
+    sessionStorage.setItem(deviceKey, stored.deviceId);
+    await assert.rejects(commitMatrixSessionAfterCryptoSetup(stored, async () => { throw new Error("CRYPTO TEST FAILURE"); }), /CRYPTO TEST FAILURE/);
+    assert.equal(localStorage.getItem("locus.matrix.session.v1"), null);
+    assert.equal(localStorage.getItem(deviceKey), null);
+    const keys = { verification: "pending" };
+    assert.deepEqual(await commitMatrixSessionAfterCryptoSetup(stored, async () => keys), keys);
+    assert.deepEqual(JSON.parse(localStorage.getItem("locus.matrix.session.v1")), stored);
+    assert.equal(localStorage.getItem(deviceKey), stored.deviceId);
+    assert.equal(sessionStorage.getItem(deviceKey), null);
+  } finally {
+    globalThis.window = originalWindow;
   }
 });
 

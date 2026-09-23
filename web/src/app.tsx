@@ -15,7 +15,7 @@ import { Modal } from "./components/Modal.js";
 import { AccountMenu } from "./components/AccountMenu.js";
 import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, revokeStoredMatrixSession, type MatrixConnected } from "./matrix/MatrixConnector.js";
 import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
-import { completeMatrixAuthCallback } from "./matrix/MatrixOAuth.js";
+import { completeMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
 import { useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
 import type { Eip1193Provider } from "@jamscript/client";
 import { OwnershipInput } from "./locus/OwnershipInput.js";
@@ -80,6 +80,7 @@ export function App() {
   const networkIdRef = useRef(network.networkId);
   const sessionRestoreAttempted = useRef(false);
   const oauthCallbackAttempted = useRef(false);
+  const provisionalMatrixAuth = useRef<MatrixOAuthSession | null>(null);
   const { address: appKitAddress, isConnected: appKitConnected, status: appKitStatus } = useAppKitAccount({ namespace: "eip155" });
   const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
   networkIdRef.current = network.networkId;
@@ -98,17 +99,26 @@ export function App() {
     if (networkMode && (network.status !== "ready" || !network.locus)) return;
     oauthCallbackAttempted.current = true;
     let cancelled = false;
+    let authenticationSucceeded = false;
     void completeMatrixAuthCallback().then(async (stored) => {
       if (!stored || cancelled) return;
+      authenticationSucceeded = true;
+      provisionalMatrixAuth.current = stored;
       const connected = await connectMatrixTokenSession(stored, { locus: network.locus });
       if (cancelled) { connected.session.cleanup?.(); return; }
+      provisionalMatrixAuth.current = null;
       if (connected.state === "READY") setSession(connected.session);
       else {
         setPendingMatrixConnection(connected);
         setConnectOpen(true);
         finishRestore("Matrix sign-in is not complete. Verify this device before it can control a Locus identity. No session is connected yet.");
       }
-    }).catch((cause) => finishRestore(`Matrix sign-in failed. No session is connected. ${cause instanceof Error ? cause.message : "The sign-in callback could not be completed."}`));
+    }).catch((cause) => {
+      const detail = cause instanceof Error ? cause.message : "Try signing in again.";
+      finishRestore(authenticationSucceeded
+        ? `Matrix authentication succeeded, but the local crypto device could not be initialized or registered. No Locus session is connected. ${detail}`
+        : `Matrix sign-in could not be completed. No session is connected. ${detail}`);
+    });
     return () => { cancelled = true; };
   }, [finishRestore, network.locus, network.status, networkMode, setSession]);
 
@@ -174,12 +184,21 @@ export function App() {
   }, [appKitAddress, appKitConnected, appKitStatus, session, setSession]);
 
   function disconnectSession() {
+    const provisional = provisionalMatrixAuth.current;
+    provisionalMatrixAuth.current = null;
     window.localStorage.removeItem("locus.session.v1");
     session?.cleanup?.();
     if (pendingMatrixConnection && pendingMatrixConnection.session !== session) pendingMatrixConnection.session.cleanup?.();
     setPendingMatrixConnection(null);
     finishRestore();
-    if (session?.kind === "matrix" || !session) void revokeStoredMatrixSession().catch((cause) => notify(cause instanceof Error ? `Signed out locally, but Matrix token revocation failed: ${cause.message}` : "Signed out locally, but Matrix token revocation failed."));
+    if (session?.kind === "matrix" || !session) {
+      const durable = readStoredMatrixSession();
+      const revocations = [
+        ...(durable ? [revokeStoredMatrixSession()] : []),
+        ...(provisional && provisional.accessToken !== durable?.accessToken ? [revokeMatrixOAuthSession(provisional)] : []),
+      ];
+      void Promise.all(revocations).catch((cause) => notify(cause instanceof Error ? `Signed out locally, but Matrix token revocation failed: ${cause.message}` : "Signed out locally, but Matrix token revocation failed."));
+    }
     setSession(null);
   }
 

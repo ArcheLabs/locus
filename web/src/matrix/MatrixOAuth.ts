@@ -3,6 +3,7 @@ import { MatrixConnectorError } from "./MatrixErrors.ts";
 const OAUTH_FLOW_KEY = "locus.matrix.oauth-flow.v1";
 const SSO_FLOW_KEY = "locus.matrix.sso-flow.v1";
 const DEVICE_KEY_PREFIX = "locus.matrix.device.v1.";
+const MATRIX_SESSION_KEY = "locus.matrix.session.v1";
 
 export type MatrixAuthMetadata = {
   issuer: string;
@@ -64,13 +65,28 @@ export function matrixDeviceId(homeserver: string, userId: string): string {
   const existing = window.localStorage.getItem(key);
   if (existing && /^[A-Z0-9_-]{1,255}$/.test(existing)) return existing;
   const oldSessionDeviceId = window.sessionStorage.getItem(key);
-  if (oldSessionDeviceId && /^[A-Z0-9_-]{1,255}$/.test(oldSessionDeviceId)) {
-    window.localStorage.setItem(key, oldSessionDeviceId);
-    return oldSessionDeviceId;
-  }
+  if (oldSessionDeviceId && /^[A-Z0-9_-]{1,255}$/.test(oldSessionDeviceId)) return oldSessionDeviceId;
   const created = `LOCUS-${randomUrlSafe(18).replace(/[-_]/g, "").toUpperCase()}`;
-  window.localStorage.setItem(key, created);
+  window.sessionStorage.setItem(key, created);
   return created;
+}
+
+export function commitMatrixDeviceId(homeserver: string, userId: string, deviceId: string): void {
+  if (!/^[A-Z0-9_-]{1,255}$/.test(deviceId)) throw matrixError("Matrix returned an invalid device ID; sign in again.");
+  const key = `${DEVICE_KEY_PREFIX}${homeserver}|${userId}`;
+  window.localStorage.setItem(key, deviceId);
+  window.sessionStorage.removeItem(key);
+}
+
+export function persistMatrixSession(stored: MatrixOAuthSession): void {
+  window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
+}
+
+export async function commitMatrixSessionAfterCryptoSetup<T>(stored: MatrixOAuthSession, setup: () => Promise<T>): Promise<T> {
+  const result = await setup();
+  commitMatrixDeviceId(stored.homeserver.replace(/\/$/, ""), stored.userId, stored.deviceId);
+  persistMatrixSession(stored);
+  return result;
 }
 
 export async function discoverMatrixAuthMetadata(homeserver: string): Promise<MatrixAuthMetadata | null> {
@@ -219,7 +235,6 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
       userId, deviceId: flow.deviceId, homeserver: flow.homeserver, authType: "oauth", clientId: flow.clientId,
       tokenEndpoint: flow.tokenEndpoint, revocationEndpoint: flow.revocationEndpoint,
     };
-    window.localStorage.setItem("locus.matrix.session.v1", JSON.stringify(stored));
     return stored;
   }
   if (loginToken || ssoState) {
@@ -239,13 +254,12 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
     cleanUrl.hash = "";
     window.history.replaceState({}, "", cleanUrl.toString());
     const stored: MatrixOAuthSession = { accessToken: payload.access_token, refreshToken: payload.refresh_token, expiresAtMs: typeof payload.expires_in_ms === "number" ? Date.now() + payload.expires_in_ms : undefined, userId: payload.user_id, deviceId: payload.device_id, homeserver: flow.homeserver, authType: "legacy" };
-    window.localStorage.setItem("locus.matrix.session.v1", JSON.stringify(stored));
     return stored;
   }
   return null;
 }
 
-export async function refreshMatrixOAuthToken(stored: MatrixOAuthSession): Promise<void> {
+export async function refreshMatrixOAuthToken(stored: MatrixOAuthSession, persist = true): Promise<void> {
   if (!stored.refreshToken || !stored.tokenEndpoint || !stored.clientId) throw matrixError("The Matrix session cannot be refreshed; sign in again.");
   const response = await fetch(stored.tokenEndpoint, {
     method: "POST", headers: { "content-type": "application/x-www-form-urlencoded", accept: "application/json" },
@@ -255,7 +269,7 @@ export async function refreshMatrixOAuthToken(stored: MatrixOAuthSession): Promi
   stored.accessToken = tokens.access_token!;
   if (tokens.refresh_token) stored.refreshToken = tokens.refresh_token;
   if (typeof tokens.expires_in === "number") stored.expiresAtMs = Date.now() + tokens.expires_in * 1000;
-  window.localStorage.setItem("locus.matrix.session.v1", JSON.stringify(stored));
+  if (persist) persistMatrixSession(stored);
 }
 
 export async function revokeMatrixOAuthSession(stored: MatrixOAuthSession): Promise<void> {

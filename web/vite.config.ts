@@ -7,6 +7,9 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   plugins: [react()],
+  optimizeDeps: {
+    exclude: ["@matrix-org/matrix-sdk-crypto-wasm"],
+  },
   resolve: {
     alias: {
       "@archelabs/locus": path.resolve(root, "../sdk/src/index.ts"),

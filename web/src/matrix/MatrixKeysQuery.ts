@@ -1,7 +1,7 @@
 import { matrixOwnership } from "../../../sdk/src/ownership.ts";
 import type { Ownership } from "../../../sdk/src/types.ts";
 import { encodeMatrixControlClaimProofV1, type MatrixControlClaimProofV1 } from "@jamscript/client";
-import { MatrixConnectorError } from "./MatrixErrors.ts";
+import { describeMatrixCause, MatrixConnectorError } from "./MatrixErrors.ts";
 
 type MatrixSignedKey = {
   keys?: Record<string, string>;
@@ -80,8 +80,11 @@ async function matrixJson<T>(homeserver: string, accessToken: string | undefined
     throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Matrix homeserver returned invalid JSON", { cause });
   }
   if (!response.ok) {
-    const error = parsed && typeof parsed === "object" && "error" in parsed ? String((parsed as { error?: unknown }).error) : `HTTP ${response.status}`;
-    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", `Matrix keys query failed: ${error}`);
+    const payload = parsed && typeof parsed === "object" ? parsed as { errcode?: unknown; error?: unknown } : {};
+    const errcode = typeof payload.errcode === "string" ? payload.errcode : "";
+    const error = typeof payload.error === "string" ? describeMatrixCause(payload.error) : "";
+    const detail = [errcode, error].filter(Boolean).join(": ");
+    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", `Matrix keys query failed with HTTP ${response.status}${detail ? ` (${detail})` : ""}.`);
   }
   return parsed as T;
 }

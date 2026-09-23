@@ -2,10 +2,10 @@ import { createClient, type MatrixClient } from "matrix-js-sdk";
 import { MatrixDeviceController } from "@jamscript/client";
 import { matrixOwnership, type LocusClient } from "@archelabs/locus";
 import type { LocusWebSession } from "../session/types.js";
-import { MatrixConnectorError } from "./MatrixErrors.js";
+import { describeMatrixCause, MatrixConnectorError } from "./MatrixErrors.js";
 import { MatrixCryptoDevice } from "./MatrixCryptoDevice.js";
 import { queryMatrixKeys } from "./MatrixKeysQuery.js";
-import { matrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
+import { commitMatrixSessionAfterCryptoSetup, matrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
 
 export type MatrixStoredSession = MatrixOAuthSession;
 
@@ -48,10 +48,10 @@ export async function discoverHomeserver(userId: string, configured?: string): P
   }
 }
 
-async function refreshMatrixAccessToken(stored: MatrixStoredSession): Promise<void> {
+async function refreshMatrixAccessToken(stored: MatrixStoredSession, persist = true): Promise<void> {
   if (!stored.refreshToken) throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "The Matrix session has no refresh token");
   if (stored.authType === "oauth") {
-    try { await refreshMatrixOAuthToken(stored); }
+    try { await refreshMatrixOAuthToken(stored, persist); }
     catch (cause) { throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "Matrix OAuth token refresh failed. Sign in again if the session has expired.", { cause }); }
     return;
   }
@@ -77,11 +77,11 @@ async function refreshMatrixAccessToken(stored: MatrixStoredSession): Promise<vo
   if (typeof payload.expires_in_ms === "number" && Number.isFinite(payload.expires_in_ms)) {
     stored.expiresAtMs = Date.now() + payload.expires_in_ms;
   }
-  window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
+  if (persist) window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
 }
 
-async function ensureFreshMatrixToken(stored: MatrixStoredSession): Promise<void> {
-  if (stored.expiresAtMs !== undefined && stored.expiresAtMs <= Date.now() + 5_000) await refreshMatrixAccessToken(stored);
+async function ensureFreshMatrixToken(stored: MatrixStoredSession, persist = true): Promise<void> {
+  if (stored.expiresAtMs !== undefined && stored.expiresAtMs <= Date.now() + 5_000) await refreshMatrixAccessToken(stored, persist);
 }
 
 function classifyLoginFailure(cause: unknown): MatrixConnectorError {
@@ -97,30 +97,39 @@ function classifyLoginFailure(cause: unknown): MatrixConnectorError {
   return new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Unable to reach or initialize the Matrix homeserver", { cause });
 }
 
-async function authenticatedFetch(stored: MatrixStoredSession, input: RequestInfo | URL, init: RequestInit = {}): Promise<Response> {
+async function authenticatedFetch(stored: MatrixStoredSession, input: RequestInfo | URL, init: RequestInit = {}, persistRefresh = true): Promise<Response> {
   const request = async (): Promise<Response> => {
     const headers = new Headers(init.headers);
     headers.set("authorization", `Bearer ${stored.accessToken}`);
     return fetch(input, { ...init, headers });
   };
-  await ensureFreshMatrixToken(stored);
+  await ensureFreshMatrixToken(stored, persistRefresh);
   let response = await request();
   if (response.status === 401 && stored.refreshToken) {
-    await refreshMatrixAccessToken(stored);
+    await refreshMatrixAccessToken(stored, persistRefresh);
     response = await request();
   }
   return response;
 }
 
-function authenticatedHttp(homeserver: string, stored: MatrixStoredSession) {
+function authenticatedHttp(homeserver: string, stored: MatrixStoredSession, persistRefresh = true) {
   return async (path: string, body: string, method: "POST" | "PUT" = "POST"): Promise<string> => {
     const response = await authenticatedFetch(stored, `${homeserver.replace(/\/$/, "")}${path}`, {
       method,
       headers: { "content-type": "application/json" },
       body,
-    });
+    }, persistRefresh);
     const text = await response.text();
-    if (!response.ok) throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", `Matrix request ${path} failed with HTTP ${response.status}: ${text.slice(0, 240)}`);
+    if (!response.ok) {
+      let matrixError = "";
+      try {
+        const payload = JSON.parse(text) as { errcode?: unknown; error?: unknown };
+        const code = typeof payload.errcode === "string" ? payload.errcode : "";
+        const message = typeof payload.error === "string" ? describeMatrixCause(payload.error) : "";
+        matrixError = [code, message].filter(Boolean).join(": ");
+      } catch { /* Do not expose an unstructured server response body. */ }
+      throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", `Matrix device request ${path} failed with HTTP ${response.status}${matrixError ? ` (${matrixError})` : ""}.`);
+    }
     return text || "{}";
   };
 }
@@ -175,24 +184,27 @@ function connectedState(keys: Awaited<ReturnType<typeof queryMatrixKeys>>, locus
 async function connectStoredMatrixSession(
   stored: MatrixStoredSession,
   options: MatrixConnectionOptions,
-  persist: boolean,
+  persistRefresh: boolean,
 ): Promise<MatrixConnected> {
   const homeserver = stored.homeserver.replace(/\/$/, "");
   const client = createClient({ baseUrl: homeserver, accessToken: stored.accessToken, userId: stored.userId, deviceId: stored.deviceId });
-  let crypto: MatrixCryptoDevice | null = null;
+  const cryptoDevice: { current: MatrixCryptoDevice | null } = { current: null };
   try {
-    const cryptoHttp = authenticatedHttp(homeserver, stored);
-    const authFetch = (input: RequestInfo | URL, init?: RequestInit) => authenticatedFetch(stored, input, init);
-    crypto = await MatrixCryptoDevice.initialize(stored.userId, stored.deviceId, cryptoHttp);
-    crypto.startSync(homeserver, authFetch, cryptoHttp);
-    const keys = await queryMatrixKeys(stored.userId, stored.deviceId, homeserver, stored.accessToken, authFetch);
-    const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto!.sign(message) });
+    const cryptoHttp = authenticatedHttp(homeserver, stored, persistRefresh);
+    const authFetch = (input: RequestInfo | URL, init?: RequestInit) => authenticatedFetch(stored, input, init, persistRefresh);
+    const { device, keys } = await commitMatrixSessionAfterCryptoSetup(stored, async () => {
+      const device = await MatrixCryptoDevice.initialize(stored.userId, stored.deviceId, cryptoHttp);
+      cryptoDevice.current = device;
+      device.startSync(homeserver, authFetch, cryptoHttp);
+      const keys = await queryMatrixKeys(stored.userId, stored.deviceId, homeserver, stored.accessToken, authFetch);
+      return { device, keys };
+    });
+    const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => device.sign(message) });
     const owner = matrixOwnership(keys.masterPublicKey);
     if (keys.verification === "verified") await ensureMatrixController(options.locus, owner, controller, keys.encodedProof);
-    if (persist) window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
-    return await makeConnected(stored, client, crypto, keys, controller, options.locus);
+    return await makeConnected(stored, client, device, keys, controller, options.locus);
   } catch (cause) {
-    try { crypto?.dispose(); } catch { /* Preserve the original connection error. */ }
+    try { cryptoDevice.current?.dispose(); } catch { /* Preserve the original connection error. */ }
     client.stopClient();
     throw cause;
   }
@@ -285,11 +297,11 @@ export async function connectMatrixSession(
     homeserver,
     authType: "legacy",
   };
-  return connectStoredMatrixSession(stored, options, true);
+  return connectStoredMatrixSession(stored, options, false);
 }
 
 export async function connectMatrixTokenSession(stored: MatrixStoredSession, options: MatrixConnectionOptions = { locus: null }): Promise<MatrixConnected> {
-  return connectStoredMatrixSession(stored, options, true);
+  return connectStoredMatrixSession(stored, options, false);
 }
 
 export async function restoreMatrixSession(
@@ -297,7 +309,7 @@ export async function restoreMatrixSession(
   options: MatrixConnectionOptions = { locus: null },
 ): Promise<MatrixConnected> {
   await ensureFreshMatrixToken(stored);
-  return connectStoredMatrixSession(stored, options, false);
+  return connectStoredMatrixSession(stored, options, true);
 }
 
 export function readStoredMatrixSession(): MatrixStoredSession | null {

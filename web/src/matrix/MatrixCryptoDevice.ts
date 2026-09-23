@@ -13,16 +13,61 @@ import {
   ToDeviceRequest,
   UserId,
 } from "@matrix-org/matrix-sdk-crypto-wasm";
-import { MatrixConnectorError } from "./MatrixErrors.js";
+import { describeMatrixCause, MatrixConnectorError } from "./MatrixErrors.ts";
 
 type MatrixHttp = (path: string, body: string, method?: "POST" | "PUT") => Promise<string>;
 type MatrixFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
 let wasmReady: Promise<void> | null = null;
+type WasmRequestDiagnostic = { url?: string; status?: number; contentType?: string; bytes?: number; fetchError?: string };
+
 function ensureWasm(): Promise<void> {
-  wasmReady ??= initAsync();
+  if (wasmReady) return wasmReady;
+
+  const diagnostic: WasmRequestDiagnostic = {};
+  const originalFetch = globalThis.fetch;
+  let observedResponse = Promise.resolve();
+  const observeFetch: typeof fetch = (input, init) => {
+    const requestUrl = input instanceof Request ? input.url : String(input);
+    if (!/matrix_sdk_crypto_wasm_bg\.wasm(?:$|[?#])/i.test(requestUrl)) return originalFetch.call(globalThis, input, init);
+    diagnostic.url = requestUrl;
+    const response = originalFetch.call(globalThis, input, init);
+    observedResponse = response.then(async (result) => {
+      diagnostic.status = result.status;
+      diagnostic.contentType = result.headers.get("content-type") ?? "(missing)";
+      try { diagnostic.bytes = (await result.clone().arrayBuffer()).byteLength; }
+      catch (cause) { diagnostic.fetchError = describeMatrixCause(cause); }
+    }, (cause) => { diagnostic.fetchError = describeMatrixCause(cause); });
+    return response;
+  };
+
+  // initAsync starts fetch synchronously; restore the global before yielding so
+  // unrelated application requests are never intercepted.
+  globalThis.fetch = observeFetch;
+  try { wasmReady = initAsync(); }
+  catch (cause) { wasmReady = Promise.reject(cause); }
+  finally { globalThis.fetch = originalFetch; }
+
+  wasmReady = wasmReady.catch(async (cause) => {
+    await observedResponse;
+    wasmReady = null;
+    const request = diagnostic.url
+      ? ` Request ${diagnostic.url}${diagnostic.status === undefined ? "" : ` returned HTTP ${diagnostic.status}`}${diagnostic.contentType ? ` (${diagnostic.contentType})` : ""}${diagnostic.bytes === undefined ? "" : `, ${diagnostic.bytes} bytes`}${diagnostic.fetchError ? `; ${diagnostic.fetchError}` : ""}.`
+      : " No Matrix crypto WASM request was observed. Reload the page before retrying initialization.";
+    throw new MatrixConnectorError("CRYPTO_WASM_INIT_FAILED", `Matrix crypto WASM could not be loaded.${request} ${describeMatrixCause(cause)}`, { cause });
+  });
   return wasmReady;
 }
+
+type MatrixCryptoRuntime = {
+  loadWasm: () => Promise<void>;
+  createMachine: (userId: string, deviceId: string, storeName: string) => Promise<OlmMachine>;
+};
+
+const browserCryptoRuntime: MatrixCryptoRuntime = {
+  loadWasm: ensureWasm,
+  createMachine: (userId, deviceId, storeName) => OlmMachine.initialize(new UserId(userId), new DeviceId(deviceId), storeName),
+};
 
 function requestEndpoint(request: KeysUploadRequest | KeysQueryRequest | SignatureUploadRequest | KeysClaimRequest | ToDeviceRequest | RoomMessageRequest | KeysBackupRequest): { path: string; method: "POST" | "PUT" } {
   const type = request.type;
@@ -50,31 +95,59 @@ function isKnownRequest(value: unknown): value is SupportedRequest {
 
 export class MatrixCryptoDevice {
   private syncAbort: AbortController | null = null;
-  private constructor(readonly machine: OlmMachine, readonly deviceId: string) {}
+  readonly machine: OlmMachine;
+  readonly deviceId: string;
 
-  static async initialize(userId: string, deviceId: string, http: MatrixHttp): Promise<MatrixCryptoDevice> {
-    try {
-      await ensureWasm();
-      const machine = await OlmMachine.initialize(new UserId(userId), new DeviceId(deviceId), `locus-matrix-v1-${stableStoreSuffix(userId, deviceId)}`);
-      const device = new MatrixCryptoDevice(machine, deviceId);
-      await device.flush(http);
-      return device;
-    } catch (cause) {
-      if (cause instanceof MatrixConnectorError) throw cause;
-      throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", "Unable to initialize or upload Matrix device keys", { cause });
+  private constructor(machine: OlmMachine, deviceId: string) {
+    this.machine = machine;
+    this.deviceId = deviceId;
+  }
+
+  static async initialize(userId: string, deviceId: string, http: MatrixHttp, runtime: MatrixCryptoRuntime = browserCryptoRuntime): Promise<MatrixCryptoDevice> {
+    try { await runtime.loadWasm(); }
+    catch (cause) {
+      if (cause instanceof MatrixConnectorError && cause.code === "CRYPTO_WASM_INIT_FAILED") throw cause;
+      throw new MatrixConnectorError("CRYPTO_WASM_INIT_FAILED", `Matrix crypto WASM could not be loaded. ${describeMatrixCause(cause)}`, { cause });
     }
+
+    const storeName = `locus-matrix-v1-${stableStoreSuffix(userId, deviceId)}`;
+    let machine: OlmMachine;
+    try { machine = await runtime.createMachine(userId, deviceId, storeName); }
+    catch (cause) {
+      throw new MatrixConnectorError("CRYPTO_STORE_INIT_FAILED", `Matrix crypto storage could not be opened (${storeName}). ${describeMatrixCause(cause)}`, { cause });
+    }
+
+    const device = new MatrixCryptoDevice(machine, deviceId);
+    try { await device.flush(http); }
+    catch (cause) {
+      try { device.dispose(); } catch { /* Preserve the original device setup failure. */ }
+      throw cause;
+    }
+    return device;
   }
 
   private async flush(http: MatrixHttp): Promise<void> {
     for (;;) {
-      const requests = await this.machine.outgoingRequests();
+      let requests;
+      try { requests = await this.machine.outgoingRequests(); }
+      catch (cause) {
+        throw new MatrixConnectorError("CRYPTO_OUTGOING_REQUEST_FAILED", `Matrix crypto could not prepare outgoing device requests. ${describeMatrixCause(cause)}`, { cause });
+      }
       if (requests.length === 0) return;
       for (const request of requests) {
         if (!isKnownRequest(request)) throw new MatrixConnectorError("UNSUPPORTED_MATRIX_CRYPTO_REQUEST", `Unsupported Matrix crypto request ${String(request)}`);
         const endpoint = requestEndpoint(request);
-        const response = await http(endpoint.path, request.body, endpoint.method);
-        if (!request.id) throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", "Matrix crypto request did not provide a request ID");
-        await this.machine.markRequestAsSent(request.id, request.type, response);
+        let response: string;
+        try { response = await http(endpoint.path, request.body, endpoint.method); }
+        catch (cause) {
+          if (cause instanceof MatrixConnectorError) throw cause;
+          throw new MatrixConnectorError("DEVICE_KEYS_UPLOAD_FAILED", `Matrix device request ${request.type} to ${endpoint.path} failed. ${describeMatrixCause(cause)}`, { cause });
+        }
+        if (!request.id) throw new MatrixConnectorError("CRYPTO_REQUEST_ACK_FAILED", `Matrix crypto request ${request.type} did not provide a request ID`);
+        try { await this.machine.markRequestAsSent(request.id, request.type, response); }
+        catch (cause) {
+          throw new MatrixConnectorError("CRYPTO_REQUEST_ACK_FAILED", `Matrix crypto could not accept the homeserver response for request ${request.type}. ${describeMatrixCause(cause)}`, { cause });
+        }
       }
     }
   }
