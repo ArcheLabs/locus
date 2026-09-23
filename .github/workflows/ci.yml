@@ -93,7 +93,7 @@ jobs:
 
       - name: Consumer service check and ABI validation
         run: |
-          "$JAMSCRIPT_SOURCE_CLI" check .
+          LOCUS_JAMSCRIPT_CLI="$JAMSCRIPT_SOURCE_CLI" npm run check
 
       - name: Consumer PVM artifact build
         run: |

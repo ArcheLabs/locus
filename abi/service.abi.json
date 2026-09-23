@@ -532,6 +532,14 @@
         "max": 16
       }
     },
+    "Bytes<4096>": {
+      "kind": "bytes",
+      "max": 4096,
+      "descriptor": {
+        "kind": "bytes",
+        "max": 4096
+      }
+    },
     "Bytes<64>": {
       "kind": "bytes",
       "max": 64,
@@ -593,6 +601,29 @@
           },
           {
             "name": "ownerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
+      }
+    },
+    "Record<subjectKey:FixedBytes<32>,controllerKey:FixedBytes<32>>": {
+      "kind": "record",
+      "max": null,
+      "descriptor": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "subjectKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "controllerKey",
             "type": {
               "kind": "fixedBytes",
               "len": 32
@@ -688,60 +719,6 @@
       "max": null,
       "descriptor": {
         "kind": "unit"
-      }
-    },
-    "Record<controllerKey:FixedBytes<32>,subjectKey:FixedBytes<32>>": {
-      "kind": "record",
-      "max": null,
-      "descriptor": {
-        "kind": "record",
-        "fields": [
-          {
-            "name": "subjectKey",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "controllerKey",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          }
-        ]
-      }
-    },
-    "Record<subjectKey:FixedBytes<32>,controllerKey:FixedBytes<32>>": {
-      "kind": "record",
-      "max": null,
-      "descriptor": {
-        "kind": "record",
-        "fields": [
-          {
-            "name": "subjectKey",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "controllerKey",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          }
-        ]
-      }
-    },
-    "Bytes<4096>": {
-      "kind": "bytes",
-      "max": 4096,
-      "descriptor": {
-        "kind": "bytes",
-        "max": 4096
       }
     }
   },
