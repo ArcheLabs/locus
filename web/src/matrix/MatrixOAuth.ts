@@ -89,7 +89,7 @@ export async function discoverMatrixAuthMetadata(homeserver: string): Promise<Ma
   if (!metadata.registration_endpoint || !metadata.revocation_endpoint) throw matrixError("The Matrix OAuth service is missing client registration or token revocation support.");
   if (!metadata.response_types_supported?.includes("code")) throw matrixError("This Matrix server does not support the authorization-code flow.");
   if (!metadata.grant_types_supported?.includes("authorization_code") || !metadata.grant_types_supported.includes("refresh_token")) throw matrixError("This Matrix server does not advertise authorization-code and refresh-token support.");
-  if (!metadata.response_modes_supported?.includes("query")) throw matrixError("This Matrix server does not support the query callback needed for sign-in.");
+  if (!metadata.response_modes_supported?.includes("fragment")) throw matrixError("This Matrix server does not support the fragment callback required for secure web sign-in.");
   if (!metadata.code_challenge_methods_supported?.includes("S256")) throw matrixError("This Matrix server does not support PKCE S256.");
   return metadata as MatrixAuthMetadata;
 }
@@ -101,12 +101,20 @@ function redirectUri(): string {
   return url.toString();
 }
 
+function matrixWebClientUris(): { clientUri: string; redirectUri: string } {
+  const callback = new URL(redirectUri());
+  if (callback.protocol !== "https:") {
+    throw matrixError("Matrix OAuth web sign-in requires Locus to be opened over HTTPS. This local HTTP preview cannot register an OAuth callback; use Matrix SSO here, or open the HTTPS Locus site.");
+  }
+  return { clientUri: new URL("/", callback.origin).toString(), redirectUri: callback.toString() };
+}
+
 export async function beginMatrixOAuth(homeserver: string, userId: string): Promise<void> {
   const metadata = await discoverMatrixAuthMetadata(homeserver);
   if (!metadata) throw matrixError("OAuth is not available on this Matrix server. Choose Matrix SSO or the legacy password option.");
   if (!metadata.registration_endpoint) throw matrixError("This Matrix server does not advertise OAuth client registration.");
   const deviceId = matrixDeviceId(homeserver, userId);
-  const uri = redirectUri();
+  const { clientUri, redirectUri: uri } = matrixWebClientUris();
   let registration: Response;
   try {
     registration = await fetch(metadata.registration_endpoint, {
@@ -114,7 +122,7 @@ export async function beginMatrixOAuth(homeserver: string, userId: string): Prom
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify({
         client_name: "Locus",
-        client_uri: window.location.origin,
+        client_uri: clientUri,
         application_type: "web",
         redirect_uris: [uri],
         grant_types: ["authorization_code", "refresh_token"],
@@ -147,7 +155,7 @@ export async function beginMatrixOAuth(homeserver: string, userId: string): Prom
   authorization.searchParams.set("redirect_uri", uri);
   authorization.searchParams.set("scope", `urn:matrix:client:api:* urn:matrix:client:device:${deviceId}`);
   authorization.searchParams.set("state", state);
-  authorization.searchParams.set("response_mode", "query");
+  authorization.searchParams.set("response_mode", "fragment");
   authorization.searchParams.set("code_challenge", challenge);
   authorization.searchParams.set("code_challenge_method", "S256");
   window.location.assign(authorization.toString());
@@ -181,9 +189,10 @@ async function whoAmI(homeserver: string, accessToken: string): Promise<string> 
 
 export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession | null> {
   const url = new URL(window.location.href);
-  const oauthCode = url.searchParams.get("code");
-  const oauthState = url.searchParams.get("state");
-  const oauthError = url.searchParams.get("error");
+  const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
+  const oauthCode = url.searchParams.get("code") ?? fragment.get("code");
+  const oauthState = url.searchParams.get("state") ?? fragment.get("state");
+  const oauthError = url.searchParams.get("error") ?? fragment.get("error");
   const ssoState = url.searchParams.get("matrix_sso_state");
   const loginToken = url.searchParams.get("loginToken") ?? new URLSearchParams(url.hash.replace(/^#/, "")).get("loginToken");
   if (oauthCode || oauthState || oauthError) {

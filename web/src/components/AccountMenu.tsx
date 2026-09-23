@@ -6,9 +6,17 @@ import { IdentityIcon } from "./IdentityIcon.js";
 import type { SessionLifecycle } from "../session/SessionProvider.js";
 import { useState } from "react";
 
-export function AccountMenu({ session, lifecycle, restoreError, onConnect, onDisconnect }: { session: LocusWebSession | null; lifecycle: SessionLifecycle; restoreError?: string; onConnect: () => void; onDisconnect: () => void }) {
+export function AccountMenu({ session, lifecycle, restoreError, onConnect, onDisconnect, onClearSavedSession }: { session: LocusWebSession | null; lifecycle: SessionLifecycle; restoreError?: string; onConnect: () => void; onDisconnect: () => void; onClearSavedSession: () => void }) {
   const [copied, setCopied] = useState(false);
-  if (!session) return <button type="button" className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring"}><span className="neutral-mark"><UserRound size={17} aria-hidden="true" /></span><span>{lifecycle === "restoring" ? "Restoring…" : "Connect"}</span>{restoreError && <small title={restoreError}>Restore needs attention</small>}</button>;
+  if (!session) return <div className="disconnected-session">
+    <button type="button" className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring"}><span className="neutral-mark"><UserRound size={17} aria-hidden="true" /></span><span>{lifecycle === "restoring" ? "Restoring…" : "Connect"}</span></button>
+    {restoreError && <section className="session-restore-alert" role="alert">
+      <strong>Not connected</strong>
+      <p>{restoreError}</p>
+      <button type="button" className="secondary" onClick={onConnect}>Try another sign-in</button>
+      <button type="button" className="text-button" onClick={onClearSavedSession}>Sign out and clear saved session</button>
+    </section>}
+  </div>;
   const locusId = formatLocusId(session.owner);
   async function copy() {
     try {

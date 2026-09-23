@@ -172,6 +172,32 @@ function connectedState(keys: Awaited<ReturnType<typeof queryMatrixKeys>>, locus
   return locus ? "READY" : "VERIFIED";
 }
 
+async function connectStoredMatrixSession(
+  stored: MatrixStoredSession,
+  options: MatrixConnectionOptions,
+  persist: boolean,
+): Promise<MatrixConnected> {
+  const homeserver = stored.homeserver.replace(/\/$/, "");
+  const client = createClient({ baseUrl: homeserver, accessToken: stored.accessToken, userId: stored.userId, deviceId: stored.deviceId });
+  let crypto: MatrixCryptoDevice | null = null;
+  try {
+    const cryptoHttp = authenticatedHttp(homeserver, stored);
+    const authFetch = (input: RequestInfo | URL, init?: RequestInit) => authenticatedFetch(stored, input, init);
+    crypto = await MatrixCryptoDevice.initialize(stored.userId, stored.deviceId, cryptoHttp);
+    crypto.startSync(homeserver, authFetch, cryptoHttp);
+    const keys = await queryMatrixKeys(stored.userId, stored.deviceId, homeserver, stored.accessToken, authFetch);
+    const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto!.sign(message) });
+    const owner = matrixOwnership(keys.masterPublicKey);
+    if (keys.verification === "verified") await ensureMatrixController(options.locus, owner, controller, keys.encodedProof);
+    if (persist) window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
+    return await makeConnected(stored, client, crypto, keys, controller, options.locus);
+  } catch (cause) {
+    try { crypto?.dispose(); } catch { /* Preserve the original connection error. */ }
+    client.stopClient();
+    throw cause;
+  }
+}
+
 async function makeConnected(
   stored: MatrixStoredSession,
   client: MatrixClient,
@@ -259,32 +285,11 @@ export async function connectMatrixSession(
     homeserver,
     authType: "legacy",
   };
-  const client = createClient({ baseUrl: homeserver, accessToken: stored.accessToken, userId: stored.userId, deviceId: stored.deviceId });
-  const cryptoHttp = authenticatedHttp(homeserver, stored);
-  const authFetch = (input: RequestInfo | URL, init?: RequestInit) => authenticatedFetch(stored, input, init);
-  const crypto = await MatrixCryptoDevice.initialize(stored.userId, stored.deviceId, cryptoHttp);
-  crypto.startSync(homeserver, authFetch, cryptoHttp);
-  const keys = await queryMatrixKeys(stored.userId, stored.deviceId, homeserver, stored.accessToken, authFetch);
-  const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto.sign(message) });
-  const owner = matrixOwnership(keys.masterPublicKey);
-  if (keys.verification === "verified") await ensureMatrixController(options.locus, owner, controller, keys.encodedProof);
-  window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
-  return makeConnected(stored, client, crypto, keys, controller, options.locus);
+  return connectStoredMatrixSession(stored, options, true);
 }
 
 export async function connectMatrixTokenSession(stored: MatrixStoredSession, options: MatrixConnectionOptions = { locus: null }): Promise<MatrixConnected> {
-  const normalizedHomeserver = stored.homeserver.replace(/\/$/, "");
-  const client = createClient({ baseUrl: normalizedHomeserver, accessToken: stored.accessToken, userId: stored.userId, deviceId: stored.deviceId });
-  const cryptoHttp = authenticatedHttp(normalizedHomeserver, stored);
-  const authFetch = (input: RequestInfo | URL, init?: RequestInit) => authenticatedFetch(stored, input, init);
-  const crypto = await MatrixCryptoDevice.initialize(stored.userId, stored.deviceId, cryptoHttp);
-  crypto.startSync(normalizedHomeserver, authFetch, cryptoHttp);
-  const keys = await queryMatrixKeys(stored.userId, stored.deviceId, normalizedHomeserver, stored.accessToken, authFetch);
-  const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto.sign(message) });
-  const owner = matrixOwnership(keys.masterPublicKey);
-  if (keys.verification === "verified") await ensureMatrixController(options.locus, owner, controller, keys.encodedProof);
-  window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(stored));
-  return makeConnected(stored, client, crypto, keys, controller, options.locus);
+  return connectStoredMatrixSession(stored, options, true);
 }
 
 export async function restoreMatrixSession(
@@ -292,35 +297,32 @@ export async function restoreMatrixSession(
   options: MatrixConnectionOptions = { locus: null },
 ): Promise<MatrixConnected> {
   await ensureFreshMatrixToken(stored);
-  const client = createClient({ baseUrl: stored.homeserver, accessToken: stored.accessToken, userId: stored.userId, deviceId: stored.deviceId });
-  const cryptoHttp = authenticatedHttp(stored.homeserver, stored);
-  const authFetch = (input: RequestInfo | URL, init?: RequestInit) => authenticatedFetch(stored, input, init);
-  const crypto = await MatrixCryptoDevice.initialize(stored.userId, stored.deviceId, cryptoHttp);
-  crypto.startSync(stored.homeserver, authFetch, cryptoHttp);
-  const keys = await queryMatrixKeys(stored.userId, stored.deviceId, stored.homeserver, stored.accessToken, authFetch);
-  const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => crypto.sign(message) });
-  const owner = matrixOwnership(keys.masterPublicKey);
-  if (keys.verification === "verified") await ensureMatrixController(options.locus, owner, controller, keys.encodedProof);
-  return makeConnected(stored, client, crypto, keys, controller, options.locus);
+  return connectStoredMatrixSession(stored, options, false);
 }
 
 export function readStoredMatrixSession(): MatrixStoredSession | null {
   const localValue = window.localStorage.getItem(MATRIX_SESSION_KEY);
-  const value = localValue ?? window.sessionStorage.getItem(MATRIX_SESSION_KEY);
-  if (!value) return null;
-  try {
-    const stored = JSON.parse(value) as Partial<MatrixStoredSession>;
-    if (typeof stored.accessToken !== "string" || typeof stored.userId !== "string" || typeof stored.deviceId !== "string" || typeof stored.homeserver !== "string") return null;
-    const restored: MatrixStoredSession = { ...(stored as MatrixStoredSession), authType: stored.authType === "oauth" ? "oauth" : "legacy" };
-    if (!localValue) window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(restored));
-    return restored;
-  } catch { return null; }
+  const sessionValue = window.sessionStorage.getItem(MATRIX_SESSION_KEY);
+  for (const value of [localValue, sessionValue]) {
+    if (!value) continue;
+    try {
+      const stored = JSON.parse(value) as Partial<MatrixStoredSession>;
+      if (typeof stored.accessToken !== "string" || typeof stored.userId !== "string" || typeof stored.deviceId !== "string" || typeof stored.homeserver !== "string") continue;
+      const restored: MatrixStoredSession = { ...(stored as MatrixStoredSession), authType: stored.authType === "oauth" ? "oauth" : "legacy" };
+      if (value === sessionValue && value !== localValue) window.localStorage.setItem(MATRIX_SESSION_KEY, JSON.stringify(restored));
+      return restored;
+    } catch { /* Try the other storage location before reporting no session. */ }
+  }
+  return null;
 }
 
-export function clearStoredMatrixSession(): void { window.localStorage.removeItem(MATRIX_SESSION_KEY); }
+export function clearStoredMatrixSession(): void {
+  window.localStorage.removeItem(MATRIX_SESSION_KEY);
+  window.sessionStorage.removeItem(MATRIX_SESSION_KEY);
+}
 
 export async function revokeStoredMatrixSession(): Promise<void> {
   const stored = readStoredMatrixSession();
-  if (!stored) { clearStoredMatrixSession(); return; }
-  try { await revokeMatrixOAuthSession(stored); } finally { clearStoredMatrixSession(); }
+  clearStoredMatrixSession();
+  if (stored) await revokeMatrixOAuthSession(stored);
 }

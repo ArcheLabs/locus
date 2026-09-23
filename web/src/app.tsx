@@ -84,11 +84,17 @@ export function App() {
   const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
   networkIdRef.current = network.networkId;
 
+  function hasMatrixAuthCallback(): boolean {
+    const url = new URL(window.location.href);
+    const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
+    return ["code", "loginToken", "matrix_sso_state", "error"].some((key) => url.searchParams.has(key) || fragment.has(key));
+  }
+
   const sessionOwner = session?.owner ?? null;
   const locus = useMemo<LocusClient | null>(() => network.locus?.withSession(session?.ownershipSession ?? null) ?? null, [network.locus, session]);
 
   useEffect(() => {
-    if (oauthCallbackAttempted.current || !/[?&](code|loginToken|matrix_sso_state|error)=/.test(window.location.search)) return;
+    if (oauthCallbackAttempted.current || !hasMatrixAuthCallback()) return;
     if (networkMode && (network.status !== "ready" || !network.locus)) return;
     oauthCallbackAttempted.current = true;
     let cancelled = false;
@@ -100,9 +106,9 @@ export function App() {
       else {
         setPendingMatrixConnection(connected);
         setConnectOpen(true);
-        finishRestore("Matrix device verification is required.");
+        finishRestore("Matrix sign-in is not complete. Verify this device before it can control a Locus identity. No session is connected yet.");
       }
-    }).catch((cause) => finishRestore(cause instanceof Error ? cause.message : "Matrix sign-in callback failed."));
+    }).catch((cause) => finishRestore(`Matrix sign-in failed. No session is connected. ${cause instanceof Error ? cause.message : "The sign-in callback could not be completed."}`));
     return () => { cancelled = true; };
   }, [finishRestore, network.locus, network.status, networkMode, setSession]);
 
@@ -116,8 +122,13 @@ export function App() {
         sessionRestoreAttempted.current = true;
         void restoreMatrixSession(matrixStored, { locus: network.locus }).then((connected) => {
           if (connected.state === "READY") setSession(connected.session);
-          else { setPendingMatrixConnection(connected); setConnectOpen(true); finishRestore("Matrix device verification is required."); }
-        }).catch((cause) => finishRestore(cause instanceof Error ? cause.message : "Could not restore the Matrix session."));
+          else { setPendingMatrixConnection(connected); setConnectOpen(true); finishRestore("Matrix sign-in is not complete. Verify this device before it can control a Locus identity. No session is connected yet."); }
+        }).catch((cause) => finishRestore(`Could not restore the Matrix session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try signing in again."}`));
+        return;
+      }
+      if (window.localStorage.getItem("locus.matrix.session.v1") || window.sessionStorage.getItem("locus.matrix.session.v1")) {
+        sessionRestoreAttempted.current = true;
+        finishRestore("The saved Matrix sign-in is incomplete and could not be read. No session is connected; sign out to clear it or try signing in again.");
         return;
       }
       const stored = window.localStorage.getItem("locus.session.v1");
@@ -135,7 +146,7 @@ export function App() {
     void restore.then((restored) => {
       if (restored.address.toLowerCase() !== saved!.address!.toLowerCase()) throw new Error("The restored wallet account changed.");
       setSession(restored);
-    }).catch((cause) => finishRestore(cause instanceof Error ? cause.message : "Could not restore the wallet session."));
+    }).catch((cause) => finishRestore(`Could not restore the wallet session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try connecting again."}`));
   }, [appKitAddress, appKitConnected, appKitStatus, finishRestore, lifecycle, network.locus, network.status, networkMode, setSession, session, walletProvider]);
 
   useEffect(() => {
@@ -165,7 +176,10 @@ export function App() {
   function disconnectSession() {
     window.localStorage.removeItem("locus.session.v1");
     session?.cleanup?.();
-    if (session?.kind === "matrix") void revokeStoredMatrixSession().catch((cause) => notify(cause instanceof Error ? cause.message : "Signed out locally, but Matrix token revocation failed."));
+    if (pendingMatrixConnection && pendingMatrixConnection.session !== session) pendingMatrixConnection.session.cleanup?.();
+    setPendingMatrixConnection(null);
+    finishRestore();
+    if (session?.kind === "matrix" || !session) void revokeStoredMatrixSession().catch((cause) => notify(cause instanceof Error ? `Signed out locally, but Matrix token revocation failed: ${cause.message}` : "Signed out locally, but Matrix token revocation failed."));
     setSession(null);
   }
 
@@ -330,7 +344,7 @@ export function App() {
 
       <main className="main">
         <header className="topbar">
-          <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} onConnect={() => setConnectOpen(true)} onDisconnect={disconnectSession} />
+          <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} onConnect={() => setConnectOpen(true)} onDisconnect={disconnectSession} onClearSavedSession={disconnectSession} />
         </header>
 
         {networkMode && network.status !== "ready" && (

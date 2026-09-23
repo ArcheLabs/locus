@@ -71,6 +71,7 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
   const originalWindow = globalThis.window;
   const originalFetch = globalThis.fetch;
   const assigned = [];
+  const registrations = [];
   globalThis.window = {
     localStorage: storage(), sessionStorage: storage(),
     location: { href: "https://locus.example/app", origin: "https://locus.example", assign: (value) => assigned.push(value) },
@@ -83,6 +84,7 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
       grant_types_supported: ["authorization_code", "refresh_token"], response_modes_supported: ["query", "fragment"],
     }), { status: 200, headers: { "content-type": "application/json" } });
     assert.equal(init.method, "POST");
+    registrations.push(JSON.parse(init.body));
     return new Response(JSON.stringify({ client_id: "locus-test-client" }), { status: 201, headers: { "content-type": "application/json" } });
   };
   try {
@@ -94,11 +96,17 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
     const flow = JSON.parse(window.sessionStorage.getItem("locus.matrix.oauth-flow.v1"));
     assert.equal(authorization.searchParams.get("response_type"), "code");
     assert.equal(authorization.searchParams.get("client_id"), "locus-test-client");
+    assert.equal(authorization.searchParams.get("response_mode"), "fragment");
     assert.equal(authorization.searchParams.get("code_challenge_method"), "S256");
     assert.equal(authorization.searchParams.get("state"), flow.state);
     assert.equal(authorization.searchParams.get("scope"), `urn:matrix:client:api:* urn:matrix:client:device:${flow.deviceId}`);
     assert.equal(authorization.searchParams.get("code_challenge"), createHash("sha256").update(flow.verifier).digest("base64url"));
+    assert.deepEqual(registrations[0].redirect_uris, ["https://locus.example/app"]);
+    assert.equal(registrations[0].client_uri, "https://locus.example/");
     assert.equal(window.localStorage.getItem("locus.matrix.device.v1.https://example.org|@alice:example.org"), flow.deviceId);
+    window.location.href = "http://127.0.0.1:5173/";
+    await assert.rejects(beginMatrixOAuth("https://example.org", "@alice:example.org"), /requires Locus to be opened over HTTPS/);
+    assert.equal(registrations.length, 1, "insecure previews must not register an invalid web client");
   } finally {
     globalThis.window = originalWindow;
     globalThis.fetch = originalFetch;
@@ -122,7 +130,7 @@ test("Matrix OAuth callback persists a durable session and supports refresh and 
   sessionStorage.setItem("locus.matrix.oauth-flow.v1", JSON.stringify(flow));
   globalThis.window = {
     localStorage, sessionStorage,
-    location: { href: `https://locus.example/app?code=authorization-code&state=${flow.state}` },
+    location: { href: `https://locus.example/app#code=authorization-code&state=${flow.state}` },
     history: { replaceState() {} },
   };
   const calls = [];
