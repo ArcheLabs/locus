@@ -5,6 +5,8 @@ import { formatUnits, parseUnits, evmOwnership, polkadotOwnership, solanaOwnersh
 import { encodeAddress } from "@polkadot/util-crypto";
 import { selectNetwork } from "../web/src/network/selection.ts";
 import { queryMatrixKeys } from "../web/src/matrix/MatrixKeysQuery.ts";
+import { beginMatrixOAuth, completeMatrixAuthCallback, discoverMatrixAuthMetadata, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
+import { createHash } from "node:crypto";
 
 function matrixB64(bytes) {
   return Buffer.from(bytes).toString("base64url");
@@ -48,6 +50,104 @@ test("network amounts remain exact bigint values", () => {
   assert.equal(formatUnits(12345n, 3), "12.345");
   assert.throws(() => parseUnits("1e3", 0));
   assert.throws(() => parseUnits("1.234", 2));
+});
+
+test("unknown and zero balances use zero-value formatting", async () => {
+  const source = await fs.readFile(new URL("../web/src/locus/assets.ts", import.meta.url), "utf8");
+  assert.match(source, /formatUnits\(value \?\? 0n, decimals\)/);
+  assert.equal(formatUnits(0n, 0), "0");
+  assert.equal(formatUnits(0n, 6), "0");
+});
+
+test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and stable device scope", async () => {
+  const storage = () => {
+    const entries = new Map();
+    return {
+      getItem: (key) => entries.get(key) ?? null,
+      setItem: (key, value) => entries.set(key, String(value)),
+      removeItem: (key) => entries.delete(key),
+    };
+  };
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const assigned = [];
+  globalThis.window = {
+    localStorage: storage(), sessionStorage: storage(),
+    location: { href: "https://locus.example/app", origin: "https://locus.example", assign: (value) => assigned.push(value) },
+  };
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).endsWith("/_matrix/client/v1/auth_metadata")) return new Response(JSON.stringify({
+      issuer: "https://auth.example.org/", authorization_endpoint: "https://auth.example.org/oauth2/auth",
+      token_endpoint: "https://auth.example.org/oauth2/token", registration_endpoint: "https://auth.example.org/oauth2/register",
+      revocation_endpoint: "https://auth.example.org/oauth2/revoke", code_challenge_methods_supported: ["S256"], response_types_supported: ["code"],
+      grant_types_supported: ["authorization_code", "refresh_token"], response_modes_supported: ["query", "fragment"],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    assert.equal(init.method, "POST");
+    return new Response(JSON.stringify({ client_id: "locus-test-client" }), { status: 201, headers: { "content-type": "application/json" } });
+  };
+  try {
+    const metadata = await discoverMatrixAuthMetadata("https://example.org");
+    assert.equal(metadata.authorization_endpoint, "https://auth.example.org/oauth2/auth");
+    await beginMatrixOAuth("https://example.org", "@alice:example.org");
+    assert.equal(assigned.length, 1);
+    const authorization = new URL(assigned[0]);
+    const flow = JSON.parse(window.sessionStorage.getItem("locus.matrix.oauth-flow.v1"));
+    assert.equal(authorization.searchParams.get("response_type"), "code");
+    assert.equal(authorization.searchParams.get("client_id"), "locus-test-client");
+    assert.equal(authorization.searchParams.get("code_challenge_method"), "S256");
+    assert.equal(authorization.searchParams.get("state"), flow.state);
+    assert.equal(authorization.searchParams.get("scope"), `urn:matrix:client:api:* urn:matrix:client:device:${flow.deviceId}`);
+    assert.equal(authorization.searchParams.get("code_challenge"), createHash("sha256").update(flow.verifier).digest("base64url"));
+    assert.equal(window.localStorage.getItem("locus.matrix.device.v1.https://example.org|@alice:example.org"), flow.deviceId);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Matrix OAuth callback persists a durable session and supports refresh and revocation", async () => {
+  const storage = () => {
+    const entries = new Map();
+    return {
+      getItem: (key) => entries.get(key) ?? null,
+      setItem: (key, value) => entries.set(key, String(value)),
+      removeItem: (key) => entries.delete(key),
+    };
+  };
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const localStorage = storage();
+  const sessionStorage = storage();
+  const flow = { homeserver: "https://example.org", clientId: "client", deviceId: "LOCUS-DEVICE", state: "state", verifier: "verifier", redirectUri: "https://locus.example/app", tokenEndpoint: "https://auth.example.org/oauth2/token", revocationEndpoint: "https://auth.example.org/oauth2/revoke" };
+  sessionStorage.setItem("locus.matrix.oauth-flow.v1", JSON.stringify(flow));
+  globalThis.window = {
+    localStorage, sessionStorage,
+    location: { href: `https://locus.example/app?code=authorization-code&state=${flow.state}` },
+    history: { replaceState() {} },
+  };
+  const calls = [];
+  globalThis.fetch = async (url, init = {}) => {
+    calls.push({ url: String(url), init });
+    if (String(url) === flow.tokenEndpoint) return new Response(JSON.stringify({ access_token: "access-1", refresh_token: "refresh-1", expires_in: 300 }), { status: 200, headers: { "content-type": "application/json" } });
+    if (String(url).endsWith("/account/whoami")) return new Response(JSON.stringify({ user_id: "@alice:example.org" }), { status: 200, headers: { "content-type": "application/json" } });
+    if (String(url) === flow.revocationEndpoint) return new Response("{}", { status: 200 });
+    throw new Error(`Unexpected Matrix OAuth request ${url}`);
+  };
+  try {
+    const stored = await completeMatrixAuthCallback();
+    assert.equal(stored.userId, "@alice:example.org");
+    assert.equal(stored.deviceId, flow.deviceId);
+    assert.equal(stored.authType, "oauth");
+    assert.equal(JSON.parse(localStorage.getItem("locus.matrix.session.v1")).refreshToken, "refresh-1");
+    await refreshMatrixOAuthToken(stored);
+    assert.equal(JSON.parse(localStorage.getItem("locus.matrix.session.v1")).accessToken, "access-1");
+    await revokeMatrixOAuthSession(stored);
+    assert.equal(calls.some(({ url }) => url === flow.revocationEndpoint), true);
+    assert.match(String(calls.find(({ url }) => url === flow.revocationEndpoint).init.body), /refresh-1/);
+  } finally {
+    globalThis.window = originalWindow;
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Matrix web sessions keep owner/controller/subject distinct and omit actAs", async () => {

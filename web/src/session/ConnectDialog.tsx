@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowRight } from "lucide-react";
+import { useAppKit, useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
 import { Modal } from "../components/Modal.js";
-import { connectBrowserSession, connectorInfo, hasEvmWallet, hasSolanaWallet, listBrowserAccounts, type BrowserAccountOption } from "./connectors.js";
+import { connectBrowserSession, connectEvmProvider, connectorInfo, hasSolanaWallet, listBrowserAccounts, type BrowserAccountOption } from "./connectors.js";
 import type { LocusWebSession, SessionKind } from "./types.js";
 import { MatrixLoginDialog } from "../matrix/MatrixLoginDialog.js";
+import type { MatrixConnected } from "../matrix/MatrixConnector.js";
+import type { Eip1193Provider } from "@jamscript/client";
 import { SiEthereum, SiMatrix, SiPolkadot, SiSolana } from "react-icons/si";
 import type { IconType } from "react-icons";
 
@@ -12,21 +15,25 @@ type Props = {
   onClose: () => void;
   onConnected: (session: LocusWebSession) => void;
   locus: import("@archelabs/locus").LocusClient | null;
+  initialMatrixConnection?: MatrixConnected | null;
 };
 
 function available(kind: SessionKind): boolean {
-  if (kind === "evm") return hasEvmWallet();
   if (kind === "solana") return hasSolanaWallet();
   return true;
 }
 
-export function ConnectDialog({ open, onClose, onConnected, locus }: Props) {
+export function ConnectDialog({ open, onClose, onConnected, locus, initialMatrixConnection = null }: Props) {
   const [connecting, setConnecting] = useState<SessionKind | null>(null);
   const [error, setError] = useState("");
   const [accountOptions, setAccountOptions] = useState<BrowserAccountOption[]>([]);
   const [selectedKind, setSelectedKind] = useState<SessionKind | null>(null);
   const [selectedAccount, setSelectedAccount] = useState("");
   const [matrixOpen, setMatrixOpen] = useState(false);
+  const [waitingForEvm, setWaitingForEvm] = useState(false);
+  const { open: openAppKit, close: closeAppKit } = useAppKit();
+  const { address: evmAddress, isConnected: evmConnected } = useAppKitAccount({ namespace: "eip155" });
+  const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
   const options = useMemo(() => connectorInfo.map((entry) => ({ ...entry, available: available(entry.kind) })), []);
 
   useEffect(() => {
@@ -35,13 +42,41 @@ export function ConnectDialog({ open, onClose, onConnected, locus }: Props) {
       setAccountOptions([]);
       setSelectedAccount("");
       setError("");
+      setWaitingForEvm(false);
     }
   }, [open]);
+
+  useEffect(() => {
+    if (initialMatrixConnection) setMatrixOpen(true);
+  }, [initialMatrixConnection]);
+
+  useEffect(() => {
+    if (!waitingForEvm || !evmConnected || !evmAddress || !walletProvider) return;
+    let cancelled = false;
+    setConnecting("evm");
+    setError("");
+    void connectEvmProvider(walletProvider, evmAddress).then((session) => {
+      if (cancelled) { session.cleanup?.(); return; }
+      onConnected(session);
+      setWaitingForEvm(false);
+      onClose();
+    }).catch((cause) => {
+      if (!cancelled) setError(cause instanceof Error ? cause.message : "EVM wallet connection failed.");
+    }).finally(() => { if (!cancelled) setConnecting(null); });
+    return () => { cancelled = true; };
+  }, [evmAddress, evmConnected, onClose, onConnected, waitingForEvm, walletProvider]);
 
   async function chooseConnector(kind: SessionKind) {
     if (kind === "matrix") {
       onClose();
       setMatrixOpen(true);
+      return;
+    }
+    if (kind === "evm") {
+      setError("");
+      setWaitingForEvm(true);
+      try { await openAppKit({ view: "Connect", namespace: "eip155" }); }
+      catch (cause) { setWaitingForEvm(false); setError(cause instanceof Error ? cause.message : "Unable to open the EVM wallet selector."); }
       return;
     }
     setConnecting(kind);
@@ -100,10 +135,11 @@ export function ConnectDialog({ open, onClose, onConnected, locus }: Props) {
         </select>
         <button type="button" className="primary" disabled={!selectedAccount || connecting !== null} onClick={() => connect(selectedKind, selectedAccount)}>Connect selected account</button>
       </div>}
+      {waitingForEvm && <button type="button" className="text-button cancel-wallet-connect" onClick={() => { setWaitingForEvm(false); void closeAppKit(); }}>Cancel wallet connection</button>}
       {error && <div className="transaction-error">{error}</div>}
       <p className="modal-note">Locus keeps assets attached to Ownership. Wallets only authorize actions.</p>
     </Modal>
-    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onConnected={onConnected} locus={locus} />
+    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onConnected={onConnected} locus={locus} initialConnection={initialMatrixConnection} />
     </>
   );
 }

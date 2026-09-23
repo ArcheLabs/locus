@@ -145,6 +145,21 @@ async function connectEvm(selectedId: string): Promise<LocusWebSession> {
   };
 }
 
+export async function connectEvmProvider(provider: Eip1193Provider, address: string): Promise<LocusWebSession> {
+  if (!/^0x[0-9a-f]{40}$/i.test(address)) throw new Error("The EVM wallet returned an invalid account.");
+  const signer = new EvmOwnershipSigner(provider, address);
+  const controller = asOwnership(await signer.getController());
+  return {
+    kind: "evm",
+    owner: controller,
+    controller,
+    ownershipSession: { signer, subject: controller },
+    label: `EVM ${shortAddress(address)}`,
+    address,
+    connectionId: address,
+  };
+}
+
 function polkadotScheme(account: PolkadotAccount): "ed25519" | "sr25519" | "ecdsa" {
   if (account.type === "ed25519" || account.type === "sr25519" || account.type === "ecdsa") return account.type;
   throw new Error("The Polkadot extension did not provide a supported signature scheme for this account.");
@@ -207,6 +222,39 @@ export async function connectBrowserSession(kind: SessionKind, selectedId: strin
   if (kind === "evm") return connectEvm(selectedId);
   if (kind === "polkadot") return connectPolkadot(selectedId);
   return connectSolana(selectedId);
+}
+
+/** Restore only an account that a wallet has already exposed to this origin. */
+export async function restoreBrowserSession(kind: Exclude<SessionKind, "matrix">, selectedId: string): Promise<LocusWebSession> {
+  if (kind === "evm") {
+    const provider = browserWindow().ethereum;
+    if (!provider) throw new Error("The saved EVM wallet is not available.");
+    const result = await provider.request({ method: "eth_accounts" });
+    const address = Array.isArray(result) ? result.find((value) => typeof value === "string" && value.toLowerCase() === selectedId.toLowerCase()) : undefined;
+    if (typeof address !== "string") throw new Error("The saved EVM account is not connected to this site.");
+    return connectEvmProvider(provider, address);
+  }
+  if (kind === "polkadot") {
+    const selected = (await polkadotAccounts()).find(({ account }) => account.address === selectedId);
+    if (!selected) throw new Error("The saved Polkadot account is not enabled for this site.");
+    const { account } = selected;
+    const injector = await web3FromAddress(account.address);
+    if (!injector.signer.signRaw) throw new Error("The selected Polkadot extension cannot sign raw messages.");
+    const accountId = account.publicKey ? Uint8Array.from(account.publicKey) : decodePolkadotAccountId(account.address);
+    const signer = new PolkadotOwnershipSigner({ accountId, address: account.address, scheme: polkadotScheme(account), signer: { signRaw: (input) => injector.signer.signRaw!(input) } });
+    const controller = asOwnership(await signer.getController());
+    return { kind: "polkadot", owner: controller, controller, ownershipSession: { signer, subject: controller }, label: `Polkadot ${shortAddress(account.address)}`, address: account.address, connectionId: account.address };
+  }
+  const separator = selectedId.indexOf("::");
+  const walletName = separator < 0 ? selectedId : selectedId.slice(0, separator);
+  const requestedAddress = separator < 0 ? "" : selectedId.slice(separator + 2);
+  const wallet = solanaWallets().find((candidate) => candidate.name === walletName);
+  const account = wallet?.accounts.find((candidate) => candidate.address === requestedAddress);
+  const signMessage = wallet?.features[SolanaSignMessage] as SolanaSignMessageFeature | undefined;
+  if (!wallet || !account || !signMessage) throw new Error("The saved Solana wallet account is not available.");
+  const signer = new SolanaOwnershipSigner(account, signMessage);
+  const controller = asOwnership(await signer.getController());
+  return { kind: "solana", owner: controller, controller, ownershipSession: { signer, subject: controller }, label: `Solana ${shortAddress(account.address)}`, address: account.address, connectionId: selectedId };
 }
 
 /** Keep a connected browser session from signing with an account that the wallet has replaced. */
