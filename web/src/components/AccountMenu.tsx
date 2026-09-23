@@ -2,30 +2,33 @@ import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
 import { ChevronDown, Copy, LogOut, UserRound } from "lucide-react";
 import { formatLocusId } from "@archelabs/locus";
 import type { LocusWebSession } from "../session/types.js";
-import { clearStoredMatrixSession } from "../matrix/MatrixConnector.js";
-import { SiEthereum, SiMatrix, SiPolkadot, SiSolana } from "react-icons/si";
-import type { IconType } from "react-icons";
+import { IdentityIcon } from "./IdentityIcon.js";
+import type { SessionLifecycle } from "../session/SessionProvider.js";
+import { useState } from "react";
 
-export function AccountMenu({ session, onConnect, onDisconnect }: { session: LocusWebSession | null; onConnect: () => void; onDisconnect: () => void }) {
-  if (!session) return <button type="button" className="profile-pill profile-button" onClick={onConnect}><span className="neutral-mark"><UserRound size={17} aria-hidden="true" /></span><span>Connect</span></button>;
+export function AccountMenu({ session, lifecycle, restoreError, onConnect, onDisconnect }: { session: LocusWebSession | null; lifecycle: SessionLifecycle; restoreError?: string; onConnect: () => void; onDisconnect: () => void }) {
+  const [copied, setCopied] = useState(false);
+  if (!session) return <button type="button" className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring"}><span className="neutral-mark"><UserRound size={17} aria-hidden="true" /></span><span>{lifecycle === "restoring" ? "Restoring…" : "Connect"}</span>{restoreError && <small title={restoreError}>Restore needs attention</small>}</button>;
   const locusId = formatLocusId(session.owner);
-  async function copy() { await navigator.clipboard?.writeText(locusId); }
+  async function copy() {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable");
+      await navigator.clipboard.writeText(locusId);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1600);
+    }
+    catch { setCopied(false); }
+  }
   const activeSession = session;
-  function disconnect() { activeSession.cleanup?.(); clearStoredMatrixSession(); onDisconnect(); }
+  function disconnect() { activeSession.cleanup?.(); onDisconnect(); }
   return <DropdownMenu.Root>
-    <DropdownMenu.Trigger asChild><button type="button" className="profile-pill profile-button"><span className={`wallet-mark ${session.kind}`}><SessionIcon kind={session.kind} /></span><span>{session.label}</span><ChevronDown size={15} aria-hidden="true" /></button></DropdownMenu.Trigger>
+    <DropdownMenu.Trigger asChild><button type="button" className="profile-pill profile-button"><span className={`wallet-mark ${session.kind}`}><IdentityIcon kind={session.kind} /></span><span>{session.label}</span><ChevronDown size={15} aria-hidden="true" /></button></DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content className="account-menu" sideOffset={8} align="end">
       <div className="account-heading"><strong>{session.label}</strong><small>{session.kind === "matrix" ? "Matrix Ownership" : "Ownership session"}</small></div>
       <div className="account-detail"><small>Owner</small><code>{locusId}</code></div>
-      {session.kind === "matrix" && <div className="account-detail"><small>Controller</small><code>Device {session.matrix?.deviceId}</code><span className="account-status">Local controller authorization</span></div>}
-      <DropdownMenu.Item className="account-action" onSelect={() => void copy()}><Copy size={15} aria-hidden="true" /> Copy Locus ID</DropdownMenu.Item>
+      <div className="account-detail"><small>Controller</small><code>{formatLocusId(session.controller)}</code><span className="account-status">{session.kind === "matrix" ? `Verified Matrix device ${session.matrix?.deviceId} controls this master Ownership` : "Signs as this Ownership controller"}</span></div>
+      <DropdownMenu.Item className="account-action" onSelect={() => void copy()}><Copy size={15} aria-hidden="true" /> {copied ? "Copied" : "Copy Locus ID"}</DropdownMenu.Item>
       <DropdownMenu.Item className="account-action danger" onSelect={disconnect}><LogOut size={15} aria-hidden="true" /> Disconnect</DropdownMenu.Item>
     </DropdownMenu.Content></DropdownMenu.Portal>
   </DropdownMenu.Root>;
-}
-
-function SessionIcon({ kind }: { kind: LocusWebSession["kind"] }) {
-  const icons: Record<LocusWebSession["kind"], IconType> = { matrix: SiMatrix, evm: SiEthereum, polkadot: SiPolkadot, solana: SiSolana };
-  const Icon = icons[kind];
-  return <Icon size={16} aria-hidden="true" />;
 }

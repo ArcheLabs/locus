@@ -32,5 +32,5 @@ export async function loadAssets(locus: LocusClient, owner: Ownership | null): P
 }
 
 export function displayAmount(value: bigint | null, decimals: number): string {
-  return value === null ? "—" : formatUnits(value, decimals);
+  return formatUnits(value ?? 0n, decimals);
 }

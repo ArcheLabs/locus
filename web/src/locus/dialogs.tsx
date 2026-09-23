@@ -4,8 +4,7 @@ import { Modal } from "../components/Modal.js";
 import type { LocusWebSession } from "../session/types.js";
 import type { AssetView } from "./assets.js";
 import type { RecipientResolution } from "./recipients.js";
-import { SiEthereum, SiMatrix, SiPolkadot, SiSolana } from "react-icons/si";
-import type { IconType } from "react-icons";
+import { IdentityIcon } from "../components/IdentityIcon.js";
 
 export function ReviewDialog({
   open,
@@ -50,9 +49,12 @@ export function ReceiveDialog({ open, asset, session, onClose }: { open: boolean
   const locusId = session ? formatLocusId(session.owner) : "";
   async function copy() {
     if (!locusId) return;
-    await navigator.clipboard?.writeText(locusId);
-    setCopied(true);
-    window.setTimeout(() => setCopied(false), 1800);
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable");
+      await navigator.clipboard.writeText(locusId);
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1800);
+    } catch { setCopied(false); }
   }
   return (
     <Modal open={open} title="Receive" onClose={onClose}>
@@ -96,7 +98,7 @@ export function CreateAssetDialog({ open, locus, session, onClose, onCreated }: 
   return (
     <Modal open={open} title="Create asset" onClose={onClose} footer={<><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="button" className="primary modal-primary" disabled={working || !locus} onClick={create}>{working ? "Creating…" : "Create asset"}</button></>}>
       <p className="modal-lead">The connected Ownership becomes the issuer.</p>
-      {session && <div className="issuer-card"><span className={`wallet-mark ${session.kind}`}><SessionIcon kind={session.kind} /></span><span><small>Owner / Issuer</small><strong>{session.label}</strong><code>{formatLocusId(session.owner)}</code>{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; subject is the master Ownership</small>}</span></div>}
+      {session && <div className="issuer-card"><span className={`wallet-mark ${session.kind}`}><IdentityIcon kind={session.kind} /></span><span><small>Owner / Issuer</small><strong>{session.label}</strong><code>{formatLocusId(session.owner)}</code>{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; subject is the master Ownership</small>}</span></div>}
       <div className="form-grid">
         <label>Name<input value={name} placeholder="Dot Token" onChange={(event) => setName(event.target.value)} /></label>
         <label>Symbol<input value={symbol} placeholder="DOT" onChange={(event) => setSymbol(event.target.value.toUpperCase())} /></label>
@@ -106,10 +108,4 @@ export function CreateAssetDialog({ open, locus, session, onClose, onCreated }: 
       {error && <div className="transaction-error">{error}</div>}
     </Modal>
   );
-}
-
-function SessionIcon({ kind }: { kind: LocusWebSession["kind"] }) {
-  const icons: Record<LocusWebSession["kind"], IconType> = { matrix: SiMatrix, evm: SiEthereum, polkadot: SiPolkadot, solana: SiSolana };
-  const Icon = icons[kind];
-  return <Icon size={16} aria-hidden="true" />;
 }

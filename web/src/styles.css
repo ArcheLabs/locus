@@ -134,3 +134,33 @@ button:disabled { cursor: not-allowed; }
 .account-action:hover { background: #f5f7ff; }
 .account-action.danger { color: #b42318; }
 .text-button { border: 0; background: transparent; color: #3b5cff; padding: 0; font-weight: 650; }
+.latest-assets h2 { margin: 2px 0 14px; font-size: 20px; letter-spacing: -.3px; }
+.latest-list { overflow: hidden; }
+.latest-asset { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 0; border-top: 1px solid #eef0f4; background: #fff; text-align: left; }
+.latest-asset:first-child { border-top: 0; }
+.latest-asset:hover { background: #f8faff; }
+.latest-asset > span:nth-child(2) { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.latest-asset strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.latest-chevron { color: #98a2b3; font-size: 25px; }
+.asset-row:focus-visible, .latest-asset:focus-visible { outline: 3px solid #aebcff; outline-offset: -3px; }
+.asset-row[role="button"] { cursor: pointer; }
+.asset-row[role="button"]:focus-visible { outline: 3px solid #aebcff; outline-offset: -3px; }
+.detail-modal { text-align: center; }
+.detail-modal h2 { margin: 14px 0 2px; font-size: 28px; }
+.detail-modal dl { margin: 24px 0 12px; text-align: left; }
+.detail-modal dl div { display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; padding: 11px 0; border-bottom: 1px solid #f0f2f5; }
+.detail-modal dt { color: #667085; }
+.detail-modal dd { margin: 0; font-weight: 700; text-align: right; overflow-wrap: anywhere; }
+.detail-modal dd code { font-size: 11px; }
+.matrix-id-field, .password-fallback label { display: grid; gap: 7px; color: #344054; font-size: 13px; font-weight: 650; }
+.matrix-id-field input, .password-fallback input { width: 100%; border: 1px solid #d8dee8; border-radius: 10px; padding: 12px; }
+.matrix-auth-button { margin-top: 14px; }
+.auth-caption { color: #667085; font-size: 12px; line-height: 1.5; margin: 9px 0 16px; }
+.legacy-auth-options { border: 1px solid #e6eaf0; background: #fbfcff; border-radius: 12px; padding: 14px; margin-top: 15px; }
+.legacy-auth-options > p { color: #667085; font-size: 13px; line-height: 1.45; margin: 5px 0 12px; }
+.legacy-password-toggle { margin-top: 14px; }
+.password-fallback { margin-top: 14px; display: grid; gap: 10px; }
+.advanced-toggle { display: block; margin-top: 16px; }
+.verification-card { border: 1px solid #f5d08a; background: #fffaeb; border-radius: 12px; padding: 15px; color: #7a4d00; }
+.verification-card p { font-size: 13px; line-height: 1.5; margin: 7px 0 0; }
+@media(max-width:900px){.latest-assets{margin-top:8px}.asset-row{grid-template-columns:auto 1fr .5fr auto}.asset-row > span:nth-of-type(3){display:none}}

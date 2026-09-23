@@ -13,11 +13,11 @@ export function AssetPicker({ networkMode, asset, assets, search, open, onOpenCh
   onSelect: (asset: AssetView) => void;
   onCycleDemo: () => void;
 }) {
-  const symbol = asset?.symbol ?? "—";
+  const symbol = asset?.symbol ?? "Asset";
   const matching = assets.filter((entry) => !search || `${entry.name} ${entry.symbol} ${entry.assetIdHex}`.toLowerCase().includes(search.toLowerCase()));
   const selectedId = asset && "assetIdHex" in asset ? asset.assetIdHex : undefined;
   const trigger = <button type="button" className="asset-picker" onClick={networkMode ? undefined : onCycleDemo} aria-label="Select asset">
-    <span className="coin" style={{ background: asset?.color ?? "#98a2b3" }}>{symbol[0]}</span>
+    <span className="coin" style={{ background: asset?.color ?? "#98a2b3" }}>{asset?.symbol?.[0] ?? "?"}</span>
     <span className="asset-copy"><strong>{symbol}</strong><small>{asset?.name ?? "No assets found on this network."}</small></span>
     <span className="balance-copy"><small>Balance</small><strong>{displayAmount(asset?.balance ?? null, asset?.decimals ?? 0)} {asset ? symbol : ""}</strong></span>
     <ChevronDown size={17} className="muted" aria-hidden="true" />
