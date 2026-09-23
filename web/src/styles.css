@@ -24,7 +24,16 @@ button:disabled { cursor: not-allowed; }
 .mode-pill { color: #12b76a; font-size: 13px; }
 .mode-pill.error { color: #ef4444; }
 .mode-pill.connecting { color: #b54708; }
-.matrix-mark, .type-icon { display: grid; place-items: center; background: #111827; color: #62f0b1; border-radius: 9px; width: 30px; height: 30px; font-weight: 800; }
+.matrix-mark { display: grid; place-items: center; background: #111827; color: #62f0b1; border-radius: 9px; width: 30px; height: 30px; font-weight: 800; }
+.type-icon { display: grid; place-items: center; color: #344054; background: #f2f4f7; border-radius: 9px; width: 30px; height: 30px; font-weight: 800; flex: 0 0 auto; }
+.type-icon.matrix { color: #5b3a91; background: #f0eafd; }
+.type-icon.telegram { color: #1677bd; background: #e8f4fc; }
+.type-icon.email { color: #3454e8; background: #edf0ff; }
+.type-icon.github { color: #24292f; background: #eef0f2; }
+.type-icon.evm { color: #627eea; background: #edf0ff; }
+.type-icon.polkadot { color: #e6007a; background: #fde8f3; }
+.type-icon.solana { color: #6843ce; background: #f0eaff; }
+.type-icon.locus { color: #3454e8; background: #edf0ff; }
 .neutral-mark { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: #f2f4f7; color: #667085; }
 .page { max-width: 1120px; margin: 0 auto; }
 .send-page { max-width: 760px; }
@@ -110,7 +119,6 @@ button:disabled { cursor: not-allowed; }
 .asset-menu button > span:nth-child(2) { display: grid; gap: 2px; flex: 1; }
 .asset-menu button > span:last-child { color: #667085; }
 .asset-menu .empty-state { padding: 14px; }
-.type-icon { flex: 0 0 auto; }
 .type-menu button .type-icon { display: grid; place-items: center; }
 .activity-row > .sent, .activity-row > .received { display: inline-flex; align-items: center; gap: 4px; }
 .modal-backdrop { background: #10182866; }
@@ -163,4 +171,10 @@ button:disabled { cursor: not-allowed; }
 .advanced-toggle { display: block; margin-top: 16px; }
 .verification-card { border: 1px solid #f5d08a; background: #fffaeb; border-radius: 12px; padding: 15px; color: #7a4d00; }
 .verification-card p { font-size: 13px; line-height: 1.5; margin: 7px 0 0; }
+.disconnected-session { position: relative; }
+.session-restore-alert { position: absolute; z-index: 90; top: calc(100% + 10px); right: 0; width: min(390px, calc(100vw - 32px)); padding: 16px; border: 1px solid #f4c7c3; border-radius: 14px; background: #fff; box-shadow: 0 18px 38px #10182826; color: #344054; }
+.session-restore-alert strong { display: block; color: #b42318; }
+.session-restore-alert p { margin: 7px 0 12px; color: #475467; font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.session-restore-alert .secondary { width: 100%; justify-content: center; font-size: 13px; }
+.session-restore-alert .text-button { display: block; margin: 12px auto 0; color: #b42318; }
 @media(max-width:900px){.latest-assets{margin-top:8px}.asset-row{grid-template-columns:auto 1fr .5fr auto}.asset-row > span:nth-of-type(3){display:none}}
