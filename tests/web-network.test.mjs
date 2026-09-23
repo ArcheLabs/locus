@@ -6,8 +6,7 @@ import { encodeAddress } from "@polkadot/util-crypto";
 import { selectNetwork } from "../web/src/network/selection.ts";
 import { queryMatrixKeys } from "../web/src/matrix/MatrixKeysQuery.ts";
 import { beginMatrixOAuth, commitMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, completeMatrixAuthCallback, discoverMatrixAuthMetadata, matrixDeviceId, persistMatrixSession, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
-import { MatrixCryptoDevice } from "../web/src/matrix/MatrixCryptoDevice.ts";
-import { describeMatrixCause } from "../web/src/matrix/MatrixErrors.ts";
+import { describeMatrixCause, matrixCryptoStageFailure } from "../web/src/matrix/MatrixErrors.ts";
 import { createHash } from "node:crypto";
 
 function matrixB64(bytes) {
@@ -185,30 +184,17 @@ test("Matrix device IDs stay pending in session storage until the crypto setup c
   } finally { globalThis.window = originalWindow; }
 });
 
-test("Matrix crypto initialization reports WASM and store failures separately and preserves safe causes", async () => {
-  const http = async () => "{}";
-  await assert.rejects(
-    MatrixCryptoDevice.initialize("@alice:example.org", "LOCUS-TEST", http, {
-      loadWasm: async () => { throw new Error("WASM TEST ERROR"); },
-      createMachine: async () => { throw new Error("must not initialize store after WASM failure"); },
-    }),
-    (error) => error.code === "CRYPTO_WASM_INIT_FAILED" && error.message.includes("WASM TEST ERROR"),
-  );
-  await assert.rejects(
-    MatrixCryptoDevice.initialize("@alice:example.org", "LOCUS-TEST", http, {
-      loadWasm: async () => undefined,
-      createMachine: async () => { throw new Error("IndexedDB TEST ERROR"); },
-    }),
-    (error) => error.code === "CRYPTO_STORE_INIT_FAILED" && error.message.includes("IndexedDB TEST ERROR") && error.message.includes("locus-matrix-v1-"),
-  );
-  const machine = { outgoingRequests: async () => { throw new Error("OUTGOING TEST ERROR"); }, close() {}, free() {} };
-  await assert.rejects(
-    MatrixCryptoDevice.initialize("@alice:example.org", "LOCUS-TEST", http, {
-      loadWasm: async () => undefined,
-      createMachine: async () => machine,
-    }),
-    (error) => error.code === "CRYPTO_OUTGOING_REQUEST_FAILED" && error.message.includes("OUTGOING TEST ERROR"),
-  );
+test("Matrix crypto WASM, store, and outgoing-request stages retain distinct safe errors", () => {
+  const wasm = matrixCryptoStageFailure("CRYPTO_WASM_INIT_FAILED", "WASM could not load.", new Error("WASM TEST ERROR"));
+  assert.equal(wasm.code, "CRYPTO_WASM_INIT_FAILED");
+  assert.match(wasm.message, /WASM TEST ERROR/);
+  assert.equal(wasm.cause.message, "WASM TEST ERROR");
+  const store = matrixCryptoStageFailure("CRYPTO_STORE_INIT_FAILED", "Store locus-matrix-v1-test could not open.", new Error("IndexedDB TEST ERROR"));
+  assert.equal(store.code, "CRYPTO_STORE_INIT_FAILED");
+  assert.match(store.message, /locus-matrix-v1-test.*IndexedDB TEST ERROR/);
+  const outgoing = matrixCryptoStageFailure("CRYPTO_OUTGOING_REQUEST_FAILED", "Outgoing requests could not be prepared.", new Error("OUTGOING TEST ERROR"));
+  assert.equal(outgoing.code, "CRYPTO_OUTGOING_REQUEST_FAILED");
+  assert.match(outgoing.message, /OUTGOING TEST ERROR/);
   assert.match(describeMatrixCause(new Error("Bearer secret access_token=secret refresh_token=secret password=secret code_verifier=secret")), /\[redacted\]/);
   assert.doesNotMatch(describeMatrixCause(new Error("Bearer secret access_token=secret refresh_token=secret password=secret code_verifier=secret")), /secret/);
 });

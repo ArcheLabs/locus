@@ -42,3 +42,8 @@ export function describeMatrixCause(cause: unknown): string {
     .replace(/([?#&](?:code|token|access_token|refresh_token|loginToken|code_verifier)=)[^&#\s]+/gi, "$1[redacted]")
     .slice(0, 360);
 }
+
+export function matrixCryptoStageFailure(code: MatrixErrorCode, message: string, cause: unknown): MatrixConnectorError {
+  if (cause instanceof MatrixConnectorError && cause.code === code) return cause;
+  return new MatrixConnectorError(code, `${message} ${describeMatrixCause(cause)}`, { cause });
+}
