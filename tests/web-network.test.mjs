@@ -292,3 +292,41 @@ test("Matrix pending-device lookup reuses the same device ID until cross-signing
   assert.equal(ready.deviceId, deviceId);
   assert.deepEqual(ready.masterPublicKey, master);
 });
+
+test("identity icons use branded marks, generic EVM, and row-level selection", async () => {
+  const identity = await fs.readFile(new URL("../web/src/components/IdentityIcon.tsx", import.meta.url), "utf8");
+  const recipient = await fs.readFile(new URL("../web/src/locus/RecipientTypeMenu.tsx", import.meta.url), "utf8");
+  const connect = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
+  const account = await fs.readFile(new URL("../web/src/components/AccountMenu.tsx", import.meta.url), "utf8");
+  const styles = await fs.readFile(new URL("../web/src/styles/identity-icons.css", import.meta.url), "utf8");
+  const baseStyles = await fs.readFile(new URL("../web/src/styles.css", import.meta.url), "utf8");
+  const solana = await fs.readFile(new URL("../web/src/assets/brands/solana.svg", import.meta.url), "utf8");
+
+  for (const kind of ["matrix", "telegram", "github", "polkadot", "solana", "email", "evm", "locus"]) {
+    assert.match(identity, new RegExp(`case "${kind}"`), `${kind} identity icon is mapped`);
+    assert.match(recipient, new RegExp(`"${kind}"`), `${kind} recipient is available`);
+  }
+  assert.doesNotMatch(identity, /SiEthereum/);
+  assert.doesNotMatch(connect, /SiEthereum/);
+  assert.match(connect, /IdentityIcon kind=\{entry\.kind\}/);
+  assert.match(account, /IdentityIcon kind=\{session\.kind\}/);
+  assert.doesNotMatch(account, /wallet-mark/);
+  assert.match(identity, /case "evm":[\s\S]*EvmAddressIcon/);
+  assert.match(identity, /import solanaMark from "\.\.\/assets\/brands\/solana\.svg"/);
+  assert.match(solana, /linearGradient[\s\S]*#9945FF[\s\S]*#19FB9B/);
+  assert.match(recipient, /data-selected=\{selected \? "true"/);
+  assert.match(recipient, /className="identity-icon-slot"/);
+  assert.doesNotMatch(recipient, /type-icon|wallet-mark/);
+  assert.match(styles, /\.identity-icon-slot\s*\{[\s\S]*width: 32px/);
+  assert.match(styles, /--brand-matrix: #111111/);
+  assert.match(styles, /--brand-matrix: #f5f5f5/);
+  assert.match(styles, /--brand-telegram: #26a5e4/);
+  assert.match(styles, /--brand-github: #181717/);
+  assert.match(styles, /--brand-github: #f0f6fc/);
+  assert.match(styles, /--brand-polkadot: #e6007a/);
+  assert.match(styles, /overflow-y: auto/);
+  assert.match(styles, /\.type-menu \.type-menu-item\[data-selected="true"\]/);
+  assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\)/);
+  assert.match(styles, /\.connect-option\.connect-option:disabled\s*\{\s*opacity: 1/);
+  assert.doesNotMatch(baseStyles, /\.type-icon(?:\.|\s|\{)/);
+});

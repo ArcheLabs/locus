@@ -2,13 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { useAppKit, useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
 import { Modal } from "../components/Modal.js";
+import { IdentityIcon } from "../components/IdentityIcon.js";
 import { connectBrowserSession, connectEvmProvider, connectorInfo, hasSolanaWallet, listBrowserAccounts, type BrowserAccountOption } from "./connectors.js";
 import type { LocusWebSession, SessionKind } from "./types.js";
 import { MatrixLoginDialog } from "../matrix/MatrixLoginDialog.js";
 import type { MatrixConnected } from "../matrix/MatrixConnector.js";
 import type { Eip1193Provider } from "@jamscript/client";
-import { SiEthereum, SiMatrix, SiPolkadot, SiSolana } from "react-icons/si";
-import type { IconType } from "react-icons";
 
 type Props = {
   open: boolean;
@@ -122,7 +121,7 @@ export function ConnectDialog({ open, onClose, onConnected, locus, initialMatrix
       <div className="connect-options">
         {displayOptions.map((entry) => (
           <button key={entry.kind} type="button" className="connect-option" disabled={connecting !== null || !entry.available} onClick={() => chooseConnector(entry.kind)}>
-            <span className={`wallet-mark ${entry.kind}`} aria-hidden="true"><ConnectorIcon kind={entry.kind} /></span>
+            <span className="identity-icon-slot"><IdentityIcon kind={entry.kind} size={24} /></span>
             <span><strong>{entry.label}</strong><small>{connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}</small></span>
             <ArrowRight className="connect-arrow" size={18} aria-hidden="true" />
           </button>
@@ -142,10 +141,4 @@ export function ConnectDialog({ open, onClose, onConnected, locus, initialMatrix
     <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onConnected={onConnected} locus={locus} initialConnection={initialMatrixConnection} />
     </>
   );
-}
-
-function ConnectorIcon({ kind }: { kind: SessionKind }) {
-  const icons: Record<SessionKind, IconType> = { matrix: SiMatrix, evm: SiEthereum, polkadot: SiPolkadot, solana: SiSolana };
-  const Icon = icons[kind];
-  return <Icon size={18} aria-hidden="true" />;
 }

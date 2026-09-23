@@ -30,7 +30,7 @@ export function AccountMenu({ session, lifecycle, restoreError, onConnect, onDis
   const activeSession = session;
   function disconnect() { activeSession.cleanup?.(); onDisconnect(); }
   return <DropdownMenu.Root>
-    <DropdownMenu.Trigger asChild><button type="button" className="profile-pill profile-button"><span className={`wallet-mark ${session.kind}`}><IdentityIcon kind={session.kind} /></span><span>{session.label}</span><ChevronDown size={15} aria-hidden="true" /></button></DropdownMenu.Trigger>
+    <DropdownMenu.Trigger asChild><button type="button" className="profile-pill profile-button"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span>{session.label}</span><ChevronDown size={15} aria-hidden="true" /></button></DropdownMenu.Trigger>
     <DropdownMenu.Portal><DropdownMenu.Content className="account-menu" sideOffset={8} align="end">
       <div className="account-heading"><strong>{session.label}</strong><small>{session.kind === "matrix" ? "Matrix Ownership" : "Ownership session"}</small></div>
       <div className="account-detail"><small>Owner</small><code>{locusId}</code></div>
