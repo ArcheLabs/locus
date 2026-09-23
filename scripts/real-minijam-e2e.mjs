@@ -60,15 +60,18 @@ async function applied(submitted, label) {
   return result;
 }
 
-async function rejected(submitted, label, errorCode) {
+async function expectRejected(submission, label, errorCode) {
+  const submitted = await submission;
   const result = await protocolClient.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
   assert.equal(result.actionReceipt.status, "failed", `${label} receipt status`);
   assert.equal(result.actionReceipt.errorCode, errorCode, `${label} error code`);
 }
 
-async function submitExpected(client, signer, actionName, input, errorCode) {
-  const submitted = await protocolClient.submitOwnershipAction(actionName, input, signer);
-  await rejected(submitted, actionName, errorCode);
+function sessionFor(signer) {
+  return {
+    signer,
+    subject: signer.controller,
+  };
 }
 
 function assertAmount(actual, expected, label) {
@@ -80,9 +83,9 @@ await protocolClient.validateDeployment();
 const aliceSigner = signerFor(1);
 const bobSigner = signerFor(2);
 const carolSigner = signerFor(3);
-const alice = new LocusClient(protocolClient, { signer: aliceSigner });
-const bob = new LocusClient(protocolClient, { signer: bobSigner });
-const carol = new LocusClient(protocolClient, { signer: carolSigner });
+const alice = new LocusClient(protocolClient, sessionFor(aliceSigner));
+const bob = new LocusClient(protocolClient, sessionFor(bobSigner));
+const carol = new LocusClient(protocolClient, sessionFor(carolSigner));
 const aliceOwner = aliceSigner.controller;
 const bobOwner = bobSigner.controller;
 const carolOwner = carolSigner.controller;
@@ -114,7 +117,7 @@ assertAmount(await abc.balanceOf(carolOwner), 7n * unit, "Carol after transferFr
 assertAmount(await abc.allowance(aliceOwner, bobOwner), 8n * unit, "allowance after transferFrom");
 console.log("TRANSFER_FROM=PASS");
 
-await submitExpected(bob, bobSigner, "mint", { assetId, to: bobOwner, amount: 1n * unit }, 2007);
+await expectRejected(bob.mint(assetId, bobOwner, 1n * unit), "NON_ISSUER_MINT", 2007);
 console.log("NON_ISSUER_REJECTED=PASS");
 
 await applied(await alice.mint(assetId, bobOwner, 10n * unit), "MINT");

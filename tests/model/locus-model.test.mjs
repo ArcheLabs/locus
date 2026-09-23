@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
+import { encodeActionPayload } from "@jamscript/client";
 import { LocusClient, LocusError, encodeAssetName, encodeAssetSymbol, formatAmount, parseAmount } from "../../dist/sdk/index.js";
 import { LocusModel, MAX_U128, id, owner, key } from "./locus-model.mjs";
+
+const serviceAbi = JSON.parse(readFileSync(new URL("../../abi/service.abi.json", import.meta.url), "utf8"));
 
 const alice = owner(41);
 const bob = owner(42);
@@ -178,6 +182,53 @@ test("SDK injects the stable subject and does not use actAs", async () => {
   assert.equal(calls[0][2], signer);
   assert.deepEqual(calls[0][1].subject, subject);
   assert.equal(calls[0].length, 3);
+});
+
+test("direct-owner session uses signer controller as subject and encodes through JamScript SDK", async () => {
+  const calls = [];
+  const signer = {
+    controller: alice,
+    async getController() { return this.controller; },
+    async signJamScriptAction() { return new Uint8Array([1]); },
+  };
+  const session = { signer, subject: signer.controller };
+  assert.equal(signer.controller, session.subject);
+  const adapter = {
+    async submitOwnershipAction(actionName, input) {
+      const payload = encodeActionPayload(serviceAbi, actionName, input);
+      calls.push({ actionName, input, payload });
+      return { transactionId: "0xencoded", status: "queued", actionHash: "0xhash" };
+    },
+    async queryLatest() { return { value: null }; },
+    async waitForAction() { return { status: "applied" }; },
+  };
+
+  const result = await new LocusClient(adapter, session).createAsset(assetId, "Direct", "DIR", 0, 1n);
+  assert.equal(result.transactionId, "0xencoded");
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].actionName, "createAsset");
+  assert.equal(calls[0].input.subject, signer.controller);
+  assert.ok(calls[0].payload instanceof Uint8Array);
+  assert.ok(calls[0].payload.length > 0);
+});
+
+test("malformed JavaScript Ownership session rejects missing subject before submission", async () => {
+  let submissions = 0;
+  const signer = {
+    async getController() { return alice; },
+    async signJamScriptAction() { return new Uint8Array([1]); },
+  };
+  const adapter = {
+    async submitOwnershipAction() { submissions += 1; return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
+    async queryLatest() { return { value: null }; },
+    async waitForAction() { return { status: "applied" }; },
+  };
+
+  await assert.rejects(
+    () => new LocusClient(adapter, { signer }).createAsset(assetId, "Invalid", "INV", 0, 1n),
+    /session\.subject is not a valid Ownership/,
+  );
+  assert.equal(submissions, 0);
 });
 
 test("SDK treats missing controller state as inactive", async () => {

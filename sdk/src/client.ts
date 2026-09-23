@@ -104,6 +104,7 @@ export class LocusClient {
 
   private requireSession(): OwnershipSession {
     if (!this.session) throw locusError(LOCUS_ERROR_CODES.NO_OWNERSHIP_SESSION, "an Ownership session is required for this action");
+    assertOwnership(this.session.subject, "session.subject");
     return this.session;
   }
 
