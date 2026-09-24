@@ -615,8 +615,8 @@ function SwapPage({ networkMode, networkId, status, locus, assets, session, onCo
       </select>
       {poolLoading && <p className="muted">Loading pools…</p>}
       {poolError && <div className="transaction-error" role="alert">{poolError}<button className="text-button" type="button" onClick={() => setPoolRefresh((value) => value + 1)}>Retry</button></div>}
-      {!poolLoading && !poolError && availablePools.length === 0 && <div className="empty-state swap-empty">Liquidity is not initialized yet. No quote is available until a pool has been seeded.</div>}
-      {selected && !selectedHasLiquidity && <div className="empty-state swap-empty">This pool has no liquidity yet. No quote is available until it is seeded.</div>}
+      {!poolLoading && !poolError && availablePools.length === 0 && <div className="empty-state swap-empty">No liquidity is available yet. This pair is not available until its pool is initialized.</div>}
+      {selected && !selectedHasLiquidity && <div className="empty-state swap-empty">No liquidity is available for this pair. No quote is available until the pool is seeded.</div>}
       {selected && selectedHasLiquidity && assetIn && assetOut && <>
         <div className="swap-side-label"><label htmlFor="swap-amount">You pay</label><span>Balance: {displayAssetAmount(assetIn)}</span></div>
         <div className="swap-token-card">
@@ -639,7 +639,8 @@ function SwapPage({ networkMode, networkId, status, locus, assets, session, onCo
           <div><dt>Fee</dt><dd>0.30%</dd></div>
           <div><dt>Minimum received</dt><dd>{minReceived} {assetOut.symbol}</dd></div>
           <div><dt>Price impact</dt><dd>{priceImpact === null ? "—" : `≈ ${priceImpact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`}</dd></div>
-          {equityPool && <div><dt>Market data</dt><dd>Demo pool · No market oracle</dd></div>}
+          <div><dt>Pricing</dt><dd>Pool price · Demo liquidity · No market oracle</dd></div>
+          {equityPool && <div><dt>Asset disclosure</dt><dd>Demo equity · No real securities rights</dd></div>}
         </dl>
       </>}
       <button className="primary" type="button" disabled={busy || status !== "ready" || !selected || !quote || submission === "applied"} onClick={openReview}>
@@ -648,7 +649,7 @@ function SwapPage({ networkMode, networkId, status, locus, assets, session, onCo
       {submission === "submitted" && transactionId && <div className="receipt"><strong>Swap submitted · waiting for confirmation</strong><code>{transactionId}</code></div>}
       {submission === "applied" && transactionId && <div className="receipt"><strong>Swap applied</strong><code>{transactionId}</code></div>}
       {(error || submission === "failed") && <div className="transaction-error" role="alert">{error || "Swap failed."}</div>}
-      {selected && <p className="notice">Pool prices are calculated from current reserves. They are not market prices. Swaps use a single pool and a fixed 0.30% fee.</p>}
+      <p className="notice">Pool prices come from on-chain reserves, not market data. Demo liquidity · No market oracle. Quotes appear only when chain state contains a seeded pool. Swaps use a single pool and a fixed 0.30% fee.</p>
     </div>
     {reviewOpen && quote && assetIn && assetOut && <Modal open title="Review swap" onClose={() => setReviewOpen(false)} footer={<><ActionButton variant="secondary" icon={X} onClick={() => setReviewOpen(false)}>Cancel</ActionButton><ActionButton variant="primary" icon={ArrowLeftRight} onClick={() => void confirmSwap()}>Confirm swap</ActionButton></>}>
       <p className="modal-lead">Review the exact-input swap before signing.</p>

@@ -3,6 +3,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import { FetchRpcTransport, JamScriptClient, ownershipKey, toHex } from "@jamscript/client";
 import { LocusClient, encodeOwnership } from "../../dist/sdk/index.js";
+import { CURATED_TREASURY_EVM, curatedTreasuryOwnership } from "./config.mjs";
 
 const root = path.resolve(new URL("../..", import.meta.url).pathname);
 
@@ -18,32 +19,53 @@ export async function createCuratedRuntime(signerEnvName, { requireTreasurySigne
     throw new Error("Set LOCUS_CURATED_BACKEND_RPC to the trusted backend RPC URL; relative browser paths cannot be used by this script.");
   }
 
-  const signerModulePath = process.env[signerEnvName];
-  if (!signerModulePath) throw new Error(`${signerEnvName} is required; no key is generated or substituted by this script`);
-  const resolvedSignerPath = signerModulePath.startsWith("file:")
-    ? new URL(signerModulePath)
-    : pathToFileURL(path.resolve(signerModulePath));
-  const signerFsPath = resolvedSignerPath.protocol === "file:" ? path.resolve(resolvedSignerPath.pathname) : "";
-  if (signerFsPath && (signerFsPath === root || signerFsPath.startsWith(`${root}${path.sep}`))) {
-    throw new Error("Signer module must be stored outside the repository");
+  let signer;
+  let subject;
+  const treasuryKeyFile = requireTreasurySigner ? process.env.LOCUS_TREASURY_KEY_FILE : undefined;
+  if (treasuryKeyFile) {
+    const { createTreasurySignerFromKeyFile } = await import("./treasury-keyfile.mjs");
+    ({ signer, subject } = await createTreasurySignerFromKeyFile(treasuryKeyFile, CURATED_TREASURY_EVM, root));
+  } else {
+    const signerModulePath = process.env[signerEnvName];
+    if (!signerModulePath) {
+      const expected = requireTreasurySigner
+        ? "LOCUS_TREASURY_KEY_FILE or a protected Treasury signer module is required; no key is generated or substituted by this script"
+        : `${signerEnvName} is required; no key is generated or substituted by this script`;
+      throw new Error(expected);
+    }
+    const resolvedSignerPath = signerModulePath.startsWith("file:")
+      ? new URL(signerModulePath)
+      : pathToFileURL(path.resolve(signerModulePath));
+    const signerFsPath = resolvedSignerPath.protocol === "file:" ? path.resolve(resolvedSignerPath.pathname) : "";
+    if (signerFsPath && (signerFsPath === root || signerFsPath.startsWith(`${root}${path.sep}`))) {
+      throw new Error("Signer module must be stored outside the repository");
+    }
+    const signerExports = await import(resolvedSignerPath.href);
+    const provided = signerExports.default ?? {};
+    signer = signerExports.signer ?? provided.signer ?? signerExports.default;
+    subject = signerExports.subject ?? signerExports.issuer ?? provided.subject ?? provided.issuer;
   }
-  const signerExports = await import(resolvedSignerPath.href);
-  const provided = signerExports.default ?? {};
-  const signer = signerExports.signer ?? provided.signer ?? signerExports.default;
-  const subject = signerExports.subject ?? signerExports.issuer ?? provided.subject ?? provided.issuer ?? signer?.controller;
-  if (!signer || !subject || typeof signer.signJamScriptAction !== "function" || !signer.controller) {
-    throw new Error(`${signerEnvName} must reference a protected module exporting signer and optional subject/issuer Ownership`);
+  const controller = signer?.controller ?? (typeof signer?.getController === "function" ? await signer.getController() : undefined);
+  subject ??= controller;
+  if (!signer || !subject || typeof signer.signJamScriptAction !== "function" || !controller) {
+    throw new Error(`${signerEnvName} must resolve to a protected Ownership signer and optional direct subject`);
   }
   encodeOwnership(subject);
-  encodeOwnership(signer.controller);
+  encodeOwnership(controller);
   if (requireTreasurySigner) {
-    const { curatedTreasuryOwnership } = await import("./config.mjs");
-    if (toHex(ownershipKey(signer.controller)).toLowerCase() !== toHex(ownershipKey(curatedTreasuryOwnership)).toLowerCase()) {
+    const exactEvmController = controller.version === curatedTreasuryOwnership.version
+      && controller.kind === curatedTreasuryOwnership.kind
+      && toHex(controller.public).toLowerCase() === toHex(curatedTreasuryOwnership.public).toLowerCase();
+    if (!exactEvmController) {
       throw new Error("Treasury signer controller does not match the configured curated treasury Ownership");
     }
-    if (toHex(ownershipKey(subject)).toLowerCase() !== toHex(ownershipKey(curatedTreasuryOwnership)).toLowerCase()) {
+    const exactEvmSubject = subject.version === curatedTreasuryOwnership.version
+      && subject.kind === curatedTreasuryOwnership.kind
+      && toHex(subject.public).toLowerCase() === toHex(curatedTreasuryOwnership.public).toLowerCase();
+    if (!exactEvmSubject) {
       throw new Error("Treasury pool actions require the treasury Ownership as the direct subject");
     }
+    console.log("TREASURY_SIGNER_ADDRESS_MATCH=PASS");
   }
 
   const protocolClient = new JamScriptClient(descriptor, new FetchRpcTransport(backendRpc));

@@ -19,4 +19,4 @@ export const CURATED_ASSETS = [
   initialSupply: asset.wholeSupply * (10n ** BigInt(asset.decimals)),
 }));
 
-export const DEMO_POOL_CONFIG_PATH = new URL("./pools.json", import.meta.url);
+export const DEMO_POOL_CONFIG_PATH = new URL("../../config/liquidity/local.v1.json", import.meta.url);
