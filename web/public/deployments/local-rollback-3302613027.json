@@ -4,9 +4,9 @@
   "backendUrl": "/rpc",
   "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
   "networkDomain": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
-  "serviceId": 3083943385,
-  "serviceKey": "0x6dd2821414b72b162c0783f77fbe467c55d985d444dd1506b3625bb6851650f3",
-  "codeHash": "0xd0458437d18c4af8a012a96edcf84d66c5a881034cb063bfc51c7a9d25ab0a1a",
+  "serviceId": 3302613027,
+  "serviceKey": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "codeHash": "0xda27eafc84d5067d39f28c6689411690f704ca437164083199507620cc829223",
   "abiVersion": 1,
   "abi": {
     "abiVersion": 1,
@@ -135,192 +135,6 @@
           },
           {
             "name": "initialSupply",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "initialHolder",
-            "type": {
-              "kind": "ownership"
-            }
-          }
-        ],
-        "executeOutput": {
-          "kind": "unit"
-        }
-      },
-      {
-        "name": "createPool",
-        "selector": "0x874c747070f5aac4",
-        "auth": {
-          "kind": "ownership",
-          "version": 1
-        },
-        "input": [
-          {
-            "name": "subject",
-            "type": {
-              "kind": "ownership"
-            }
-          },
-          {
-            "name": "assetA",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "assetB",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "amountA",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "amountB",
-            "type": {
-              "kind": "u128"
-            }
-          }
-        ],
-        "executeOutput": {
-          "kind": "unit"
-        }
-      },
-      {
-        "name": "addPoolLiquidity",
-        "selector": "0xbeedea0ca72fa6db",
-        "auth": {
-          "kind": "ownership",
-          "version": 1
-        },
-        "input": [
-          {
-            "name": "subject",
-            "type": {
-              "kind": "ownership"
-            }
-          },
-          {
-            "name": "assetA",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "assetB",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "amountA",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "amountB",
-            "type": {
-              "kind": "u128"
-            }
-          }
-        ],
-        "executeOutput": {
-          "kind": "unit"
-        }
-      },
-      {
-        "name": "removePoolLiquidity",
-        "selector": "0x2be7022240b0ed62",
-        "auth": {
-          "kind": "ownership",
-          "version": 1
-        },
-        "input": [
-          {
-            "name": "subject",
-            "type": {
-              "kind": "ownership"
-            }
-          },
-          {
-            "name": "assetA",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "assetB",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "amountA",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "amountB",
-            "type": {
-              "kind": "u128"
-            }
-          }
-        ],
-        "executeOutput": {
-          "kind": "unit"
-        }
-      },
-      {
-        "name": "swapExactIn",
-        "selector": "0xe966c6a6a1847e09",
-        "auth": {
-          "kind": "ownership",
-          "version": 1
-        },
-        "input": [
-          {
-            "name": "subject",
-            "type": {
-              "kind": "ownership"
-            }
-          },
-          {
-            "name": "assetIn",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "assetOut",
-            "type": {
-              "kind": "fixedBytes",
-              "len": 32
-            }
-          },
-          {
-            "name": "amountIn",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "minAmountOut",
             "type": {
               "kind": "u128"
             }
@@ -717,106 +531,6 @@
           },
           "nullable": true
         }
-      },
-      {
-        "name": "getPool",
-        "kind": "state_get",
-        "state": "pools",
-        "keyType": {
-          "kind": "record",
-          "fields": [
-            {
-              "name": "asset0",
-              "type": {
-                "kind": "fixedBytes",
-                "len": 32
-              }
-            },
-            {
-              "name": "asset1",
-              "type": {
-                "kind": "fixedBytes",
-                "len": 32
-              }
-            }
-          ]
-        },
-        "output": {
-          "type": {
-            "kind": "record",
-            "fields": [
-              {
-                "name": "version",
-                "type": {
-                  "kind": "u8"
-                }
-              },
-              {
-                "name": "manager",
-                "type": {
-                  "kind": "ownership"
-                }
-              },
-              {
-                "name": "reserve0",
-                "type": {
-                  "kind": "u128"
-                }
-              },
-              {
-                "name": "reserve1",
-                "type": {
-                  "kind": "u128"
-                }
-              }
-            ]
-          },
-          "nullable": true
-        }
-      },
-      {
-        "name": "getPoolCount",
-        "kind": "state_get",
-        "state": "poolCount",
-        "keyType": {
-          "kind": "unit"
-        },
-        "output": {
-          "type": {
-            "kind": "u64"
-          },
-          "nullable": true
-        }
-      },
-      {
-        "name": "getPoolByIndex",
-        "kind": "state_get",
-        "state": "poolByIndex",
-        "keyType": {
-          "kind": "u64"
-        },
-        "output": {
-          "type": {
-            "kind": "record",
-            "fields": [
-              {
-                "name": "asset0",
-                "type": {
-                  "kind": "fixedBytes",
-                  "len": 32
-                }
-              },
-              {
-                "name": "asset1",
-                "type": {
-                  "kind": "fixedBytes",
-                  "len": 32
-                }
-              }
-            ]
-          },
-          "nullable": true
-        }
       }
     ],
     "types": {
@@ -850,29 +564,6 @@
         "descriptor": {
           "kind": "fixedBytes",
           "len": 32
-        }
-      },
-      "Record<asset0:FixedBytes<32>,asset1:FixedBytes<32>>": {
-        "kind": "record",
-        "max": null,
-        "descriptor": {
-          "kind": "record",
-          "fields": [
-            {
-              "name": "asset0",
-              "type": {
-                "kind": "fixedBytes",
-                "len": 32
-              }
-            },
-            {
-              "name": "asset1",
-              "type": {
-                "kind": "fixedBytes",
-                "len": 32
-              }
-            }
-          ]
         }
       },
       "Record<assetId:FixedBytes<32>,ownerKey:FixedBytes<32>,spenderKey:FixedBytes<32>>": {
@@ -991,39 +682,6 @@
             },
             {
               "name": "totalSupply",
-              "type": {
-                "kind": "u128"
-              }
-            }
-          ]
-        }
-      },
-      "Record<version:u8,manager:ownership,reserve0:u128,reserve1:u128>": {
-        "kind": "record",
-        "max": null,
-        "descriptor": {
-          "kind": "record",
-          "fields": [
-            {
-              "name": "version",
-              "type": {
-                "kind": "u8"
-              }
-            },
-            {
-              "name": "manager",
-              "type": {
-                "kind": "ownership"
-              }
-            },
-            {
-              "name": "reserve0",
-              "type": {
-                "kind": "u128"
-              }
-            },
-            {
-              "name": "reserve1",
               "type": {
                 "kind": "u128"
               }
@@ -1249,98 +907,13 @@
         "valueType": {
           "kind": "u8"
         }
-      },
-      {
-        "name": "pools",
-        "schema": "locus.pool.v1",
-        "kind": "map",
-        "keyType": {
-          "kind": "record",
-          "fields": [
-            {
-              "name": "asset0",
-              "type": {
-                "kind": "fixedBytes",
-                "len": 32
-              }
-            },
-            {
-              "name": "asset1",
-              "type": {
-                "kind": "fixedBytes",
-                "len": 32
-              }
-            }
-          ]
-        },
-        "valueType": {
-          "kind": "record",
-          "fields": [
-            {
-              "name": "version",
-              "type": {
-                "kind": "u8"
-              }
-            },
-            {
-              "name": "manager",
-              "type": {
-                "kind": "ownership"
-              }
-            },
-            {
-              "name": "reserve0",
-              "type": {
-                "kind": "u128"
-              }
-            },
-            {
-              "name": "reserve1",
-              "type": {
-                "kind": "u128"
-              }
-            }
-          ]
-        }
-      },
-      {
-        "name": "poolCount",
-        "schema": "locus.pool-count.v1",
-        "kind": "scalar",
-        "keyType": {
-          "kind": "unit"
-        },
-        "valueType": {
-          "kind": "u64"
-        }
-      },
-      {
-        "name": "poolByIndex",
-        "schema": "locus.pool-index.v1",
-        "kind": "map",
-        "keyType": {
-          "kind": "u64"
-        },
-        "valueType": {
-          "kind": "record",
-          "fields": [
-            {
-              "name": "asset0",
-              "type": {
-                "kind": "fixedBytes",
-                "len": 32
-              }
-            },
-            {
-              "name": "asset1",
-              "type": {
-                "kind": "fixedBytes",
-                "len": 32
-              }
-            }
-          ]
-        }
       }
     ]
+  },
+  "provenance": {
+    "locusCommit": "24a1db08a74d1941aa7521d14839ea6947b5b2a5",
+    "jamscriptVersion": "source-4855697974c4ac04ffc7462e22860ac42083990a",
+    "backendVersion": "backend-v0.1.0-rc.7",
+    "minijamVersion": "stage1-v0.2.0"
   }
 }

@@ -5,6 +5,7 @@ import type { LocusWebSession } from "../session/types.js";
 import type { AssetView } from "./assets.js";
 import type { RecipientResolution } from "./recipients.js";
 import { IdentityIcon } from "../components/IdentityIcon.js";
+import { AssetIcon } from "../components/AssetIcon.js";
 
 export function ReviewDialog({
   open,
@@ -31,8 +32,8 @@ export function ReviewDialog({
       footer={<><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="button" className="primary modal-primary" disabled={!resolution.valid} onClick={onConfirm}>Confirm</button></>}
     >
       <div className="review-summary">
-        <span className="coin" style={{ background: asset.color }}>{asset.symbol[0]}</span>
-        <strong>{amount} {asset.symbol}</strong>
+        <AssetIcon asset={asset} />
+        <strong>{amount} {asset.presentation.unit === "shares" ? "shares" : asset.symbol}</strong>
       </div>
       <dl className="review-list">
         <div><dt>To</dt><dd>{recipient}</dd></div>

@@ -8,6 +8,8 @@ import { queryMatrixKeys } from "../web/src/matrix/MatrixKeysQuery.ts";
 import { beginMatrixOAuth, commitMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, completeMatrixAuthCallback, discoverMatrixAuthMetadata, matrixDeviceId, persistMatrixSession, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
 import { describeMatrixCause, matrixCryptoStageFailure } from "../web/src/matrix/MatrixErrors.ts";
 import { createHash } from "node:crypto";
+import { resolveLocusMode, buildLocusMode } from "../web/src/network/mode.ts";
+import { parseThemePreference, resolveTheme, THEME_STORAGE_KEY } from "../web/src/theme/theme.ts";
 
 function matrixB64(bytes) {
   return Buffer.from(bytes).toString("base64url");
@@ -21,9 +23,47 @@ test("network selection prefers URL, then storage, env, config, and local", () =
   assert.equal(selectNetwork("invalid", "invalid", "invalid", "local"), "local");
 });
 
+test("Network Mode is the default and Demo Mode is an explicit dev-only choice", () => {
+  assert.equal(resolveLocusMode(undefined), "network");
+  assert.equal(resolveLocusMode("network"), "network");
+  assert.equal(resolveLocusMode("demo"), "demo");
+  assert.equal(buildLocusMode("demo", "build"), "network");
+  assert.equal(buildLocusMode("demo", "serve"), "demo");
+});
+
+test("theme preference persists as System, Light, or Dark and resolves against system preference", async () => {
+  assert.equal(THEME_STORAGE_KEY, "locus.theme.v1");
+  assert.equal(parseThemePreference(null), "system");
+  assert.equal(parseThemePreference("invalid"), "system");
+  assert.equal(resolveTheme("system", true), "dark");
+  assert.equal(resolveTheme("system", false), "light");
+  assert.equal(resolveTheme("light", true), "light");
+  assert.equal(resolveTheme("dark", false), "dark");
+  const html = await fs.readFile(new URL("../web/index.html", import.meta.url), "utf8");
+  assert.ok(html.includes('localStorage.getItem("locus.theme.v1")'));
+  assert.ok(html.indexOf("locus.theme.v1") < html.indexOf('<script type="module"'));
+});
+
+test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit theming", async () => {
+  const responsive = await fs.readFile(new URL("../web/src/styles/responsive.css", import.meta.url), "utf8");
+  const app = await fs.readFile(new URL("../web/src/app.tsx", import.meta.url), "utf8");
+  const appkit = await fs.readFile(new URL("../web/src/session/appkit.ts", import.meta.url), "utf8");
+  assert.match(responsive, /@media \(min-width: 641px\) and \(max-width: 1024px\)/);
+  assert.match(responsive, /@media \(max-width: 640px\)/);
+  assert.match(responsive, /env\(safe-area-inset-bottom\)/);
+  assert.match(responsive, /100dvh/);
+  assert.match(responsive, /\.modal\s*\{/);
+  assert.match(app, /className="mobile-bottom-nav"/);
+  assert.match(appkit, /themeMode: initialThemeMode/);
+  assert.equal(JSON.parse(await fs.readFile(new URL("../web/package.json", import.meta.url), "utf8")).dependencies["@mui/material"], undefined);
+});
+
 test("network deployment does not silently configure Testnet as Local", async () => {
   const config = JSON.parse(await fs.readFile(new URL("../web/public/locus-networks.json", import.meta.url), "utf8"));
-  assert.equal(config.networks.local.backendUrl, "http://127.0.0.1:8090");
+  assert.equal(config.defaultNetwork, "local");
+  assert.equal(config.networks.local.label, "MiniJAM Local / Development");
+  assert.equal(config.networks.local.backendUrl, "/rpc");
+  assert.equal(config.networks.local.deploymentUrl, "/deployments/local.json");
   assert.equal(config.networks.testnet.backendUrl, null);
   assert.equal(config.networks.testnet.deploymentUrl, null);
 });
@@ -184,6 +224,21 @@ test("Matrix device IDs stay pending in session storage until the crypto setup c
   } finally { globalThis.window = originalWindow; }
 });
 
+test("canceling Matrix verification clears the provisional login and closes the connect flow", async () => {
+  const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  const connectDialog = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
+  const app = await fs.readFile(new URL("../web/src/app.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /onClick=\{cancel\}>Cancel/);
+  assert.match(dialog, /onCancel\(pendingConnection\)/);
+  assert.match(dialog, /authAttempt\.current \+= 1/);
+  assert.match(connectDialog, /onCancel=\{onCancelMatrix\}/);
+  assert.match(app, /onCancelMatrix=\{cancelMatrixSignIn\}/);
+  const cancelHandler = app.match(/function cancelMatrixSignIn\([\s\S]*?\n  \}/)?.[0] ?? "";
+  assert.match(cancelHandler, /disconnectSession\(\)/);
+  assert.match(cancelHandler, /setConnectOpen\(false\)/);
+  assert.match(app, /revokeStoredMatrixSession\(\)/);
+});
+
 test("Matrix crypto WASM, store, and outgoing-request stages retain distinct safe errors", () => {
   const wasm = matrixCryptoStageFailure("CRYPTO_WASM_INIT_FAILED", "WASM could not load.", new Error("WASM TEST ERROR"));
   assert.equal(wasm.code, "CRYPTO_WASM_INIT_FAILED");
@@ -264,6 +319,15 @@ test("network descriptors do not publish ControlClaim deployment metadata", asyn
   assert.doesNotMatch(config, /controlClaim|ownershipControlServiceId|codeHash/);
 });
 
+test("curated presentation requires deployment, asset ID, metadata, and issuer matches", async () => {
+  const assets = await fs.readFile(new URL("../web/src/locus/assets.ts", import.meta.url), "utf8");
+  assert.match(assets, /catalog\.genesisHash\.toLowerCase\(\) === deployment\.genesisHash\.toLowerCase\(\)/);
+  assert.match(assets, /catalog\.serviceId === deployment\.serviceId/);
+  assert.match(assets, /new Map\(\(catalogEnabled \? catalog\.assets : \[\]\)\.map\(\(entry\) => \[entry\.assetId\.toLowerCase\(\), entry\]\)\)/);
+  assert.match(assets, /candidate\.name === name[\s\S]*candidate\.symbol === symbol[\s\S]*candidate\.decimals === asset\.decimals[\s\S]*candidate\.issuerKey\.toLowerCase\(\) === issuerKey/);
+  assert.doesNotMatch(assets, /symbol\s*===\s*["'](?:DOT|MINI|USDT|AAPL|NVDA|TSLA)["']/);
+});
+
 test("Matrix pending-device lookup reuses the same device ID until cross-signing appears", async () => {
   const userId = "@alice:example.org";
   const deviceId = "LOCUS-TEST";
@@ -295,6 +359,7 @@ test("Matrix pending-device lookup reuses the same device ID until cross-signing
 
 test("identity icons use branded marks, generic EVM, and row-level selection", async () => {
   const identity = await fs.readFile(new URL("../web/src/components/IdentityIcon.tsx", import.meta.url), "utf8");
+  const identityOption = await fs.readFile(new URL("../web/src/components/IdentityOption.tsx", import.meta.url), "utf8");
   const recipient = await fs.readFile(new URL("../web/src/locus/RecipientTypeMenu.tsx", import.meta.url), "utf8");
   const connect = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
   const account = await fs.readFile(new URL("../web/src/components/AccountMenu.tsx", import.meta.url), "utf8");
@@ -308,14 +373,21 @@ test("identity icons use branded marks, generic EVM, and row-level selection", a
   }
   assert.doesNotMatch(identity, /SiEthereum/);
   assert.doesNotMatch(connect, /SiEthereum/);
-  assert.match(connect, /IdentityIcon kind=\{entry\.kind\}/);
+  assert.match(connect, /IdentityOption/);
+  assert.match(recipient, /IdentityOption/);
+  assert.match(connect, /identity-option-row--comfortable/);
+  assert.match(recipient, /identity-option-row--compact/);
+  assert.match(identityOption, /IdentityIcon kind=\{kind\}/);
+  assert.match(identityOption, /variant: IdentityOptionVariant/);
+  assert.match(identityOption, /identity-icon-slot/);
+  assert.match(identityOption, /trailing === "arrow"/);
+  assert.match(identityOption, /trailing === "check"/);
   assert.match(account, /IdentityIcon kind=\{session\.kind\}/);
   assert.doesNotMatch(account, /wallet-mark/);
   assert.match(identity, /case "evm":[\s\S]*EvmAddressIcon/);
   assert.match(identity, /import solanaMark from "\.\.\/assets\/brands\/solana\.svg"/);
   assert.match(solana, /linearGradient[\s\S]*#9945FF[\s\S]*#19FB9B/);
   assert.match(recipient, /data-selected=\{selected \? "true"/);
-  assert.match(recipient, /className="identity-icon-slot"/);
   assert.doesNotMatch(recipient, /type-icon|wallet-mark/);
   assert.match(styles, /\.identity-icon-slot\s*\{[\s\S]*width: 32px/);
   assert.match(styles, /--brand-matrix: #111111/);
@@ -325,8 +397,10 @@ test("identity icons use branded marks, generic EVM, and row-level selection", a
   assert.match(styles, /--brand-github: #f0f6fc/);
   assert.match(styles, /--brand-polkadot: #e6007a/);
   assert.match(styles, /overflow-y: auto/);
-  assert.match(styles, /\.type-menu \.type-menu-item\[data-selected="true"\]/);
+  assert.match(styles, /\.identity-option-row\[data-selected="true"\]/);
+  assert.match(styles, /identity-option-copy\[data-disabled="true"\]/);
   assert.match(styles, /@media \(hover: hover\) and \(pointer: fine\)/);
-  assert.match(styles, /\.connect-option\.connect-option:disabled\s*\{\s*opacity: 1/);
+  assert.match(styles, /\.identity-option-row:not\(\[data-disabled\]\):hover/);
+  assert.doesNotMatch(styles, /connect-option\.connect-option/);
   assert.doesNotMatch(baseStyles, /\.type-icon(?:\.|\s|\{)/);
 });

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { formatLocusId, formatUnits, parseUnits, type LocusClient } from "@archelabs/locus";
-import { ArrowDownLeft, ArrowUpRight, CirclePlus, Coins, History, Send } from "lucide-react";
+import { formatLocusId, formatUnits, minimumAmountOut, parseUnits, quoteExactIn, toHex, type LocusClient, type Pool } from "@archelabs/locus";
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CirclePlus, Coins, History, Send, X } from "lucide-react";
 import { useNetwork } from "./network/NetworkProvider.js";
 import { NetworkSwitcher } from "./network/NetworkSwitcher.js";
-import { loadAssets, displayAmount, type AssetView } from "./locus/assets.js";
+import { loadAssets, loadCuratedCatalog, displayAmount, displayAssetAmount, type AssetView } from "./locus/assets.js";
 import { resolveRecipient, detectRecipientType, type RecipientType } from "./locus/recipients.js";
 import { transferAndWait, type SendState } from "./locus/transaction.js";
 import { useSession } from "./session/SessionProvider.js";
@@ -13,16 +13,20 @@ import { CreateAssetDialog, ReceiveDialog, ReviewDialog } from "./locus/dialogs.
 import { AssetPicker } from "./locus/AssetPicker.js";
 import { Modal } from "./components/Modal.js";
 import { AccountMenu } from "./components/AccountMenu.js";
+import { ActionButton } from "./components/ActionButton.js";
+import { AssetIcon } from "./components/AssetIcon.js";
 import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, revokeStoredMatrixSession, type MatrixConnected } from "./matrix/MatrixConnector.js";
 import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
 import { completeMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
 import { useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
 import type { Eip1193Provider } from "@jamscript/client";
 import { OwnershipInput } from "./locus/OwnershipInput.js";
+import { ThemeControl } from "./theme/ThemeControl.js";
 
-type Page = "send" | "assets" | "activity";
+type Page = "send" | "assets" | "swap" | "activity";
 type DemoAsset = { symbol: string; name: string; balance: bigint; decimals: number; value: string; color: string };
-type ActivityItem = { direction: "sent" | "received"; asset: string; recipient: string; amount: string; date: string; transactionId?: string };
+type ActivityItem = { kind?: "transfer"; direction: "sent" | "received"; asset: string; recipient: string; amount: string; date: string; transactionId?: string }
+  | { kind: "swap"; assetIn: string; assetOut: string; amountIn: string; amountOut: string; date: string; transactionId?: string };
 
 const demoAssets: DemoAsset[] = [
   { symbol: "DOT", name: "Dot Token", balance: 12450n, decimals: 0, value: "≈ $623.40", color: "#247eaa" },
@@ -68,6 +72,7 @@ export function App() {
   const [typeOpen, setTypeOpen] = useState(false);
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
   const [filter, setFilter] = useState<"all" | "sent" | "received">("all");
+  const [assetFilter, setAssetFilter] = useState<"all" | "crypto" | "equities" | "custom">("all");
   const [toast, setToast] = useState("");
   const [sendState, setSendState] = useState<SendState>({ status: "idle" });
   const [sessionActivity, setSessionActivity] = useState<ActivityItem[]>([]);
@@ -187,8 +192,10 @@ export function App() {
     const provisional = provisionalMatrixAuth.current;
     provisionalMatrixAuth.current = null;
     window.localStorage.removeItem("locus.session.v1");
-    session?.cleanup?.();
-    if (pendingMatrixConnection && pendingMatrixConnection.session !== session) pendingMatrixConnection.session.cleanup?.();
+    try { session?.cleanup?.(); } catch { /* Local sign-out must complete even if a wallet cleanup fails. */ }
+    if (pendingMatrixConnection && pendingMatrixConnection.session !== session) {
+      try { pendingMatrixConnection.session.cleanup?.(); } catch { /* Continue clearing the provisional Matrix sign-in. */ }
+    }
     setPendingMatrixConnection(null);
     finishRestore();
     if (session?.kind === "matrix" || !session) {
@@ -200,6 +207,14 @@ export function App() {
       void Promise.all(revocations).catch((cause) => notify(cause instanceof Error ? `Signed out locally, but Matrix token revocation failed: ${cause.message}` : "Signed out locally, but Matrix token revocation failed."));
     }
     setSession(null);
+  }
+
+  function cancelMatrixSignIn(connection: MatrixConnected | null) {
+    if (connection && connection !== pendingMatrixConnection) {
+      try { connection.session.cleanup?.(); } catch { /* Continue clearing the provisional Matrix sign-in. */ }
+    }
+    disconnectSession();
+    setConnectOpen(false);
   }
 
   useEffect(() => {
@@ -230,7 +245,8 @@ export function App() {
     let cancelled = false;
     setAssetsLoading(true);
     setAssetsError("");
-    loadAssets(network.locus, sessionOwner)
+    void loadCuratedCatalog(network.networkId)
+      .then((catalog) => loadAssets(network.locus!, sessionOwner, catalog, network.networkId, network.deployment))
       .then((next) => { if (!cancelled) setAssets(next); })
       .catch((error) => { if (!cancelled) setAssetsError(error instanceof Error ? error.message : "Unable to load assets."); })
       .finally(() => { if (!cancelled) setAssetsLoading(false); });
@@ -242,9 +258,15 @@ export function App() {
   const currentAsset = networkMode ? currentNetworkAsset : currentDemoAsset;
   const filteredAssets = useMemo(
     () => networkMode
-      ? assets.filter((asset) => !search || `${asset.name} ${asset.symbol} ${asset.assetIdHex}`.toLowerCase().includes(search.toLowerCase()))
+      ? assets.filter((asset) => {
+        const matchesClass = assetFilter === "all"
+          || (assetFilter === "crypto" && asset.presentation.class === "crypto")
+          || (assetFilter === "equities" && asset.presentation.class === "equity-demo")
+          || (assetFilter === "custom" && asset.presentation.class === "custom");
+        return matchesClass && (!search || `${asset.name} ${asset.symbol} ${asset.presentation.class} ${asset.assetIdHex}`.toLowerCase().includes(search.toLowerCase()));
+      })
       : demoAssets.filter((asset) => !search || `${asset.name} ${asset.symbol}`.toLowerCase().includes(search.toLowerCase())),
-    [assets, networkMode, search],
+    [assetFilter, assets, networkMode, search],
   );
   const currentResolution = useMemo(() => resolveRecipient(recipientType, recipient), [recipient, recipientType]);
   const resolvedRecipient = useMemo(() => {
@@ -267,7 +289,7 @@ export function App() {
     return () => { cancelled = true; };
   }, [networkMode, recipient, recipientType]);
   const activity = networkMode ? sessionActivity : demoActivity;
-  const filteredActivity = activity.filter((entry) => filter === "all" || entry.direction === filter);
+  const filteredActivity = activity.filter((entry) => filter === "all" || entry.kind === "swap" || entry.direction === filter);
 
   function notify(message: string) {
     setToast(message);
@@ -345,14 +367,30 @@ export function App() {
     }
   }
 
+  function recordSwap(item: { assetIn: string; assetOut: string; amountIn: string; amountOut: string; transactionId: string; networkId: string }) {
+    if (!session || networkIdRef.current !== item.networkId) return;
+    const nextActivity: ActivityItem[] = [{
+      kind: "swap",
+      assetIn: item.assetIn,
+      assetOut: item.assetOut,
+      amountIn: item.amountIn,
+      amountOut: item.amountOut,
+      date: "Just now",
+      transactionId: item.transactionId,
+    }, ...sessionActivity];
+    setSessionActivity(nextActivity);
+    window.localStorage.setItem(sessionActivityKey(item.networkId, formatLocusId(session.owner)), JSON.stringify(nextActivity));
+    setRefreshToken((value) => value + 1);
+  }
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-locus-mode={network.mode}>
       <aside className="sidebar">
         <div className="brand">locus</div>
         <nav aria-label="Primary">
-          {(["assets", "send", "activity"] as Page[]).map((entry) => (
+          {(["assets", "send", "swap", "activity"] as Page[]).map((entry) => (
             <button type="button" className={page === entry ? "nav-item active" : "nav-item"} key={entry} onClick={() => setPage(entry)}>
-              <span className="nav-icon" aria-hidden="true">{entry === "send" ? <Send size={17} /> : entry === "assets" ? <Coins size={17} /> : <History size={17} />}</span>{entry[0].toUpperCase() + entry.slice(1)}
+              <span className="nav-icon" aria-hidden="true">{entry === "send" ? <Send size={17} /> : entry === "assets" ? <Coins size={17} /> : entry === "swap" ? <ArrowLeftRight size={17} /> : <History size={17} />}</span><span className="nav-label">{entry[0].toUpperCase() + entry.slice(1)}</span>
             </button>
           ))}
         </nav>
@@ -361,8 +399,22 @@ export function App() {
         </div>
       </aside>
 
+      <header className="mobile-header">
+        <div className="mobile-header-row">
+          <div className="brand">locus</div>
+          <div className="mobile-header-actions">
+            <ThemeControl />
+            {networkMode
+              ? <NetworkSwitcher compact />
+              : <span className="mobile-demo-indicator"><span className="status-dot ready" aria-hidden="true" />Demo</span>}
+            <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} onConnect={() => setConnectOpen(true)} onDisconnect={disconnectSession} onClearSavedSession={disconnectSession} />
+          </div>
+        </div>
+      </header>
+
       <main className="main">
         <header className="topbar">
+          <ThemeControl />
           <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} onConnect={() => setConnectOpen(true)} onDisconnect={disconnectSession} onClearSavedSession={disconnectSession} />
         </header>
 
@@ -374,11 +426,20 @@ export function App() {
         )}
 
         {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} amount={amount} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={updateRecipient} onAmount={updateAmount} onMax={() => updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : "")} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
-        {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} latestAssets={[...assets].reverse().slice(0, 5)} search={search} setSearch={setSearch} onRetry={() => setRefreshToken((value) => value + 1)} onCreate={() => { if (!session) { setConnectOpen(true); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} onSend={networkMode ? (asset) => { if ("assetId" in asset) chooseNetworkAsset(asset); } : (asset) => { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); setPage("send"); }} />}
+        {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} onRetry={() => setRefreshToken((value) => value + 1)} onCreate={() => { if (!session) { setConnectOpen(true); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} onSend={networkMode ? (asset) => { if ("assetId" in asset) chooseNetworkAsset(asset); } : (asset) => { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); setPage("send"); }} />}
+        {page === "swap" && <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} locus={locus} assets={assets} session={session !== null} onConnect={() => setConnectOpen(true)} onApplied={recordSwap} onNotify={notify} />}
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>
+      <nav className="mobile-bottom-nav" aria-label="Primary">
+        {(["assets", "send", "swap", "activity"] as Page[]).map((entry) => (
+          <button type="button" className={page === entry ? "mobile-nav-item active" : "mobile-nav-item"} key={entry} aria-current={page === entry ? "page" : undefined} onClick={() => setPage(entry)}>
+            {entry === "send" ? <Send size={20} aria-hidden="true" /> : entry === "assets" ? <Coins size={20} aria-hidden="true" /> : entry === "swap" ? <ArrowLeftRight size={20} aria-hidden="true" /> : <History size={20} aria-hidden="true" />}
+            <span>{entry[0].toUpperCase() + entry.slice(1)}</span>
+          </button>
+        ))}
+      </nav>
       {toast && <div className="toast" role="status">{toast}</div>}
-      <ConnectDialog open={connectOpen} onClose={() => { setConnectOpen(false); setPendingMatrixConnection(null); }} onConnected={setSession} locus={network.locus} initialMatrixConnection={pendingMatrixConnection} />
+      <ConnectDialog open={connectOpen} onClose={() => { setConnectOpen(false); setPendingMatrixConnection(null); }} onCancelMatrix={cancelMatrixSignIn} onConnected={setSession} locus={network.locus} initialMatrixConnection={pendingMatrixConnection} />
       {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={resolvedRecipient} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
       <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
       <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} onClose={() => setCreateAssetOpen(false)} onCreated={() => setRefreshToken((value) => value + 1)} />
@@ -403,17 +464,216 @@ function Receipt({ state }: { state: Extract<SendState, { status: "submitted" | 
   return <div className="receipt"><strong>{state.status === "applied" ? "Transaction applied" : "Transaction submitted"}</strong><span>Network: {state.networkId}</span><span>Status: {state.status}</span><code>{state.transactionId}</code>{state.actionHash && <code>{state.actionHash}</code>}</div>;
 }
 
-function AssetsPage({ networkMode, loading, error, assets, latestAssets, search, setSearch, onRetry, onOpenDetail, onSend, onCreate }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; latestAssets: AssetView[]; search: string; setSearch: (value: string) => void; onRetry: () => void; onOpenDetail: (asset: AssetView | DemoAsset) => void; onSend: (asset: AssetView | DemoAsset) => void; onCreate: () => void }) {
+type SwapSubmissionState = "idle" | "awaiting-signature" | "submitted" | "applied" | "failed";
+
+function SwapPage({ networkMode, networkId, status, locus, assets, session, onConnect, onApplied, onNotify }: {
+  networkMode: boolean;
+  networkId: string;
+  status: string;
+  locus: LocusClient | null;
+  assets: AssetView[];
+  session: boolean;
+  onConnect: () => void;
+  onApplied: (item: { assetIn: string; assetOut: string; amountIn: string; amountOut: string; transactionId: string; networkId: string }) => void;
+  onNotify: (message: string) => void;
+}) {
+  const [pools, setPools] = useState<Pool[]>([]);
+  const [poolLoading, setPoolLoading] = useState(false);
+  const [poolError, setPoolError] = useState("");
+  const [poolRefresh, setPoolRefresh] = useState(0);
+  const [poolKey, setPoolKey] = useState("");
+  const [reverse, setReverse] = useState(false);
+  const [amount, setAmount] = useState("");
+  const [slippage, setSlippage] = useState("100");
+  const [customSlippage, setCustomSlippage] = useState("1");
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [submission, setSubmission] = useState<SwapSubmissionState>("idle");
+  const [transactionId, setTransactionId] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!networkMode || status !== "ready" || !locus) {
+      setPools([]);
+      setPoolLoading(false);
+      setPoolError("");
+      return;
+    }
+    let cancelled = false;
+    setPoolLoading(true);
+    setPoolError("");
+    void locus.listPools().then((next) => {
+      if (!cancelled) {
+        setPools(next);
+        setPoolKey((current) => current || next.map((pool) => `${toHex(pool.asset0)}:${toHex(pool.asset1)}`)[0] || "");
+      }
+    }).catch((cause) => {
+      if (!cancelled) setPoolError(cause instanceof Error ? cause.message : "Pools could not be loaded.");
+    }).finally(() => { if (!cancelled) setPoolLoading(false); });
+    return () => { cancelled = true; };
+  }, [locus, networkId, networkMode, poolRefresh, status]);
+
+  const assetById = useMemo(() => new Map(assets.map((asset) => [asset.assetIdHex.toLowerCase(), asset])), [assets]);
+  const availablePools = useMemo(() => pools.flatMap((pool) => {
+    const asset0 = assetById.get(toHex(pool.asset0).toLowerCase());
+    const asset1 = assetById.get(toHex(pool.asset1).toLowerCase());
+    return asset0 && asset1 ? [{ pool, asset0, asset1, key: `${toHex(pool.asset0)}:${toHex(pool.asset1)}` }] : [];
+  }), [assetById, pools]);
+  const selected = availablePools.find((entry) => entry.key === poolKey) ?? availablePools[0] ?? null;
+  const selectedHasLiquidity = !!selected && selected.pool.reserve0 > 0n && selected.pool.reserve1 > 0n;
+  const assetIn = selected ? (reverse ? selected.asset1 : selected.asset0) : null;
+  const assetOut = selected ? (reverse ? selected.asset0 : selected.asset1) : null;
+  const slippageBps = slippage === "custom" ? Math.round(Number(customSlippage) * 100) : Number(slippage);
+  const quote = useMemo(() => {
+    if (!selected || !assetIn || !assetOut || !amount.trim()) return null;
+    try {
+      if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000) return null;
+      const amountIn = parseUnits(amount, assetIn.decimals);
+      const asset0In = assetIn.assetIdHex.toLowerCase() === toHex(selected.pool.asset0).toLowerCase();
+      const result = quoteExactIn(asset0In ? selected.pool.reserve0 : selected.pool.reserve1, asset0In ? selected.pool.reserve1 : selected.pool.reserve0, amountIn);
+      return { ...result, minimumAmountOut: minimumAmountOut(result.amountOut, slippageBps) };
+    } catch {
+      return null;
+    }
+  }, [amount, assetIn, assetOut, selected, slippageBps]);
+
+  const poolPrice = useMemo(() => {
+    if (!selected || !selectedHasLiquidity || !assetIn || !assetOut) return null;
+    const asset0In = assetIn.assetIdHex.toLowerCase() === toHex(selected.pool.asset0).toLowerCase();
+    const reserveIn = asset0In ? selected.pool.reserve0 : selected.pool.reserve1;
+    const reserveOut = asset0In ? selected.pool.reserve1 : selected.pool.reserve0;
+    if (reserveIn === 0n || reserveOut === 0n) return null;
+    const humanIn = Number(formatUnits(reserveIn, assetIn.decimals));
+    const humanOut = Number(formatUnits(reserveOut, assetOut.decimals));
+    const price = humanOut / humanIn;
+    return Number.isFinite(price) ? price : null;
+  }, [assetIn, assetOut, selected, selectedHasLiquidity]);
+
+  const priceImpact = useMemo(() => {
+    if (poolPrice === null || !quote || !assetIn || !assetOut) return null;
+    const humanIn = Number(formatUnits(quote.amountIn, assetIn.decimals));
+    const humanOut = Number(formatUnits(quote.amountOut, assetOut.decimals));
+    const executionPrice = humanOut / humanIn;
+    const impact = (1 - executionPrice / poolPrice) * 100;
+    return Number.isFinite(impact) ? Math.max(0, impact) : null;
+  }, [assetIn, assetOut, poolPrice, quote]);
+
+  function openReview() {
+    if (!networkMode) { onNotify("Swap is available in Network Mode."); return; }
+    if (status !== "ready" || !locus) { onNotify("The selected network is not ready."); return; }
+    if (!session) { onConnect(); return; }
+    if (!selected || !assetIn || !assetOut || !quote) { onNotify("Enter an amount with available pool liquidity."); return; }
+    if (assetIn.balance === null || quote.amountIn > assetIn.balance) { onNotify("The input amount exceeds your available balance."); return; }
+    setError("");
+    setReviewOpen(true);
+  }
+
+  async function confirmSwap() {
+    if (!locus || !selected || !assetIn || !assetOut || !quote) return;
+    setReviewOpen(false);
+    setSubmission("awaiting-signature");
+    setError("");
+    try {
+      const submitted = await locus.swapExactIn(assetIn.assetId, assetOut.assetId, quote.amountIn, quote.minimumAmountOut);
+      setTransactionId(submitted.transactionId);
+      setSubmission("submitted");
+      const receipt = await locus.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+      if (receipt.actionReceipt.status !== "applied") {
+        throw new Error(`Swap failed${receipt.actionReceipt.errorCode === null ? "" : ` (error ${receipt.actionReceipt.errorCode})`}`);
+      }
+      setSubmission("applied");
+      let activitySaved = true;
+      try {
+        onApplied({
+          assetIn: assetIn.symbol,
+          assetOut: assetOut.symbol,
+          amountIn: formatUnits(quote.amountIn, assetIn.decimals),
+          amountOut: formatUnits(quote.amountOut, assetOut.decimals),
+          transactionId: submitted.transactionId,
+          networkId,
+        });
+      } catch {
+        activitySaved = false;
+      }
+      setAmount("");
+      onNotify(activitySaved ? "Swap completed." : "Swap completed, but browser-local activity could not be saved.");
+    } catch (cause) {
+      setSubmission("failed");
+      setError(cause instanceof Error ? cause.message : "Swap failed.");
+    }
+  }
+
+  const busy = submission === "awaiting-signature" || submission === "submitted";
+  const equityPool = selected?.asset0.presentation.class === "equity-demo" || selected?.asset1.presentation.class === "equity-demo";
+  const minReceived = quote && assetOut ? formatUnits(quote.minimumAmountOut, assetOut.decimals) : "—";
+
+  return <section className="page swap-page">
+    <h1>Swap</h1>
+    <div className="card swap-card">
+      <label className="swap-label" htmlFor="swap-pool">Pool</label>
+      <select id="swap-pool" className="swap-pool-select" value={selected?.key ?? ""} disabled={availablePools.length === 0} onChange={(event) => { setPoolKey(event.target.value); setReverse(false); setSubmission("idle"); }}>
+        {availablePools.length === 0 ? <option value="">No pool available</option> : availablePools.map((entry) => <option key={entry.key} value={entry.key}>{entry.asset0.symbol} / {entry.asset1.symbol}{entry.asset0.presentation.class === "equity-demo" || entry.asset1.presentation.class === "equity-demo" ? " · Demo pool" : ""}</option>)}
+      </select>
+      {poolLoading && <p className="muted">Loading pools…</p>}
+      {poolError && <div className="transaction-error" role="alert">{poolError}<button className="text-button" type="button" onClick={() => setPoolRefresh((value) => value + 1)}>Retry</button></div>}
+      {!poolLoading && !poolError && availablePools.length === 0 && <div className="empty-state swap-empty">Liquidity is not initialized yet. No quote is available until a pool has been seeded.</div>}
+      {selected && !selectedHasLiquidity && <div className="empty-state swap-empty">This pool has no liquidity yet. No quote is available until it is seeded.</div>}
+      {selected && selectedHasLiquidity && assetIn && assetOut && <>
+        <div className="swap-side-label"><label htmlFor="swap-amount">You pay</label><span>Balance: {displayAssetAmount(assetIn)}</span></div>
+        <div className="swap-token-card">
+          <div className="swap-token-heading"><AssetIcon asset={assetIn} size={36} /><span><strong>{assetIn.symbol}</strong><small>{assetIn.name}</small></span></div>
+          <input id="swap-amount" value={amount} inputMode="decimal" placeholder="0.00" onChange={(event) => { setAmount(event.target.value); setSubmission("idle"); }} aria-label={`Amount of ${assetIn.symbol} to swap`} />
+        </div>
+        <button className="swap-direction" type="button" aria-label="Switch swap direction" onClick={() => { setReverse((value) => !value); setSubmission("idle"); }}><ArrowDownLeft size={19} aria-hidden="true" /></button>
+        <div className="swap-side-label"><span>You receive</span><span>{assetOut.symbol}</span></div>
+        <div className="swap-token-card swap-token-output">
+          <div className="swap-token-heading"><AssetIcon asset={assetOut} size={36} /><span><strong>{assetOut.symbol}</strong><small>{assetOut.name}</small></span></div>
+          <strong>{quote ? formatUnits(quote.amountOut, assetOut.decimals) : "—"}</strong>
+        </div>
+        <div className="swap-settings">
+          <label htmlFor="swap-slippage">Slippage tolerance</label>
+          <select id="swap-slippage" value={slippage} onChange={(event) => setSlippage(event.target.value)}><option value="50">0.5%</option><option value="100">1%</option><option value="200">2%</option><option value="custom">Custom</option></select>
+          {slippage === "custom" && <input aria-label="Custom slippage percent" inputMode="decimal" value={customSlippage} onChange={(event) => setCustomSlippage(event.target.value)} />}
+        </div>
+        <dl className="swap-quote-details">
+          <div><dt>Pool price</dt><dd>{poolPrice === null ? "Unavailable" : `1 ${assetIn.symbol} ≈ ${poolPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${assetOut.symbol}`}</dd></div>
+          <div><dt>Fee</dt><dd>0.30%</dd></div>
+          <div><dt>Minimum received</dt><dd>{minReceived} {assetOut.symbol}</dd></div>
+          <div><dt>Price impact</dt><dd>{priceImpact === null ? "—" : `≈ ${priceImpact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`}</dd></div>
+          {equityPool && <div><dt>Market data</dt><dd>Demo pool · No market oracle</dd></div>}
+        </dl>
+      </>}
+      <button className="primary" type="button" disabled={busy || status !== "ready" || !selected || !quote || submission === "applied"} onClick={openReview}>
+        {submission === "awaiting-signature" ? "Approve in wallet…" : submission === "submitted" ? "Waiting for confirmation…" : submission === "applied" ? "Swap completed" : session ? "Review swap" : "Connect to swap"}
+      </button>
+      {submission === "submitted" && transactionId && <div className="receipt"><strong>Swap submitted · waiting for confirmation</strong><code>{transactionId}</code></div>}
+      {submission === "applied" && transactionId && <div className="receipt"><strong>Swap applied</strong><code>{transactionId}</code></div>}
+      {(error || submission === "failed") && <div className="transaction-error" role="alert">{error || "Swap failed."}</div>}
+      {selected && <p className="notice">Pool prices are calculated from current reserves. They are not market prices. Swaps use a single pool and a fixed 0.30% fee.</p>}
+    </div>
+    {reviewOpen && quote && assetIn && assetOut && <Modal open title="Review swap" onClose={() => setReviewOpen(false)} footer={<><ActionButton variant="secondary" icon={X} onClick={() => setReviewOpen(false)}>Cancel</ActionButton><ActionButton variant="primary" icon={ArrowLeftRight} onClick={() => void confirmSwap()}>Confirm swap</ActionButton></>}>
+      <p className="modal-lead">Review the exact-input swap before signing.</p>
+      <dl className="review-list"><div><dt>You pay</dt><dd>{formatUnits(quote.amountIn, assetIn.decimals)} {assetIn.symbol}</dd></div><div><dt>Expected output</dt><dd>{formatUnits(quote.amountOut, assetOut.decimals)} {assetOut.symbol}</dd></div><div><dt>Minimum received</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div><div><dt>Pool</dt><dd>{selected?.asset0.symbol} / {selected?.asset1.symbol}</dd></div><div><dt>Fee</dt><dd>0.30%</dd></div><div><dt>Slippage tolerance</dt><dd>{(slippageBps / 100).toFixed(slippageBps % 100 === 0 ? 0 : 2)}%</dd></div></dl>
+    </Modal>}
+  </section>;
+}
+
+function AssetsPage({ networkMode, loading, error, assets, featuredAssets, search, setSearch, filter, setFilter, onRetry, onOpenDetail, onSend, onCreate }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; featuredAssets: AssetView[]; search: string; setSearch: (value: string) => void; filter: "all" | "crypto" | "equities" | "custom"; setFilter: (value: "all" | "crypto" | "equities" | "custom") => void; onRetry: () => void; onOpenDetail: (asset: AssetView | DemoAsset) => void; onSend: (asset: AssetView | DemoAsset) => void; onCreate: () => void }) {
   const portfolio = assets.length === 0 ? "0" : assets.length === 1 ? displayAmount(assets[0].balance, assets[0].decimals) : `${assets.length} assets`;
-  return <section className="page"><div className="page-heading"><h1>Assets</h1>{networkMode && <button type="button" className="secondary" onClick={onCreate}><CirclePlus size={16} aria-hidden="true" /> Create asset</button>}</div><div className="assets-layout"><div><div className="card summary"><div><small>Total Assets</small><strong>{loading ? "…" : assets.length}</strong></div><div><small>Portfolio</small><strong>{loading ? "…" : portfolio}</strong></div></div><input className="search" value={search} placeholder="Search assets…" onChange={(event) => setSearch(event.target.value)} />{error && <div className="empty-state" role="alert">{error}<button type="button" className="text-button" onClick={onRetry}>Try again</button></div>}{!error && !loading && assets.length === 0 && <div className="empty-state">No assets found on this network. Create an asset or switch networks to get started.</div>}<div className="card asset-list">{assets.map((entry) => { const view = entry; const id = "assetIdHex" in view ? view.assetIdHex : view.symbol; return <div className="asset-row" key={id} role="button" tabIndex={0} onClick={() => onOpenDetail(view)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(view); } }}><span className="coin small-coin" style={{ background: view.color }}>{view.symbol[0]}</span><strong>{view.name}</strong><span>{view.symbol}</span><span>{displayAmount(view.balance, view.decimals)} {view.symbol}</span><button type="button" className="secondary" onClick={(event) => { event.stopPropagation(); onSend(view); }}>Send</button></div>; })}</div></div><aside className="latest-assets"><h2>Latest Assets</h2><div className="card latest-list">{latestAssets.length === 0 ? <div className="empty-state">New assets will appear here.</div> : latestAssets.map((asset) => <button type="button" className="latest-asset" key={asset.assetIdHex} onClick={() => onOpenDetail(asset)}><span className="coin small-coin" style={{ background: asset.color }}>{asset.symbol[0]}</span><span><strong>{asset.name}</strong><small>{asset.symbol}</small></span><span className="latest-chevron">›</span></button>)}</div></aside></div></section>;
+  const filters = [{ id: "all", label: "All" }, { id: "crypto", label: "Crypto" }, { id: "equities", label: "Equities" }, { id: "custom", label: "Custom" }] as const;
+  return <section className="page"><div className="page-heading"><h1>Assets</h1>{networkMode && <button type="button" className="secondary" onClick={onCreate}><CirclePlus size={16} aria-hidden="true" /> Create asset</button>}</div><div className="assets-layout"><div><div className="card summary"><div><small>Total Assets</small><strong>{loading ? "…" : assets.length}</strong></div><div><small>Portfolio</small><strong>{loading ? "…" : portfolio}</strong></div></div>{networkMode && <div className="tabs asset-class-tabs" aria-label="Filter assets">{filters.map((entry) => <button key={entry.id} type="button" className={filter === entry.id ? "active" : ""} onClick={() => setFilter(entry.id)}>{entry.label}</button>)}</div>}<input className="search" value={search} placeholder="Search assets by name, symbol, or class…" onChange={(event) => setSearch(event.target.value)} />{error && <div className="empty-state" role="alert">{error}<button type="button" className="text-button" onClick={onRetry}>Try again</button></div>}{!error && !loading && assets.length === 0 && <div className="empty-state">{networkMode ? "No matching assets on this network." : "No demo assets found."}</div>}<div className="card asset-list">{assets.map((entry) => { const isNetworkAsset = "assetIdHex" in entry; const id = isNetworkAsset ? entry.assetIdHex : entry.symbol; const badge = isNetworkAsset ? entry.presentation.badge : "Demo"; const balance = isNetworkAsset ? displayAssetAmount(entry) : `${displayAmount(entry.balance, entry.decimals)} ${entry.symbol}`; return <div className="asset-row" key={id} role="button" tabIndex={0} onClick={() => onOpenDetail(entry)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(entry); } }}>
+    {isNetworkAsset ? <AssetIcon asset={entry} size={40} /> : <span className="coin small-coin" style={{ background: entry.color }}>{entry.symbol[0]}</span>}
+    <span className="asset-row-info"><strong>{entry.name}</strong><small>{badge}</small></span><span className="asset-row-symbol">{entry.symbol}</span><span className="asset-row-balance">{balance}</span><button type="button" className="secondary" onClick={(event) => { event.stopPropagation(); onSend(entry); }}>Send</button>
+  </div>; })}</div></div><aside className="latest-assets"><h2>Featured Assets</h2><div className="card latest-list">{featuredAssets.length === 0 ? <div className="empty-state">Curated test assets will appear after their catalog and on-chain metadata match.</div> : featuredAssets.map((asset) => <button type="button" className="latest-asset" key={asset.assetIdHex} onClick={() => onOpenDetail(asset)}><AssetIcon asset={asset} size={36} /><span><strong>{asset.symbol}</strong><small>{asset.name} · {asset.presentation.badge}</small></span><span className="latest-chevron">›</span></button>)}</div></aside></div></section>;
 }
 
 function AssetDetailModal({ asset, networkMode, onClose, onReceive, onSend }: { asset: AssetView | DemoAsset | null; networkMode: boolean; onClose: () => void; onReceive: (asset: AssetView | DemoAsset) => void; onSend: (asset: AssetView | DemoAsset) => void }) {
   if (!asset) return null;
-  const totalSupply = "totalSupply" in asset ? formatUnits(asset.totalSupply, asset.decimals) : "Demo data";
-  return <Modal open title={`${asset.symbol} details`} onClose={onClose} footer={<><button type="button" className="secondary" onClick={() => onReceive(asset)}>Receive</button><button type="button" className="primary modal-primary" onClick={() => onSend(asset)}>Send</button></>}><div className="detail-modal"><span className="coin detail-coin" style={{ background: asset.color }}>{asset.symbol[0]}</span><h2>{asset.name}</h2><p className="muted">{asset.symbol}</p><dl><div><dt>Decimals</dt><dd>{asset.decimals}</dd></div><div><dt>Balance</dt><dd>{displayAmount(asset.balance, asset.decimals)} {asset.symbol}</dd></div><div><dt>Total supply</dt><dd>{totalSupply}{"totalSupply" in asset ? ` ${asset.symbol}` : ""}</dd></div><div><dt>Value</dt><dd>{networkMode ? "Not priced" : (asset as DemoAsset).value}</dd></div>{"assetIdHex" in asset && <div><dt>Asset ID</dt><dd><code>{asset.assetIdHex}</code></dd></div>}</dl><p className="modal-note">Asset balances and supply are read from the selected Locus network.</p></div></Modal>;
+  const isNetworkAsset = "assetIdHex" in asset;
+  const totalSupply = isNetworkAsset ? (asset.presentation.unit === "shares" ? `${formatUnits(asset.totalSupply, asset.decimals)} shares` : `${formatUnits(asset.totalSupply, asset.decimals)} ${asset.symbol}`) : "Demo data";
+  const balance = isNetworkAsset ? displayAssetAmount(asset) : `${displayAmount(asset.balance, asset.decimals)} ${asset.symbol}`;
+  return <Modal open title={`${asset.symbol} details`} onClose={onClose} footer={<><ActionButton variant="secondary" icon={ArrowDownLeft} onClick={() => onReceive(asset)}>Receive</ActionButton><ActionButton variant="primary" icon={Send} onClick={() => onSend(asset)}>Send</ActionButton></>}><div className="detail-modal">{isNetworkAsset ? <AssetIcon asset={asset} size={64} /> : <span className="coin detail-coin" style={{ background: asset.color }}>{asset.symbol[0]}</span>}<h2>{asset.name}</h2><p className="muted">{asset.symbol}{isNetworkAsset && ` · ${asset.presentation.badge}`}</p><dl><div><dt>Decimals</dt><dd>{asset.decimals}</dd></div><div><dt>Balance</dt><dd>{balance}</dd></div><div><dt>Total supply</dt><dd>{totalSupply}</dd></div><div><dt>Value</dt><dd>{networkMode ? "Not priced" : (asset as DemoAsset).value}</dd></div>{isNetworkAsset && <><div><dt>Asset class</dt><dd>{asset.presentation.class}</dd></div><div><dt>Issuer</dt><dd><code>{formatLocusId(asset.issuer)}</code></dd></div><div><dt>Asset ID</dt><dd><code>{asset.assetIdHex}</code></dd></div></>}</dl>{isNetworkAsset && asset.presentation.disclosure ? <p className="asset-disclosure">{asset.presentation.disclosure}</p> : <p className="modal-note">Asset balances and supply are read from the selected Locus network.</p>}</div></Modal>;
 }
 
 function ActivityPage({ networkMode, filter, setFilter, rows }: { networkMode: boolean; filter: "all" | "sent" | "received"; setFilter: (value: "all" | "sent" | "received") => void; rows: ActivityItem[] }) {
-  return <section className="page"><div className="activity-heading"><div><h1>Activity</h1><p className="muted">{networkMode ? "Browser-local recent activity · not an indexed history" : "Demo activity"}</p></div>{!networkMode && <div className="card activity-summary"><div><small>Total sent (30d)</small><strong>1,240 DOT</strong></div><div><small>Total received (30d)</small><strong>320 DOT</strong></div></div>}</div><div className="tabs">{(["all", "sent", "received"] as const).map((entry) => <button type="button" className={filter === entry ? "active" : ""} key={entry} onClick={() => setFilter(entry)}>{entry[0].toUpperCase() + entry.slice(1)}</button>)}</div>{networkMode && rows.length === 0 ? <div className="card empty-state">No recent transactions in this browser yet. This list is local to this browser and is not a complete on-chain history.</div> : <div className="card activity-list">{rows.map((entry, index) => <div className="activity-row" key={`${entry.transactionId ?? entry.date}-${index}`}><span className={entry.direction === "sent" ? "sent" : "received"}>{entry.direction === "sent" ? <><ArrowUpRight size={15} aria-hidden="true" /> Sent</> : <><ArrowDownLeft size={15} aria-hidden="true" /> Received</>}</span><strong>{entry.asset}</strong><span>{entry.recipient}<small>{networkMode ? "Browser-local" : "Recipient"}</small></span><strong>{entry.amount}</strong><small>{entry.date}</small></div>)}</div>}</section>;
+  return <section className="page"><div className="activity-heading"><div><h1>Activity</h1><p className="muted">{networkMode ? "Browser-local recent activity · not an indexed history" : "Demo activity"}</p></div>{!networkMode && <div className="card activity-summary"><div><small>Total sent (30d)</small><strong>1,240 DOT</strong></div><div><small>Total received (30d)</small><strong>320 DOT</strong></div></div>}</div><div className="tabs">{(["all", "sent", "received"] as const).map((entry) => <button type="button" className={filter === entry ? "active" : ""} key={entry} onClick={() => setFilter(entry)}>{entry[0].toUpperCase() + entry.slice(1)}</button>)}</div>{networkMode && rows.length === 0 ? <div className="card empty-state">No recent transactions in this browser yet. This list is local to this browser and is not a complete on-chain history.</div> : <div className="card activity-list">{rows.map((entry, index) => entry.kind === "swap" ? <div className="activity-row activity-row-swap" key={`${entry.transactionId ?? entry.date}-${index}`}><span className="received"><ArrowLeftRight size={15} aria-hidden="true" /> Swapped</span><strong>{entry.amountIn} {entry.assetIn} → {entry.amountOut} {entry.assetOut}</strong><span>Simple swap<small>Browser-local</small></span><small>{entry.date}</small></div> : <div className="activity-row" key={`${entry.transactionId ?? entry.date}-${index}`}><span className={entry.direction === "sent" ? "sent" : "received"}>{entry.direction === "sent" ? <><ArrowUpRight size={15} aria-hidden="true" /> Sent</> : <><ArrowDownLeft size={15} aria-hidden="true" /> Received</>}</span><strong>{entry.asset}</strong><span>{entry.recipient}<small>{networkMode ? "Browser-local" : "Recipient"}</small></span><strong>{entry.amount}</strong><small>{entry.date}</small></div>)}</div>}</section>;
 }

@@ -1,8 +1,10 @@
-# Locus v0.2
+# Locus v0.3
 
 Locus is an Ownership-native multi-asset service for JamScript. Assets are
 owned directly by canonical JamScript `Ownership` values; Locus does not
-create application identities, wallet accounts, or bridge destinations.
+create application identities, wallet accounts, or bridge destinations. The
+v0.3 web client presents curated MiniJAM test assets and demo equities and
+supports single-pool exact-input swaps when operator-managed liquidity exists.
 
 ```text
 Asset → Ownership
@@ -114,12 +116,24 @@ docker rm -f locus-v02-web-preview
 ## Protocol surface
 
 The service exposes `bootstrapMatrixController`, `addController`,
-`revokeController`, `createAsset`, `transfer`, `approve`, `transferFrom`,
-`mint`, and `burn`. Controller authorization is local to Locus, and recipient
-Ownership values do not need to be registered.
+`revokeController`, `createAsset`, pool-management actions, `swapExactIn`,
+`transfer`, `approve`, `transferFrom`, `mint`, and `burn`. `createAsset` keeps
+the issuer (`subject`) separate from its optional `initialHolder`; the SDK
+defaults the holder to the current subject. Controller authorization is local
+to Locus, and recipient Ownership values do not need to be registered.
 Balances use a canonical `ownershipKey(owner)` state key, while the public SDK
 continues to accept and return `Ownership` values. All quantities remain
-`bigint`/JamScript `u128` values.
+`bigint`/JamScript `u128` values. Swap v0 uses a fixed 30 bps fee, one
+constant-product pool per canonical asset pair, and a reserve cap that keeps
+the multiplication within `u128`.
+
+Curated asset presentation is bound to the selected deployment and on-chain
+asset ID, metadata, and issuer. A matching symbol by itself never grants a
+brand icon or curated badge. DOT and USDT entries are test representations;
+AAPL, NVDA, and TSLA are demo equities without ownership, dividend, voting, or
+redemption rights. Swap prices come from pool reserves only, not a market
+oracle. The current Local deployment has no seeded pools, so Swap reports that
+liquidity is not initialized and does not produce a quote.
 
 The SDK is in [`sdk/src`](sdk/src), the service is [`src/service.ts`](src/service.ts),
 and the React/Vite web client is in [`web`](web). Network Mode never falls back

@@ -1,8 +1,8 @@
 # Frontend
 
-The React/Vite web client has three product surfaces: Send, Assets, and Activity.
-Recipient selection identifies the destination Ownership, not a network or
-bridge route.
+The React/Vite web client has four product surfaces: Assets, Send, Swap, and
+Activity. Recipient selection identifies the destination Ownership, not a
+network or bridge route.
 
 The application has two modes:
 
@@ -31,9 +31,10 @@ does not use demo assets, fake balances, fake USD values, or mock activity. A
 network without a descriptor is shown as Not configured rather than falling
 back to Local or Demo.
 
-The current Local descriptor points to the published rc.7 backend and the
-validated local MiniJAM deployment. Testnet remains an explicit, visible
-option but is not configured until a canonical public descriptor is published.
+The current Local descriptor points to the validated MiniJAM Local deployment
+and same-origin `/rpc` backend. Testnet remains an explicit, visible option but
+is not configured until canonical operator secrets and a testnet descriptor are
+available.
 
 The web app owns the session boundary only. It does not implement EVM proof,
 Polkadot proof, Matrix verification, SignedAction encoding, or MiniJAM
@@ -53,3 +54,16 @@ Mode is connected. Receive shares the canonical `locus:` Ownership identifier;
 it does not invent a chain address. Recent successful transfers are stored as
 device-local activity and are labelled as such rather than presented as a
 chain-wide index.
+
+The Local curated catalog contains DOT, MINI, USDT, and AAPL/NVDA/TSLA demo
+equities. Its network, genesis, Service ID, asset ID, issuer, and on-chain
+metadata must match before curated icons or labels are shown. Assets created by
+users remain custom even when they reuse a curated symbol. Curated initial
+supply is held by the configured EVM Treasury; the separate generated creator
+identity is the issuer and does not control Treasury funds.
+
+Swap v0 is single-hop and exact-input with a fixed 0.30% fee and caller-provided
+minimum output. The current Local Service has no pools because the Treasury
+signer has not been provisioned. The UI therefore shows that liquidity is not
+initialized and does not show a quote. Pool prices are reserve ratios, not
+market prices; equity demo pools have no market oracle.

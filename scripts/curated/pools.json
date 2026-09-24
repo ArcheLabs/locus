@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "demoOnly": true,
+  "unitRatio": "1:1 test units; not a market price",
+  "pools": [
+    { "base": "DOT", "quote": "USDT", "baseAmount": "10000000000000", "quoteAmount": "1000000000" },
+    { "base": "MINI", "quote": "USDT", "baseAmount": "1000000000", "quoteAmount": "1000000000" },
+    { "base": "AAPL", "quote": "USDT", "baseAmount": "10000000", "quoteAmount": "1000000000" },
+    { "base": "NVDA", "quote": "USDT", "baseAmount": "10000000", "quoteAmount": "1000000000" },
+    { "base": "TSLA", "quote": "USDT", "baseAmount": "10000000", "quoteAmount": "1000000000" }
+  ]
+}
