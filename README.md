@@ -43,33 +43,30 @@ Install the web dependencies once:
 npm --prefix web install
 ```
 
-Start the default visual preview in Demo Mode:
+Start the real network-mode preview (Local by default):
+
+```bash
+  npm --prefix web run dev -- --host 127.0.0.1
+```
+
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Network Mode loads the
+configured network and never falls back to Demo Mode.
+
+To preview the prototype assets and activity data, explicitly opt in to Demo:
 
 ```bash
 VITE_LOCUS_MODE=demo \
   npm --prefix web run dev -- --host 127.0.0.1
 ```
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Demo Mode uses only the
-prototype assets and activity data; it does not contact the backend.
-
-To preview the real Local Network Mode, make sure the Local MiniJAM node and
-JamScript backend are running, then start Vite with:
-
-```bash
-VITE_LOCUS_MODE=network \
-VITE_LOCUS_DEFAULT_NETWORK=local \
-  npm --prefix web run dev -- --host 127.0.0.1
-```
-
-Network Mode loads the runtime configuration from
+Production builds always use Network Mode. `VITE_LOCUS_MODE=demo` only affects
+the Vite development server. Network Mode loads the runtime configuration from
 [`web/public/locus-networks.json`](web/public/locus-networks.json), fetches the
-Local deployment descriptor, creates the published `JamScriptClient`, and
-calls `validateDeployment()` before showing real assets. The current Local
-backend is `http://127.0.0.1:8090`; the descriptor contains the validated
-Service deployment. Testnet is shown as an option but remains Not configured
-until a canonical public descriptor is published. Network Mode never falls
-back to Demo Mode.
+deployment descriptor, creates the published `JamScriptClient`, and calls
+`validateDeployment()` before showing real assets. The live web deployment
+uses same-origin `/rpc` to reach the loopback backend. The current network is
+MiniJAM Local / Development; Testnet remains unconfigured until a canonical
+descriptor is published.
 
 In Network Mode, `Connect` uses a browser-provided EVM EIP-1193 wallet, the
 official Polkadot extension-dapp adapter, the official Solana Wallet Standard

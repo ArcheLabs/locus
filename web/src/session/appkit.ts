@@ -7,6 +7,7 @@ import { defineChain } from "viem";
 // Locus reuses that same wallet layer for EVM only; Polkadot stays on the
 // extension-dapp raw-signature path used by OwnershipSigner.
 const projectId = import.meta.env.VITE_REOWN_PROJECT_ID?.trim() || "65fcb5a5788f31332af2ca9bfabf4699";
+const initialThemeMode = typeof document !== "undefined" && document.documentElement.dataset.theme === "dark" ? "dark" : "light";
 const locusEvmNetwork = defineChain({
   id: 1,
   name: "Ethereum",
@@ -21,6 +22,7 @@ createAppKit({
   adapters: [wagmiAdapter],
   networks: [locusEvmNetwork],
   projectId,
+  themeMode: initialThemeMode,
   metadata: {
     name: "Locus",
     description: "Ownership assets and identity",

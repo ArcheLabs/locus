@@ -1,6 +1,7 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronDown, X } from "lucide-react";
+import { ChevronDown, X } from "lucide-react";
 import { RecipientIcon } from "./RecipientIcon.js";
+import { IdentityOption } from "../components/IdentityOption.js";
 import { recipientHints, recipientLabels, type RecipientType } from "./recipients.js";
 
 export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkMode, value, onChange, onClear }: {
@@ -35,15 +36,17 @@ export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkM
                 key={entry}
                 disabled={disabled}
                 data-selected={selected ? "true" : undefined}
-                className="type-menu-item"
+                className="identity-option-row identity-option-row--compact"
                 onSelect={() => onChoose(entry)}
               >
-                <span className="identity-icon-slot"><RecipientIcon type={entry} size={24} /></span>
-                <span className="type-menu-copy">
-                  <strong>{recipientLabels[entry]}</strong>
-                  <small>{disabled ? "Not configured" : recipientHints[entry]}</small>
-                </span>
-                <span className="type-menu-check">{selected && <Check size={18} aria-hidden="true" />}</span>
+                <IdentityOption
+                  kind={entry}
+                  title={recipientLabels[entry]}
+                  description={disabled ? "Not configured" : recipientHints[entry]}
+                  variant="compact"
+                  disabled={disabled}
+                  trailing={selected ? "check" : null}
+                />
               </DropdownMenu.Item>;
             })}
           </DropdownMenu.Content>

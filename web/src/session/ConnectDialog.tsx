@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowRight } from "lucide-react";
 import { useAppKit, useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
 import { Modal } from "../components/Modal.js";
-import { IdentityIcon } from "../components/IdentityIcon.js";
+import { IdentityOption } from "../components/IdentityOption.js";
 import { connectBrowserSession, connectEvmProvider, connectorInfo, hasSolanaWallet, listBrowserAccounts, type BrowserAccountOption } from "./connectors.js";
 import type { LocusWebSession, SessionKind } from "./types.js";
 import { MatrixLoginDialog } from "../matrix/MatrixLoginDialog.js";
@@ -12,6 +11,7 @@ import type { Eip1193Provider } from "@jamscript/client";
 type Props = {
   open: boolean;
   onClose: () => void;
+  onCancelMatrix: (connection: MatrixConnected | null) => void;
   onConnected: (session: LocusWebSession) => void;
   locus: import("@archelabs/locus").LocusClient | null;
   initialMatrixConnection?: MatrixConnected | null;
@@ -22,7 +22,7 @@ function available(kind: SessionKind): boolean {
   return true;
 }
 
-export function ConnectDialog({ open, onClose, onConnected, locus, initialMatrixConnection = null }: Props) {
+export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, locus, initialMatrixConnection = null }: Props) {
   const [connecting, setConnecting] = useState<SessionKind | null>(null);
   const [error, setError] = useState("");
   const [accountOptions, setAccountOptions] = useState<BrowserAccountOption[]>([]);
@@ -120,10 +120,22 @@ export function ConnectDialog({ open, onClose, onConnected, locus, initialMatrix
       <p className="modal-lead">Choose an Ownership signer. This does not select an execution network.</p>
       <div className="connect-options">
         {displayOptions.map((entry) => (
-          <button key={entry.kind} type="button" className="connect-option" disabled={connecting !== null || !entry.available} onClick={() => chooseConnector(entry.kind)}>
-            <span className="identity-icon-slot"><IdentityIcon kind={entry.kind} size={24} /></span>
-            <span><strong>{entry.label}</strong><small>{connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}</small></span>
-            <ArrowRight className="connect-arrow" size={18} aria-hidden="true" />
+          <button
+            key={entry.kind}
+            type="button"
+            className="identity-option-row identity-option-row--comfortable"
+            disabled={connecting !== null || !entry.available}
+            data-disabled={connecting !== null || !entry.available ? "true" : undefined}
+            onClick={() => chooseConnector(entry.kind)}
+          >
+            <IdentityOption
+              kind={entry.kind}
+              title={entry.label}
+              description={connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}
+              variant="comfortable"
+              disabled={connecting !== null || !entry.available}
+              trailing="arrow"
+            />
           </button>
         ))}
       </div>
@@ -138,7 +150,7 @@ export function ConnectDialog({ open, onClose, onConnected, locus, initialMatrix
       {error && <div className="transaction-error">{error}</div>}
       <p className="modal-note">Locus keeps assets attached to Ownership. Wallets only authorize actions.</p>
     </Modal>
-    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onConnected={onConnected} locus={locus} initialConnection={initialMatrixConnection} />
+    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onCancel={onCancelMatrix} onConnected={onConnected} locus={locus} initialConnection={initialMatrixConnection} />
     </>
   );
 }

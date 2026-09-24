@@ -5,7 +5,7 @@ import type { SessionKind } from "../session/types.js";
 import type { RecipientType } from "../locus/recipients.js";
 import "../styles/identity-icons.css";
 
-type IdentityKind = SessionKind | RecipientType;
+export type IdentityKind = SessionKind | RecipientType;
 type IdentityIconProps = {
   kind: IdentityKind;
   size?: number;

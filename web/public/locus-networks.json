@@ -3,8 +3,8 @@
   "defaultNetwork": "local",
   "networks": {
     "local": {
-      "label": "Local",
-      "backendUrl": "http://127.0.0.1:8090",
+      "label": "MiniJAM Local / Development",
+      "backendUrl": "/rpc",
       "deploymentUrl": "/deployments/local.json"
     },
     "testnet": {

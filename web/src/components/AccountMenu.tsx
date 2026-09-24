@@ -9,7 +9,7 @@ import { useState } from "react";
 export function AccountMenu({ session, lifecycle, restoreError, onConnect, onDisconnect, onClearSavedSession }: { session: LocusWebSession | null; lifecycle: SessionLifecycle; restoreError?: string; onConnect: () => void; onDisconnect: () => void; onClearSavedSession: () => void }) {
   const [copied, setCopied] = useState(false);
   if (!session) return <div className="disconnected-session">
-    <button type="button" className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring"}><span className="neutral-mark"><UserRound size={17} aria-hidden="true" /></span><span>{lifecycle === "restoring" ? "Restoring…" : "Connect"}</span></button>
+    <button type="button" className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring"}><span className="identity-icon-slot"><UserRound className="identity-icon account-placeholder-icon" size={24} aria-hidden="true" /></span><span>{lifecycle === "restoring" ? "Restoring…" : "Connect"}</span></button>
     {restoreError && <section className="session-restore-alert" role="alert">
       <strong>Not connected</strong>
       <p>{restoreError}</p>

@@ -4,12 +4,15 @@ The React/Vite web client has three product surfaces: Send, Assets, and Activity
 Recipient selection identifies the destination Ownership, not a network or
 bridge route.
 
-The application has two explicit modes:
+The application has two modes:
 
-- `VITE_LOCUS_MODE=demo` keeps the visual prototype data for UI development.
-- `VITE_LOCUS_MODE=network` loads `/locus-networks.json`, fetches the selected
+- Network Mode is the default for development and every production build.
+  It loads `/locus-networks.json`, fetches the selected
   deployment descriptor, creates the published `JamScriptClient`, calls
   `validateDeployment()`, and then reads through `LocusClient`.
+- Demo Mode is an explicit development opt-in using
+  `VITE_LOCUS_MODE=demo`; it keeps the visual prototype data. Production builds
+  ignore this value and are guarded to compile as Network Mode.
 
 Network selection is persisted under `locus.network.v1`. The URL `?network=`
 selection takes precedence over local storage, followed by

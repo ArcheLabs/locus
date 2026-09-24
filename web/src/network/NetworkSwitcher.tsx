@@ -1,5 +1,5 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { Check, ChevronDown } from "lucide-react";
+import { Check, ChevronDown, Network as NetworkIcon } from "lucide-react";
 import { useNetwork } from "./NetworkProvider.js";
 import type { LocusNetworkId } from "./types.js";
 
@@ -11,7 +11,7 @@ function statusLabel(status: string): string {
   return "Idle";
 }
 
-export function NetworkSwitcher() {
+export function NetworkSwitcher({ compact = false }: { compact?: boolean }) {
   const { networkId, config, status, switchNetwork } = useNetwork();
   if (!config) return null;
   const options: LocusNetworkId[] = ["local", "testnet"];
@@ -20,7 +20,7 @@ export function NetworkSwitcher() {
     <DropdownMenu.Root>
       <div className="network-switcher">
         <DropdownMenu.Portal>
-          <DropdownMenu.Content className="network-menu" sideOffset={8} align="start">
+          <DropdownMenu.Content className="network-menu" sideOffset={8} align={compact ? "end" : "start"}>
             <DropdownMenu.RadioGroup value={networkId} onValueChange={(value) => switchNetwork(value as LocusNetworkId)}>
           {options.map((id) => {
             const entry = config.networks[id];
@@ -40,10 +40,20 @@ export function NetworkSwitcher() {
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
         <DropdownMenu.Trigger asChild>
-          <button type="button" className="network-trigger">
-        <span className={`status-dot ${status}`} aria-hidden="true" />
-        <span><strong>{selected.label}</strong><small>{statusLabel(status)}</small></span>
-            <span className="network-chevron"><ChevronDown size={16} aria-hidden="true" /></span>
+          <button
+            type="button"
+            className={compact ? "network-trigger network-trigger-compact" : "network-trigger"}
+            aria-label={compact ? `Select network. Current network: ${selected.label}, ${statusLabel(status)}` : undefined}
+            title={compact ? `Network: ${selected.label} (${statusLabel(status)})` : undefined}
+          >
+            {compact ? <>
+              <NetworkIcon size={19} aria-hidden="true" />
+              <span className={`status-dot network-compact-status ${status}`} aria-hidden="true" />
+            </> : <>
+              <span className={`status-dot ${status}`} aria-hidden="true" />
+              <span><strong>{selected.label}</strong><small>{statusLabel(status)}</small></span>
+              <span className="network-chevron"><ChevronDown size={16} aria-hidden="true" /></span>
+            </>}
           </button>
         </DropdownMenu.Trigger>
       </div>

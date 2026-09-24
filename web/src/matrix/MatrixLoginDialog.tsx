@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Modal } from "../components/Modal.js";
 import type { LocusWebSession } from "../session/types.js";
-import { connectMatrixSession, discoverHomeserver, type MatrixConnected } from "./MatrixConnector.js";
+import { connectMatrixSession, discoverHomeserver, revokeStoredMatrixSession, type MatrixConnected } from "./MatrixConnector.js";
 import { beginMatrixOAuth, beginMatrixSso } from "./MatrixOAuth.js";
 import type { LocusClient } from "@archelabs/locus";
 
-export function MatrixLoginDialog({ open, onClose, onConnected, locus, initialConnection = null }: {
+export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus, initialConnection = null }: {
   open: boolean;
   onClose: () => void;
+  onCancel: (connection: MatrixConnected | null) => void;
   onConnected: (session: LocusWebSession) => void;
   locus: LocusClient | null;
   initialConnection?: MatrixConnected | null;
@@ -21,6 +22,7 @@ export function MatrixLoginDialog({ open, onClose, onConnected, locus, initialCo
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [pendingConnection, setPendingConnection] = useState<MatrixConnected | null>(initialConnection);
+  const authAttempt = useRef(0);
 
   useEffect(() => {
     if (initialConnection) {
@@ -56,12 +58,18 @@ export function MatrixLoginDialog({ open, onClose, onConnected, locus, initialCo
   }
 
   async function passwordLogin() {
+    const attempt = ++authAttempt.current;
     setWorking(true);
     setError("");
     try {
       const connected = pendingConnection
         ? await pendingConnection.checkVerification()
         : await connectMatrixSession(userId.trim(), password, advanced ? homeserver.trim() || undefined : undefined, { locus });
+      if (attempt !== authAttempt.current) {
+        connected.session.cleanup?.();
+        void revokeStoredMatrixSession().catch(() => undefined);
+        return;
+      }
       if (connected.state === "AWAITING_VERIFICATION") {
         setPendingConnection(connected);
         setError("Verify the device named “Locus” in Element, then check again here.");
@@ -72,21 +80,29 @@ export function MatrixLoginDialog({ open, onClose, onConnected, locus, initialCo
       onConnected(connected.session);
       setPassword("");
       onClose();
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Matrix sign-in failed."); }
-    finally { setPassword(""); setWorking(false); }
+    } catch (cause) {
+      if (attempt === authAttempt.current) setError(cause instanceof Error ? cause.message : "Matrix sign-in failed.");
+    } finally {
+      if (attempt === authAttempt.current) { setPassword(""); setWorking(false); }
+    }
   }
 
-  function close() {
-    pendingConnection?.session.cleanup?.();
+  function cancel() {
+    authAttempt.current += 1;
+    onCancel(pendingConnection);
     setPendingConnection(null);
     setPassword("");
+    setWorking(false);
+    setError("");
+    setShowLegacy(false);
+    setShowPassword(false);
     onClose();
   }
 
   const awaitingVerification = pendingConnection?.state === "AWAITING_VERIFICATION";
   return (
-    <Modal open={open} title="Connect Matrix" onClose={close} footer={<>
-      <button type="button" className="secondary" onClick={close}>Cancel</button>
+    <Modal open={open} title="Connect Matrix" onClose={cancel} footer={<>
+      <button type="button" className="secondary" onClick={cancel}>Cancel</button>
       {awaitingVerification ? <button type="button" className="primary modal-primary" disabled={working} onClick={passwordLogin}>{working ? "Checking…" : "Check verification"}</button> : null}
     </>}>
       <p className="modal-lead">Use your Matrix cross-signing master key as the Locus Ownership. A verified Matrix device signs through its device key.</p>

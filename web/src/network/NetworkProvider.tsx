@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type PropsWithChildren } from "react";
 import { bootstrapNetwork } from "./bootstrap.js";
 import { defaultNetworkFromEnv, isExplicitSelection, isNetworkId, loadRuntimeNetworkConfig, NETWORK_STORAGE_KEY, readNetworkSelection } from "./config.js";
+import { resolveLocusMode } from "./mode.js";
 import { NetworkBootstrapError, type NetworkContextValue, type LocusNetworkId, type NetworkStatus } from "./types.js";
 
 const NetworkContext = createContext<NetworkContextValue | null>(null);
@@ -10,7 +11,7 @@ function initialNetwork(): LocusNetworkId {
 }
 
 export function NetworkProvider({ children }: PropsWithChildren) {
-  const mode: "demo" | "network" = import.meta.env.VITE_LOCUS_MODE === "network" ? "network" : "demo";
+  const mode = resolveLocusMode(__LOCUS_MODE__);
   const [networkId, setNetworkId] = useState<LocusNetworkId>(initialNetwork);
   const [config, setConfig] = useState<NetworkContextValue["config"]>(null);
   const [status, setStatus] = useState<NetworkStatus>(mode === "network" ? "connecting" : "idle");

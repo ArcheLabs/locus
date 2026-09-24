@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/assert-matrix-wasm.mjs"
+    "build": "tsc --noEmit && vite build && node scripts/assert-matrix-wasm.mjs && node --experimental-strip-types scripts/assert-production-network.mjs"
   },
   "dependencies": {
     "@jamscript/client": "0.1.0-rc.3",
