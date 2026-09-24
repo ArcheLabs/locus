@@ -22,6 +22,23 @@ export interface Asset {
   totalSupply: Amount;
 }
 
+export interface Pool {
+  version: 1;
+  manager: Ownership;
+  asset0: AssetId;
+  asset1: AssetId;
+  reserve0: Amount;
+  reserve1: Amount;
+}
+
+export interface ExactInQuote {
+  amountIn: Amount;
+  amountOut: Amount;
+  minimumAmountOut: Amount;
+  feeAmount: Amount;
+  feeBps: 30;
+}
+
 export interface LocusQueryResult {
   value: LocusValue | null;
 }

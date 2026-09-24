@@ -9,12 +9,22 @@ import type {
   JamScriptLikeClient,
   LocusRecord,
   LocusValue,
+  ExactInQuote,
   OwnershipSession,
+  Pool,
 } from "./types.js";
+
+export const MAX_POOL_RESERVE = (1n << 64n) - 1n;
+export const SWAP_FEE_BPS = 30 as const;
+const BPS = 10000n;
 
 function asBigInt(value: LocusValue | null, label: string): bigint {
   if (typeof value !== "bigint") throw new Error(`${label} query did not return bigint`);
   return value;
+}
+
+function asBigIntOrZero(value: LocusValue | null, label: string): bigint {
+  return value === null ? 0n : asBigInt(value, label);
 }
 
 function asBytes(value: LocusValue | null, label: string): Uint8Array {
@@ -46,6 +56,23 @@ function asAsset(value: LocusValue | null): Asset | null {
   };
 }
 
+function asPool(value: LocusValue | null, key: { asset0: AssetId; asset1: AssetId }): Pool | null {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || value instanceof Uint8Array || Array.isArray(value)) {
+    throw new Error("pool query did not return a record");
+  }
+  const pool = value as Record<string, LocusValue>;
+  if (typeof pool.version !== "number" || pool.version !== 1) throw new Error("unsupported pool version");
+  return {
+    version: 1,
+    manager: asOwnership(pool.manager),
+    asset0: key.asset0,
+    asset1: key.asset1,
+    reserve0: asBigInt(pool.reserve0, "pool reserve0"),
+    reserve1: asBigInt(pool.reserve1, "pool reserve1"),
+  };
+}
+
 function assertAmount(amount: Amount, label = "amount"): void {
   if (typeof amount !== "bigint" || amount < 0n || amount >= 1n << 128n) {
     throw new Error(`${label} must be a u128 bigint`);
@@ -68,6 +95,55 @@ function assertOwnership(owner: Ownership, label: string): void {
 
 function balanceQueryKey(assetId: AssetId, owner: Ownership): LocusRecord {
   return { assetId, ownerKey: ownershipKey(owner) };
+}
+
+function compareAssetIds(left: AssetId, right: AssetId): number {
+  for (let index = 0; index < 32; index += 1) {
+    if (left[index] < right[index]) return -1;
+    if (left[index] > right[index]) return 1;
+  }
+  return 0;
+}
+
+export function canonicalPoolKey(assetA: AssetId, assetB: AssetId): { asset0: AssetId; asset1: AssetId } {
+  assertId(assetA, "assetA");
+  assertId(assetB, "assetB");
+  const order = compareAssetIds(assetA, assetB);
+  if (order === 0) throw locusError(LOCUS_ERROR_CODES.INVALID_POOL_PAIR);
+  return order < 0 ? { asset0: assetA, asset1: assetB } : { asset0: assetB, asset1: assetA };
+}
+
+function assertPoolReserve(value: Amount, label: string): void {
+  assertAmount(value, label);
+  if (value > MAX_POOL_RESERVE) throw locusError(LOCUS_ERROR_CODES.POOL_RESERVE_LIMIT);
+}
+
+export function quoteExactIn(reserveIn: Amount, reserveOut: Amount, amountIn: Amount): ExactInQuote {
+  assertPoolReserve(reserveIn, "reserveIn");
+  assertPoolReserve(reserveOut, "reserveOut");
+  assertPoolReserve(amountIn, "amountIn");
+  if (amountIn === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+  if (reserveIn === 0n || reserveOut === 0n) throw locusError(LOCUS_ERROR_CODES.INSUFFICIENT_POOL_LIQUIDITY);
+  const amountInAfterFee = amountIn * (BPS - BigInt(SWAP_FEE_BPS)) / BPS;
+  if (amountInAfterFee === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+  const amountOut = reserveOut * amountInAfterFee / (reserveIn + amountInAfterFee);
+  if (amountOut === 0n || amountOut >= reserveOut) throw locusError(LOCUS_ERROR_CODES.INSUFFICIENT_POOL_LIQUIDITY);
+  const minimumAmountOut = amountOut;
+  return {
+    amountIn,
+    amountOut,
+    minimumAmountOut,
+    feeAmount: amountIn - amountInAfterFee,
+    feeBps: SWAP_FEE_BPS,
+  };
+}
+
+export function minimumAmountOut(amountOut: Amount, slippageBps: number): Amount {
+  assertAmount(amountOut, "amountOut");
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000) {
+    throw new Error("slippageBps must be an integer from 0 to 9999");
+  }
+  return amountOut * BigInt(10000 - slippageBps) / BPS;
 }
 
 function allowanceQueryKey(assetId: AssetId, owner: Ownership, spender: Ownership): LocusRecord {
@@ -139,10 +215,13 @@ export class LocusClient {
     symbol: string | Uint8Array,
     decimals: number,
     initialSupply: Amount,
+    initialHolder?: Ownership,
   ): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
     assertDecimals(decimals);
     assertAmount(initialSupply, "initialSupply");
+    const holder = initialHolder ?? this.requireSession().subject;
+    assertOwnership(holder, "initialHolder");
     const nameBytes = typeof name === "string" ? encodeAssetName(name) : name;
     const symbolBytes = typeof symbol === "string" ? encodeAssetSymbol(symbol) : symbol;
     if (!(nameBytes instanceof Uint8Array) || nameBytes.length === 0 || nameBytes.length > 64) {
@@ -157,6 +236,7 @@ export class LocusClient {
       symbol: symbolBytes,
       decimals,
       initialSupply,
+      initialHolder: holder,
     });
   }
 
@@ -251,7 +331,7 @@ export class LocusClient {
   }
 
   async listAssets(): Promise<AssetId[]> {
-    const count = asBigInt(await this.queryValue("getAssetCount"), "asset count");
+    const count = asBigIntOrZero(await this.queryValue("getAssetCount"), "asset count");
     const result: AssetId[] = [];
     for (let index = 0n; index < count; index += 1n) {
       result.push(asBytes(await this.queryValue("getAssetByIndex", index), "asset index"));
@@ -259,9 +339,91 @@ export class LocusClient {
     return result;
   }
 
+  async getPool(assetA: AssetId, assetB: AssetId): Promise<Pool | null> {
+    const key = canonicalPoolKey(assetA, assetB);
+    return asPool(await this.queryValue("getPool", key), key);
+  }
+
+  async listPools(): Promise<Pool[]> {
+    const count = asBigIntOrZero(await this.queryValue("getPoolCount"), "pool count");
+    const result: Pool[] = [];
+    for (let index = 0n; index < count; index += 1n) {
+      const value = await this.queryValue("getPoolByIndex", index);
+      if (!value || typeof value !== "object" || value instanceof Uint8Array || Array.isArray(value)) {
+        throw new Error("pool index query did not return a PoolKey");
+      }
+      const key = value as Record<string, LocusValue>;
+      const pool = await this.getPool(asBytes(key.asset0, "pool asset0"), asBytes(key.asset1, "pool asset1"));
+      if (!pool) throw new Error("indexed pool does not exist");
+      result.push(pool);
+    }
+    return result;
+  }
+
+  pool(assetA: AssetId, assetB: AssetId): BoundPool {
+    const key = canonicalPoolKey(assetA, assetB);
+    return new BoundPool(this, key.asset0, key.asset1);
+  }
+
+  async createPool(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+    canonicalPoolKey(assetA, assetB);
+    assertPoolReserve(amountA, "amountA");
+    assertPoolReserve(amountB, "amountB");
+    if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+    return this.submit("createPool", { assetA, assetB, amountA, amountB });
+  }
+
+  async addPoolLiquidity(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+    canonicalPoolKey(assetA, assetB);
+    assertPoolReserve(amountA, "amountA");
+    assertPoolReserve(amountB, "amountB");
+    if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+    return this.submit("addPoolLiquidity", { assetA, assetB, amountA, amountB });
+  }
+
+  async removePoolLiquidity(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+    canonicalPoolKey(assetA, assetB);
+    assertPoolReserve(amountA, "amountA");
+    assertPoolReserve(amountB, "amountB");
+    return this.submit("removePoolLiquidity", { assetA, assetB, amountA, amountB });
+  }
+
+  async swapExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult> {
+    canonicalPoolKey(assetIn, assetOut);
+    assertPoolReserve(amountIn, "amountIn");
+    assertAmount(minAmountOut, "minAmountOut");
+    if (amountIn === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+    return this.submit("swapExactIn", { assetIn, assetOut, amountIn, minAmountOut });
+  }
+
+  async quoteExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount): Promise<ExactInQuote> {
+    const pool = await this.getPool(assetIn, assetOut);
+    if (!pool) throw locusError(LOCUS_ERROR_CODES.POOL_NOT_FOUND);
+    const assetInIs0 = compareAssetIds(assetIn, pool.asset0) === 0;
+    return quoteExactIn(assetInIs0 ? pool.reserve0 : pool.reserve1, assetInIs0 ? pool.reserve1 : pool.reserve0, amountIn);
+  }
+
   asset(assetId: AssetId): BoundAsset {
     assertId(assetId, "assetId");
     return new BoundAsset(this, assetId);
+  }
+}
+
+export class BoundPool {
+  constructor(private readonly client: LocusClient, readonly asset0: AssetId, readonly asset1: AssetId) {}
+
+  get(): Promise<Pool | null> { return this.client.getPool(this.asset0, this.asset1); }
+  quoteExactIn(assetIn: AssetId, amountIn: Amount): Promise<ExactInQuote> {
+    return this.client.quoteExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn);
+  }
+  swapExactIn(assetIn: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult> {
+    return this.client.swapExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn, minAmountOut);
+  }
+  addLiquidity(amount0: Amount, amount1: Amount): Promise<SubmitActionResult> {
+    return this.client.addPoolLiquidity(this.asset0, this.asset1, amount0, amount1);
+  }
+  removeLiquidity(amount0: Amount, amount1: Amount): Promise<SubmitActionResult> {
+    return this.client.removePoolLiquidity(this.asset0, this.asset1, amount0, amount1);
   }
 }
 

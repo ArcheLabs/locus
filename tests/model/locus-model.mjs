@@ -1,6 +1,9 @@
 import { OWNERSHIP_KIND, ownershipKey, toHex } from "@jamscript/client";
 
 export const MAX_U128 = (1n << 128n) - 1n;
+export const MAX_POOL_RESERVE = (1n << 64n) - 1n;
+const SWAP_FEE_BPS = 30n;
+const BPS = 10_000n;
 
 export function id(byte) {
   const value = new Uint8Array(32);
@@ -49,6 +52,31 @@ function sub(left, right) {
   return left - right;
 }
 
+function canonicalPoolKey(assetA, assetB) {
+  const keyA = key(assetA);
+  const keyB = key(assetB);
+  if (keyA === keyB) abort(6003);
+  return keyA < keyB ? [keyA, keyB] : [keyB, keyA];
+}
+
+function poolReserve(value) {
+  amount(value);
+  if (value > MAX_POOL_RESERVE) abort(6008);
+}
+
+function quote(reserveIn, reserveOut, amountIn) {
+  poolReserve(reserveIn);
+  poolReserve(reserveOut);
+  poolReserve(amountIn);
+  if (amountIn === 0n) abort(6004);
+  if (reserveIn === 0n || reserveOut === 0n) abort(6005);
+  const netAmountIn = amountIn * (BPS - SWAP_FEE_BPS) / BPS;
+  if (netAmountIn === 0n) abort(6004);
+  const amountOut = reserveOut * netAmountIn / (reserveIn + netAmountIn);
+  if (amountOut === 0n || amountOut >= reserveOut) abort(6005);
+  return amountOut;
+}
+
 export class LocusModel {
   constructor() {
     this.assets = new Map();
@@ -57,6 +85,8 @@ export class LocusModel {
     this.controllerGrants = new Map();
     this.matrixBootstrapUsed = new Map();
     this.assetIndex = [];
+    this.pools = new Map();
+    this.poolIndex = [];
   }
 
   asset(assetId) {
@@ -106,7 +136,7 @@ export class LocusModel {
     return this.allowances.get(`${key(assetId)}:${key(ownerValue)}:${key(spender)}`) ?? 0n;
   }
 
-  createAsset(issuer, assetId, name, symbol, decimals, initialSupply) {
+  createAsset(issuer, assetId, name, symbol, decimals, initialSupply, initialHolder = issuer) {
     if (!(assetId instanceof Uint8Array) || assetId.length !== 32 || assetId.every((byte) => byte === 0)) abort(2003);
     if (this.assets.has(key(assetId))) abort(2002);
     if (!(name instanceof Uint8Array) || name.length === 0 || name.length > 64) abort(2004);
@@ -114,13 +144,13 @@ export class LocusModel {
     if (!Number.isInteger(decimals) || decimals > 38 || decimals < 0) abort(2006);
     amount(initialSupply);
     this.assets.set(key(assetId), { version: 2, issuer: clone(issuer), name: clone(name), symbol: clone(symbol), decimals, totalSupply: initialSupply });
-    if (initialSupply > 0n) this.balances.set(`${key(assetId)}:${key(issuer)}`, initialSupply);
+    if (initialSupply > 0n) this.balances.set(`${key(assetId)}:${key(initialHolder)}`, initialSupply);
     this.assetIndex.push(clone(assetId));
   }
 
-  createAssetAs(controller, subject, assetId, name, symbol, decimals, initialSupply) {
+  createAssetAs(controller, subject, assetId, name, symbol, decimals, initialSupply, initialHolder = subject) {
     this.requireController(subject, controller);
-    this.createAsset(subject, assetId, name, symbol, decimals, initialSupply);
+    this.createAsset(subject, assetId, name, symbol, decimals, initialSupply, initialHolder);
   }
 
   transferAs(controller, subject, assetId, to, value) {
@@ -197,6 +227,126 @@ export class LocusModel {
     return sum;
   }
 
+  pool(assetA, assetB) {
+    const [asset0, asset1] = canonicalPoolKey(assetA, assetB);
+    return this.pools.get(`${asset0}:${asset1}`) ?? null;
+  }
+
+  createPool(manager, assetA, assetB, amountA, amountB) {
+    if (!this.asset(assetA) || !this.asset(assetB)) abort(2001);
+    poolReserve(amountA);
+    poolReserve(amountB);
+    if (amountA === 0n || amountB === 0n) abort(6004);
+    const [asset0, asset1] = canonicalPoolKey(assetA, assetB);
+    const poolKey = `${asset0}:${asset1}`;
+    if (this.pools.has(poolKey)) abort(6002);
+    if (this.balance(assetA, manager) < amountA || this.balance(assetB, manager) < amountB) abort(3002);
+    const assetAIs0 = key(assetA) === asset0;
+    const pool = {
+      version: 1,
+      manager: clone(manager),
+      asset0: assetAIs0 ? assetA.slice() : assetB.slice(),
+      asset1: assetAIs0 ? assetB.slice() : assetA.slice(),
+      reserve0: assetAIs0 ? amountA : amountB,
+      reserve1: assetAIs0 ? amountB : amountA,
+    };
+    this.balances.set(`${key(assetA)}:${key(manager)}`, this.balance(assetA, manager) - amountA);
+    this.balances.set(`${key(assetB)}:${key(manager)}`, this.balance(assetB, manager) - amountB);
+    this.pools.set(poolKey, pool);
+    this.poolIndex.push({ asset0: pool.asset0.slice(), asset1: pool.asset1.slice() });
+  }
+
+  createPoolAs(controller, subject, assetA, assetB, amountA, amountB) {
+    this.requireController(subject, controller);
+    this.createPool(subject, assetA, assetB, amountA, amountB);
+  }
+
+  addPoolLiquidityAs(controller, subject, assetA, assetB, amountA, amountB) {
+    this.requireController(subject, controller);
+    const pool = this.pool(assetA, assetB);
+    if (!pool) abort(6001);
+    if (!equal(pool.manager, subject)) abort(6007);
+    poolReserve(amountA);
+    poolReserve(amountB);
+    if (amountA === 0n || amountB === 0n) abort(6004);
+    const assetAIs0 = key(assetA) === key(pool.asset0);
+    const reserveA = assetAIs0 ? pool.reserve0 : pool.reserve1;
+    const reserveB = assetAIs0 ? pool.reserve1 : pool.reserve0;
+    const nextA = add(reserveA, amountA);
+    const nextB = add(reserveB, amountB);
+    poolReserve(nextA);
+    poolReserve(nextB);
+    if (this.balance(assetA, subject) < amountA || this.balance(assetB, subject) < amountB) abort(3002);
+    const nextReserve0 = assetAIs0 ? nextA : nextB;
+    const nextReserve1 = assetAIs0 ? nextB : nextA;
+    this.balances.set(`${key(assetA)}:${key(subject)}`, this.balance(assetA, subject) - amountA);
+    this.balances.set(`${key(assetB)}:${key(subject)}`, this.balance(assetB, subject) - amountB);
+    pool.reserve0 = nextReserve0;
+    pool.reserve1 = nextReserve1;
+  }
+
+  removePoolLiquidityAs(controller, subject, assetA, assetB, amountA, amountB) {
+    this.requireController(subject, controller);
+    const pool = this.pool(assetA, assetB);
+    if (!pool) abort(6001);
+    if (!equal(pool.manager, subject)) abort(6007);
+    amount(amountA); amount(amountB);
+    if (amountA === 0n && amountB === 0n) abort(6004);
+    const assetAIs0 = key(assetA) === key(pool.asset0);
+    const reserveA = assetAIs0 ? pool.reserve0 : pool.reserve1;
+    const reserveB = assetAIs0 ? pool.reserve1 : pool.reserve0;
+    if (amountA > reserveA || amountB > reserveB) abort(6005);
+    const nextBalanceA = add(this.balance(assetA, subject), amountA);
+    const nextBalanceB = add(this.balance(assetB, subject), amountB);
+    const nextReserveA = reserveA - amountA;
+    const nextReserveB = reserveB - amountB;
+    this.balances.set(`${key(assetA)}:${key(subject)}`, nextBalanceA);
+    this.balances.set(`${key(assetB)}:${key(subject)}`, nextBalanceB);
+    pool.reserve0 = assetAIs0 ? nextReserveA : nextReserveB;
+    pool.reserve1 = assetAIs0 ? nextReserveB : nextReserveA;
+  }
+
+  swapExactInAs(controller, subject, assetIn, assetOut, amountIn, minAmountOut) {
+    this.requireController(subject, controller);
+    if (!this.asset(assetIn) || !this.asset(assetOut)) abort(2001);
+    poolReserve(amountIn); amount(minAmountOut);
+    if (amountIn === 0n) abort(6004);
+    const pool = this.pool(assetIn, assetOut);
+    if (!pool) abort(6001);
+    const inputIs0 = key(assetIn) === key(pool.asset0);
+    const reserveIn = inputIs0 ? pool.reserve0 : pool.reserve1;
+    const reserveOut = inputIs0 ? pool.reserve1 : pool.reserve0;
+    const balanceIn = this.balance(assetIn, subject);
+    const balanceOut = this.balance(assetOut, subject);
+    if (balanceIn < amountIn) abort(3002);
+    const amountOut = quote(reserveIn, reserveOut, amountIn);
+    if (amountOut < minAmountOut) abort(6006);
+    const nextReserveIn = add(reserveIn, amountIn);
+    poolReserve(nextReserveIn);
+    const nextBalanceOut = add(balanceOut, amountOut);
+    this.balances.set(`${key(assetIn)}:${key(subject)}`, balanceIn - amountIn);
+    this.balances.set(`${key(assetOut)}:${key(subject)}`, nextBalanceOut);
+    pool.reserve0 = inputIs0 ? nextReserveIn : reserveOut - amountOut;
+    pool.reserve1 = inputIs0 ? reserveOut - amountOut : nextReserveIn;
+    return amountOut;
+  }
+
+  quoteExactIn(assetIn, assetOut, amountIn) {
+    const pool = this.pool(assetIn, assetOut);
+    if (!pool) abort(6001);
+    const inputIs0 = key(assetIn) === key(pool.asset0);
+    return quote(inputIs0 ? pool.reserve0 : pool.reserve1, inputIs0 ? pool.reserve1 : pool.reserve0, amountIn);
+  }
+
+  totalAccounted(assetId) {
+    let sum = this.totalBalance(assetId);
+    for (const pool of this.pools.values()) {
+      if (key(pool.asset0) === key(assetId)) sum += pool.reserve0;
+      if (key(pool.asset1) === key(assetId)) sum += pool.reserve1;
+    }
+    return sum;
+  }
+
   query(name, queryKey) {
     if (name === "getAsset") return this.asset(queryKey) ?? null;
     if (name === "getAssetCount") return BigInt(this.assetIndex.length);
@@ -205,6 +355,9 @@ export class LocusModel {
     if (name === "getAllowance") return this.allowances.get(`${key(queryKey.assetId)}:${key(queryKey.ownerKey)}:${key(queryKey.spenderKey)}`) ?? 0n;
     if (name === "getControllerGrant") return this.controllerGrants.get(key(queryKey.subjectKey) + ":" + key(queryKey.controllerKey)) ?? null;
     if (name === "getMatrixBootstrapUsed") return this.matrixBootstrapUsed.get(key(queryKey)) ?? null;
+    if (name === "getPool") return this.pool(queryKey.asset0, queryKey.asset1);
+    if (name === "getPoolCount") return BigInt(this.poolIndex.length);
+    if (name === "getPoolByIndex") return this.poolIndex[Number(queryKey)] ?? null;
     throw new Error(`unknown query ${name}`);
   }
 }
