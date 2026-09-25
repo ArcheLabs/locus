@@ -14,7 +14,7 @@ on:
 env:
   JAMSCRIPT_VERSION: v0.1.0-rc.7
 # Pinned source revision is validated by JamScript CI before consumer checks.
-  JAMSCRIPT_CLIENT_REF: 288d4ea0ac70dc11bf0feb1cc355f2f11b336fc1
+  JAMSCRIPT_CLIENT_REF: 6db7f5876db436c025426aab6580a2c9be9fdc44
   NODE_VERSION: 24.15.0
 
 jobs:
