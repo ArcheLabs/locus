@@ -175,7 +175,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           {connectionState === "VERIFICATION_SAS_READY" && <p>Compare these emoji with the other device in Element. Confirm only when all seven match.</p>}
           {connectionState === "VERIFICATION_CONFIRMING" && <p>Verification was confirmed. Locus is waiting for the Matrix cross-signing proof before it can authorize this device.</p>}
           {connectionState === "VERIFIED" && <p>The public M → S → D signatures are verified. Authorizing this device for Locus…</p>}
-          {connectionState === "CONTROLLER_BOOTSTRAPPING" && <p>Matrix verification is complete. Submitting the controller authorization to MiniJAM…</p>}
+          {connectionState === "CONTROLLER_BOOTSTRAPPING" && <p>Matrix verification is complete. Waiting for MiniJAM to confirm this device’s controller authorization…</p>}
           {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <p>Matrix verification is complete, but Locus could not finish authorizing this device. The error is shown below. Retry after addressing it.</p>}
           {connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ? <p>Preparing the Locus Matrix device. Keep this window open.</p> : null}
           {canCompare && <div className="matrix-sas-emojis" aria-label="Short authentication string emojis">

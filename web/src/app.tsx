@@ -46,6 +46,16 @@ function sessionActivityKey(networkId: string, owner: string): string {
   return `locus.activity.v1.${networkId}.${owner}`;
 }
 
+function matrixRestoreMessage(connected: MatrixConnected): string {
+  if (connected.state === "CONTROLLER_BOOTSTRAPPING") {
+    return "Matrix verification is complete. Locus is waiting for the controller authorization transaction to finalize on MiniJAM. Keep the Matrix dialog open.";
+  }
+  if (connected.state === "CONTROLLER_AUTHORIZATION_FAILED") {
+    return `Matrix verification is complete, but controller authorization failed. ${connected.error}`;
+  }
+  return "Matrix device keys are ready. Open Element and start verification for the Locus device; the interactive request will appear here. No Locus session is connected yet.";
+}
+
 function networkErrorMessage(error: Error | null, endpoint?: string): string {
   if (!error) return "";
   return endpoint ? `${error.message}\n${endpoint}` : error.message;
@@ -107,7 +117,7 @@ export function App() {
       } else {
         setPendingMatrixConnection(connected);
         setConnectOpen(true);
-        finishRestore("Matrix device keys are ready. Open Element and start verification for the Locus device; the interactive request will appear here. No Locus session is connected yet.");
+        finishRestore(matrixRestoreMessage(connected));
       }
     }).catch((cause) => {
       finishRestore(`Could not restore the Matrix session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try signing in again."}`);
@@ -138,7 +148,7 @@ export function App() {
       else {
         setPendingMatrixConnection(connected);
         setConnectOpen(true);
-        finishRestore("Matrix device keys are ready. Open Element and start verification for the Locus device; the interactive request will appear here. No Locus session is connected yet.");
+        finishRestore(matrixRestoreMessage(connected));
       }
     }).catch((cause) => {
       if (abortController.signal.aborted) return;
@@ -164,7 +174,7 @@ export function App() {
         sessionRestoreAttempted.current = true;
         void restoreMatrixSession(matrixStored, { locus: network.locus }).then((connected) => {
           if (connected.state === "READY") setSession(connected.session);
-          else { setPendingMatrixConnection(connected); setConnectOpen(true); finishRestore("Matrix device keys are ready. Open Element and start verification for the Locus device; the interactive request will appear here. No Locus session is connected yet."); }
+          else { setPendingMatrixConnection(connected); setConnectOpen(true); finishRestore(matrixRestoreMessage(connected)); }
         }).catch((cause) => finishRestore(`Could not restore the Matrix session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try signing in again."}`));
         return;
       }

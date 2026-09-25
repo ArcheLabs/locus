@@ -167,7 +167,7 @@ async function ensureMatrixController(
   let result: Awaited<ReturnType<typeof scoped.waitForAction>> | null = null;
   try {
     submitted = await scoped.bootstrapMatrixController(proof);
-    result = await scoped.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+    result = await scoped.waitForAction(submitted.transactionId, { intervalMs: 2_000, timeoutMs: 180_000 });
     if (result.actionReceipt.status !== "applied") {
       throw new Error("JamScript reported a non-applied controller bootstrap action.");
     }
@@ -494,15 +494,19 @@ async function makeConnected(
   });
   options.onState?.(initialState);
   if (keys.verification === "verified" && locus) {
-    try {
-      await ensureMatrixController(locus, owner, controller, keys);
-      if (!disposed) setState("READY");
-    } catch (cause) {
-      if (!disposed) {
-        connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
-        setState("CONTROLLER_AUTHORIZATION_FAILED");
-      }
-    }
+    void ensureMatrixController(locus, owner, controller, keys)
+      .then(() => {
+        if (!disposed) {
+          connected.error = "";
+          setState("READY");
+        }
+      })
+      .catch((cause) => {
+        if (!disposed) {
+          connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
+          setState("CONTROLLER_AUTHORIZATION_FAILED");
+        }
+      });
   }
   return connected;
 }
