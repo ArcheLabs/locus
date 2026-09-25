@@ -1,4 +1,4 @@
-import { FetchRpcTransport, JamScriptClient } from "@jamscript/client";
+import { asWorkRpc, FetchRpcTransport, JamScriptClient } from "@jamscript/client";
 import { LocusClient } from "@archelabs/locus";
 import { loadDeploymentDescriptor } from "./config.js";
 import { NetworkBootstrapError, type RuntimeNetwork } from "./types.js";
@@ -22,9 +22,14 @@ export async function bootstrapNetwork(
     );
   }
 
-  const protocolClient = new JamScriptClient(
-    deployment,
-    new FetchRpcTransport(network.backendUrl, fetch.bind(globalThis)),
+  const transport = new FetchRpcTransport(network.backendUrl, fetch.bind(globalThis));
+  const workRpc = asWorkRpc(transport);
+  const protocolClient = Object.assign(
+    new JamScriptClient(deployment, transport),
+    // JamScript rc.3 exposes finalized context on WorkRpc, but not on
+    // JamScriptClient. The bootstrap recovery flow needs the signed action's
+    // validity horizon when its transaction mapping is lost after restart.
+    { finalizedContext: () => workRpc.finalizedContext() },
   );
   try {
     await protocolClient.validateDeployment();

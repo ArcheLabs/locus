@@ -47,7 +47,13 @@ function sessionActivityKey(networkId: string, owner: string): string {
 }
 
 function matrixRestoreMessage(connected: MatrixConnected): string {
-  if (connected.state === "CONTROLLER_BOOTSTRAPPING") {
+  if (connected.state === "CONTROLLER_BOOTSTRAP_QUEUED") {
+    return "Matrix verification is complete. The controller authorization is queued in MiniJAM; Locus will keep checking it. Do not repeat verification.";
+  }
+  if (connected.state === "CONTROLLER_BOOTSTRAP_UNKNOWN") {
+    return "Matrix verification is complete. The controller authorization status is temporarily unavailable; use Check authorization status in the Matrix dialog. Do not repeat verification.";
+  }
+  if (connected.state === "CONTROLLER_BOOTSTRAPPING" || connected.state === "CONTROLLER_BOOTSTRAP_FINALIZING") {
     return "Matrix verification is complete. Locus is waiting for the controller authorization transaction to finalize on MiniJAM. Keep the Matrix dialog open.";
   }
   if (connected.state === "CONTROLLER_AUTHORIZATION_FAILED") {

@@ -209,6 +209,16 @@ export class LocusClient {
     return this.jamClient.waitForAction(transactionId, options);
   }
 
+  async transactionStatus(transactionId: string) {
+    if (!this.jamClient.transactionStatus) throw new Error("the configured JamScript client does not expose transaction status");
+    return this.jamClient.transactionStatus(transactionId);
+  }
+
+  async finalizedContext() {
+    if (!this.jamClient.finalizedContext) throw new Error("the configured JamScript client does not expose finalized context");
+    return this.jamClient.finalizedContext();
+  }
+
   async createAsset(
     assetId: AssetId,
     name: string | Uint8Array,

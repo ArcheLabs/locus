@@ -1,5 +1,5 @@
 import { createClient, type MatrixClient } from "matrix-js-sdk";
-import { decodeMatrixControlClaimProofV1, encodeMatrixControlClaimProofV1, MatrixDeviceController } from "@jamscript/client";
+import { decodeMatrixControlClaimProofV1, encodeMatrixControlClaimProofV1, MatrixDeviceController, ownershipKey } from "@jamscript/client";
 import { matrixOwnership, type LocusClient } from "@archelabs/locus";
 import type { LocusWebSession } from "../session/types.js";
 import { describeMatrixCause, MatrixConnectorError } from "./MatrixErrors.js";
@@ -18,6 +18,9 @@ export type MatrixConnectionState =
   | "VERIFICATION_CONFIRMING"
   | "VERIFIED"
   | "CONTROLLER_BOOTSTRAPPING"
+  | "CONTROLLER_BOOTSTRAP_QUEUED"
+  | "CONTROLLER_BOOTSTRAP_FINALIZING"
+  | "CONTROLLER_BOOTSTRAP_UNKNOWN"
   | "CONTROLLER_AUTHORIZATION_FAILED"
   | "READY";
 
@@ -28,6 +31,72 @@ export type MatrixConnectionOptions = {
 };
 
 const MATRIX_SESSION_KEY = "locus.matrix.session.v1";
+const MATRIX_BOOTSTRAP_PENDING_KEY = "locus.matrix.bootstrap.pending.v1";
+
+class MatrixBootstrapWaitTimeout extends Error {
+  constructor(readonly transactionId: string, readonly lastStatus?: Awaited<ReturnType<LocusClient["transactionStatus"]>>) {
+    super(`timed out waiting for Matrix controller authorization ${transactionId}${lastStatus ? ` (last status: ${lastStatus.status})` : ""}`);
+    this.name = "MatrixBootstrapWaitTimeout";
+  }
+}
+
+type PendingMatrixBootstrap = {
+  version: 1;
+  transactionId: string;
+  actionHash: string;
+  subjectKey: string;
+  controllerKey: string;
+  deviceId: string;
+  submittedSlot: number;
+  validUntil: number;
+  submittedAt: number;
+};
+
+type PendingMatrixBootstrapStore = { version: 1; pending: PendingMatrixBootstrap[] };
+
+function matrixOwnershipKeyHex(owner: ReturnType<typeof matrixOwnership>): string {
+  return Array.from(ownershipKey(owner), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function readPendingMatrixBootstraps(): PendingMatrixBootstrap[] {
+  const value = window.localStorage.getItem(MATRIX_BOOTSTRAP_PENDING_KEY);
+  if (!value) return [];
+  let parsed: PendingMatrixBootstrapStore;
+  try { parsed = JSON.parse(value) as PendingMatrixBootstrapStore; }
+  catch (cause) { throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "Saved Matrix authorization recovery data is malformed; it was kept for inspection.", { cause }); }
+  if (parsed.version !== 1 || !Array.isArray(parsed.pending) || parsed.pending.some((item) =>
+    item.version !== 1 || typeof item.transactionId !== "string" || typeof item.actionHash !== "string"
+    || typeof item.subjectKey !== "string" || typeof item.controllerKey !== "string" || typeof item.deviceId !== "string"
+    || !Number.isSafeInteger(item.submittedSlot) || !Number.isSafeInteger(item.validUntil) || !Number.isFinite(item.submittedAt))) {
+    throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "Saved Matrix authorization recovery data is invalid; it was kept for inspection.");
+  }
+  return parsed.pending;
+}
+
+function savePendingMatrixBootstrap(record: PendingMatrixBootstrap): void {
+  const pending = readPendingMatrixBootstraps();
+  const identity = `${record.subjectKey}:${record.controllerKey}:${record.deviceId}`;
+  const filtered = pending.filter((item) => `${item.subjectKey}:${item.controllerKey}:${item.deviceId}` !== identity);
+  filtered.push(record);
+  window.localStorage.setItem(MATRIX_BOOTSTRAP_PENDING_KEY, JSON.stringify({ version: 1, pending: filtered } satisfies PendingMatrixBootstrapStore));
+}
+
+function removePendingMatrixBootstrap(record: Pick<PendingMatrixBootstrap, "subjectKey" | "controllerKey" | "deviceId">): void {
+  const pending = readPendingMatrixBootstraps();
+  const identity = `${record.subjectKey}:${record.controllerKey}:${record.deviceId}`;
+  const filtered = pending.filter((item) => `${item.subjectKey}:${item.controllerKey}:${item.deviceId}` !== identity);
+  if (filtered.length === 0) window.localStorage.removeItem(MATRIX_BOOTSTRAP_PENDING_KEY);
+  else window.localStorage.setItem(MATRIX_BOOTSTRAP_PENDING_KEY, JSON.stringify({ version: 1, pending: filtered } satisfies PendingMatrixBootstrapStore));
+}
+
+function pendingMatrixBootstrapFor(
+  records: PendingMatrixBootstrap[],
+  subjectKey: string,
+  controllerKey: string,
+  deviceId: string,
+): PendingMatrixBootstrap | undefined {
+  return records.find((item) => item.subjectKey === subjectKey && item.controllerKey === controllerKey && item.deviceId === deviceId);
+}
 
 type MatrixTokenResponse = {
   access_token?: string;
@@ -146,13 +215,18 @@ async function ensureMatrixController(
   subject: ReturnType<typeof matrixOwnership>,
   controller: MatrixDeviceController,
   keys: MatrixDiscoveredKeys,
-): Promise<void> {
+  deviceId: string,
+  onProgress?: (state: MatrixConnectionState) => void,
+): Promise<boolean> {
   if (!locus) throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The selected network is not ready for Matrix identity authorization");
   const proof = keys.encodedProof;
   if (!proof) throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Verify this Matrix device before authorizing it for Locus");
   const scoped = locus.withSession({ signer: controller, subject });
   const controllerOwnership = await controller.getController();
   const proofDetails = await matrixProofDiagnostics(keys, subject, controllerOwnership, proof);
+  const subjectKey = matrixOwnershipKeyHex(subject);
+  const controllerKey = matrixOwnershipKeyHex(controllerOwnership);
+  const pendingIdentity = { subjectKey, controllerKey, deviceId };
   const [bootstrapUsed, controllerGrant] = await Promise.all([
     scoped.hasMatrixBootstrapCompleted(subject),
     scoped.isControllerActive(subject, controllerOwnership),
@@ -161,47 +235,124 @@ async function ensureMatrixController(
     throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", `Matrix bootstrap is already marked complete, but this device has no active controller grant. bootstrapUsed=${bootstrapUsed}; controllerGrant=${controllerGrant}; ${proofDetails}`);
   }
   if (controllerGrant) {
-    return;
+    removePendingMatrixBootstrap(pendingIdentity);
+    return true;
   }
-  let submitted: Awaited<ReturnType<typeof scoped.bootstrapMatrixController>> | null = null;
-  let result: Awaited<ReturnType<typeof scoped.waitForAction>> | null = null;
-  try {
-    submitted = await scoped.bootstrapMatrixController(proof);
-    result = await scoped.waitForAction(submitted.transactionId, { intervalMs: 2_000, timeoutMs: 180_000 });
-    if (result.actionReceipt.status !== "applied") {
-      throw new Error("JamScript reported a non-applied controller bootstrap action.");
+
+  const settlePending = async (pending: PendingMatrixBootstrap): Promise<"ready" | "expired"> => {
+    const deadline = Date.now() + 180_000;
+    let lastStatus: Awaited<ReturnType<typeof locus.transactionStatus>> | undefined;
+    const inspectChainAuthorization = async (): Promise<"ready" | "not-ready"> => {
+      const [used, granted] = await Promise.all([
+        scoped.hasMatrixBootstrapCompleted(subject),
+        scoped.isControllerActive(subject, controllerOwnership),
+      ]);
+      if (used && granted) {
+        removePendingMatrixBootstrap(pendingIdentity);
+        return "ready";
+      }
+      if (used && !granted) {
+        throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", `Matrix bootstrap is complete but the device controller grant is absent. ${proofDetails}`);
+      }
+      if (!used && granted) {
+        removePendingMatrixBootstrap(pendingIdentity);
+        return "ready";
+      }
+      return "not-ready";
+    };
+    const expiredBeforeDispatch = async (): Promise<boolean> => {
+      const context = await locus.finalizedContext();
+      if (context.slot <= pending.validUntil) return false;
+      const state = await inspectChainAuthorization();
+      if (state === "ready") return false;
+      removePendingMatrixBootstrap(pendingIdentity);
+      return true;
+    };
+
+    while (Date.now() < deadline) {
+      try {
+        const status = await locus.transactionStatus(pending.transactionId);
+        lastStatus = status;
+        if (status.status === "failed") {
+          removePendingMatrixBootstrap(pendingIdentity);
+          throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", `Locus could not dispatch the Matrix controller authorization: ${status.error ?? "transaction failed"}. ${proofDetails}`);
+        }
+        if (status.status === "queued") {
+          onProgress?.("CONTROLLER_BOOTSTRAP_QUEUED");
+          if (!status.packageHash && status.actionIndex === null && await expiredBeforeDispatch()) return "expired";
+        } else {
+          onProgress?.("CONTROLLER_BOOTSTRAP_FINALIZING");
+        }
+        if (status.status === "imported") {
+          const receipt = status.actionIndex === null ? undefined : status.actionReceipts?.[status.actionIndex];
+          if (receipt && receipt.actionHash.toLowerCase() !== pending.actionHash.toLowerCase()) {
+            removePendingMatrixBootstrap(pendingIdentity);
+            throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The finalized transaction receipt did not match the saved Matrix authorization action.");
+          }
+          if (receipt && receipt.status !== "applied") {
+            removePendingMatrixBootstrap(pendingIdentity);
+            throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", `Locus rejected the Matrix controller authorization (error code ${receipt.errorCode ?? "none"}). ${proofDetails}`);
+          }
+          if (receipt?.status === "applied" && await inspectChainAuthorization() === "ready") return "ready";
+        }
+      } catch (cause) {
+        const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
+        const message = cause instanceof Error ? cause.message.toLowerCase() : "";
+        const notFound = code === -32013 || message.includes("transaction not found") || message.includes("work not found");
+        if (cause instanceof MatrixConnectorError) throw cause;
+        if (!notFound) onProgress?.("CONTROLLER_BOOTSTRAP_UNKNOWN");
+        if (notFound && await inspectChainAuthorization() === "ready") return "ready";
+        if (notFound && await expiredBeforeDispatch()) return "expired";
+      }
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => window.setTimeout(resolve, 2_000));
     }
+    onProgress?.("CONTROLLER_BOOTSTRAP_UNKNOWN");
+    throw new MatrixBootstrapWaitTimeout(pending.transactionId, lastStatus);
+  };
+
+  const pendingRecord = pendingMatrixBootstrapFor(readPendingMatrixBootstraps(), subjectKey, controllerKey, deviceId);
+  if (pendingRecord) {
+    onProgress?.("CONTROLLER_BOOTSTRAPPING");
+    try {
+      const outcome = await settlePending(pendingRecord);
+      if (outcome === "ready") return true;
+      // Only a transaction confirmed absent from the chain and past its signed
+      // validity slot can be replaced with one fresh submission.
+    } catch (cause) {
+      if (cause instanceof MatrixBootstrapWaitTimeout) return false;
+      throw cause;
+    }
+  }
+
+  onProgress?.("CONTROLLER_BOOTSTRAPPING");
+  // Verify local storage access before creating an on-chain action. The
+  // eventual recovery record contains no token, proof, or private key.
+  const existing = window.localStorage.getItem(MATRIX_BOOTSTRAP_PENDING_KEY);
+  window.localStorage.setItem(MATRIX_BOOTSTRAP_PENDING_KEY, existing ?? JSON.stringify({ version: 1, pending: [] }));
+  if (existing === null) window.localStorage.removeItem(MATRIX_BOOTSTRAP_PENDING_KEY);
+  const beforeSubmit = await locus.finalizedContext();
+  const submitted = await scoped.bootstrapMatrixController(proof);
+  const submittedWithValidity = submitted as typeof submitted & { submittedSlot?: number; validUntil?: number };
+  const submittedSlot = submittedWithValidity.submittedSlot ?? beforeSubmit.slot;
+  const pending: PendingMatrixBootstrap = {
+    version: 1,
+    transactionId: submitted.transactionId,
+    actionHash: submitted.actionHash,
+    subjectKey,
+    controllerKey,
+    deviceId,
+    submittedSlot,
+    validUntil: submittedWithValidity.validUntil ?? submittedSlot + 64,
+    submittedAt: Date.now(),
+  };
+  savePendingMatrixBootstrap(pending);
+  try {
+    const outcome = await settlePending(pending);
+    return outcome === "ready";
   } catch (cause) {
-    const actionReceipt = result?.actionReceipt;
-    const failureData = cause && typeof cause === "object"
-      ? (cause as { data?: unknown }).data
-      : undefined;
-    const transaction = failureData && typeof failureData === "object"
-      ? failureData as { status?: unknown; error?: unknown; actionReceipts?: unknown }
-      : undefined;
-    const rejectedReceipt = Array.isArray(transaction?.actionReceipts)
-      ? transaction.actionReceipts.find((receipt) => receipt && typeof receipt === "object"
-        && typeof (receipt as { actionHash?: unknown }).actionHash === "string"
-        && (receipt as { actionHash: string }).actionHash.toLowerCase() === submitted?.actionHash.toLowerCase()) as { status?: unknown; errorCode?: unknown } | undefined
-      : undefined;
-    const errorCode = result?.errorCode ?? actionReceipt?.errorCode
-      ?? (typeof rejectedReceipt?.errorCode === "number" ? rejectedReceipt.errorCode : null);
-    const details = [
-      `transactionId=${submitted?.transactionId ?? "not-submitted"}`,
-      `actionHash=${submitted?.actionHash ?? "not-submitted"}`,
-      `actionReceipt.status=${actionReceipt?.status ?? rejectedReceipt?.status ?? "not-received"}`,
-      `errorCode=${errorCode ?? "none"}`,
-      `transactionStatus=${result?.transactionStatus ?? (typeof transaction?.status === "string" ? transaction.status : "unknown")}`,
-      `bootstrapUsed=${bootstrapUsed}`,
-      `controllerGrant=${controllerGrant}`,
-      proofDetails,
-      ...(typeof transaction?.error === "string" ? [`transactionError=${describeMatrixCause(transaction.error)}`] : []),
-    ].join("; ");
-    throw new MatrixConnectorError(
-      "CONTROLLER_BOOTSTRAP_FAILED",
-      `Matrix controller bootstrap failed (${details}). ${describeMatrixCause(cause)}`,
-      { cause },
-    );
+    if (cause instanceof MatrixBootstrapWaitTimeout) return false;
+    throw cause;
   }
 }
 
@@ -412,10 +563,10 @@ async function makeConnected(
         if (refreshed.verification !== "verified" || refreshed.selfSigningSignature === null) {
           throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Matrix has not published the completed M → S → D verification proof yet. Wait briefly, then retry.");
         }
-        await ensureMatrixController(locus, owner, controller, refreshed);
+        const ready = await ensureMatrixController(locus, owner, controller, refreshed, stored.deviceId, setState);
         if (!disposed) {
           connected.error = "";
-          setState("READY");
+          setState(ready ? "READY" : "CONTROLLER_BOOTSTRAP_UNKNOWN");
         }
       } catch (cause) {
         if (!disposed) {
@@ -459,8 +610,8 @@ async function makeConnected(
           if (locus) {
             connected.error = "";
             setState("CONTROLLER_BOOTSTRAPPING");
-            await ensureMatrixController(locus, owner, controller, refreshed);
-            if (!disposed) setState("READY");
+            const ready = await ensureMatrixController(locus, owner, controller, refreshed, stored.deviceId, setState);
+            if (!disposed) setState(ready ? "READY" : "CONTROLLER_BOOTSTRAP_UNKNOWN");
           }
           return;
         }
@@ -494,11 +645,11 @@ async function makeConnected(
   });
   options.onState?.(initialState);
   if (keys.verification === "verified" && locus) {
-    void ensureMatrixController(locus, owner, controller, keys)
-      .then(() => {
+    void ensureMatrixController(locus, owner, controller, keys, stored.deviceId, setState)
+      .then((ready) => {
         if (!disposed) {
           connected.error = "";
-          setState("READY");
+          setState(ready ? "READY" : "CONTROLLER_BOOTSTRAP_UNKNOWN");
         }
       })
       .catch((cause) => {

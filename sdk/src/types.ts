@@ -3,6 +3,8 @@ import type {
   Ownership as JamOwnership,
   OwnershipSigner,
   SubmitActionResult,
+  TransactionStatusResult,
+  FinalizedContext,
   WaitForActionResult,
 } from "@jamscript/client";
 
@@ -62,6 +64,8 @@ export interface JamScriptLikeClient {
     transactionId: string,
     options?: { intervalMs?: number; timeoutMs?: number },
   ): Promise<WaitForActionResult>;
+  transactionStatus?(transactionId: string): Promise<TransactionStatusResult>;
+  finalizedContext?(): Promise<FinalizedContext>;
 }
 
 export type ActionReceipt = WaitForActionResult;

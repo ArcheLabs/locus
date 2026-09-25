@@ -145,8 +145,9 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
     assert.deepEqual(registrations[0].redirect_uris, ["https://locus.example/app"]);
     assert.equal(registrations[0].client_uri, "https://locus.example/");
     const deviceKey = "locus.matrix.device.v1.https://example.org|@alice:example.org";
-    assert.equal(window.sessionStorage.getItem(deviceKey), flow.deviceId);
-    assert.equal(window.localStorage.getItem(deviceKey), null, "a device ID is provisional until crypto setup succeeds");
+    assert.match(flow.deviceId, /^LOCUS-[A-Z0-9]+$/);
+    assert.equal(window.sessionStorage.getItem(deviceKey), null, "a fresh auth flow does not reuse a committed or provisional device ID");
+    assert.equal(window.localStorage.getItem(deviceKey), null, "a device ID is committed only after crypto setup succeeds");
     window.location.href = "http://127.0.0.1:5173/";
     await assert.rejects(beginMatrixOAuth("https://example.org", "@alice:example.org"), /requires Locus to be opened over HTTPS/);
     assert.equal(registrations.length, 1, "insecure previews must not register an invalid web client");
@@ -181,6 +182,7 @@ test("Matrix OAuth callback returns a provisional session; committed sessions su
     calls.push({ url: String(url), init });
     if (String(url) === flow.tokenEndpoint) return new Response(JSON.stringify({ access_token: "access-1", refresh_token: "refresh-1", expires_in: 300 }), { status: 200, headers: { "content-type": "application/json" } });
     if (String(url).endsWith("/account/whoami")) return new Response(JSON.stringify({ user_id: "@alice:example.org" }), { status: 200, headers: { "content-type": "application/json" } });
+    if (String(url).endsWith("/_matrix/client/v3/logout")) return new Response("{}", { status: 200 });
     if (String(url) === flow.revocationEndpoint) return new Response("{}", { status: 200 });
     throw new Error(`Unexpected Matrix OAuth request ${url}`);
   };
@@ -198,6 +200,7 @@ test("Matrix OAuth callback returns a provisional session; committed sessions su
     assert.equal(JSON.parse(localStorage.getItem("locus.matrix.session.v1")).accessToken, "access-1");
     await revokeMatrixOAuthSession(stored);
     assert.equal(calls.some(({ url }) => url === flow.revocationEndpoint), true);
+    assert.equal(calls.some(({ url }) => url.endsWith("/_matrix/client/v3/logout")), true);
     assert.match(String(calls.find(({ url }) => url === flow.revocationEndpoint).init.body), /refresh-1/);
   } finally {
     globalThis.window = originalWindow;
@@ -205,7 +208,7 @@ test("Matrix OAuth callback returns a provisional session; committed sessions su
   }
 });
 
-test("Matrix device IDs stay pending in session storage until the crypto setup commit", () => {
+test("new Matrix auth gets a fresh device ID; only a successfully initialized device is committed", () => {
   const storage = () => {
     const entries = new Map();
     return { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, String(value)), removeItem: (key) => entries.delete(key) };
@@ -216,8 +219,8 @@ test("Matrix device IDs stay pending in session storage until the crypto setup c
     const deviceId = matrixDeviceId("https://example.org", "@alice:example.org");
     const key = "locus.matrix.device.v1.https://example.org|@alice:example.org";
     assert.equal(window.localStorage.getItem(key), null);
-    assert.equal(window.sessionStorage.getItem(key), deviceId);
-    assert.equal(matrixDeviceId("https://example.org", "@alice:example.org"), deviceId);
+    assert.equal(window.sessionStorage.getItem(key), null);
+    assert.notEqual(matrixDeviceId("https://example.org", "@alice:example.org"), deviceId);
     commitMatrixDeviceId("https://example.org", "@alice:example.org", deviceId);
     assert.equal(window.localStorage.getItem(key), deviceId);
     assert.equal(window.sessionStorage.getItem(key), null);
@@ -236,7 +239,7 @@ test("canceling Matrix verification clears the provisional login and closes the 
   const cancelHandler = app.match(/function cancelMatrixSignIn\([\s\S]*?\n  \}/)?.[0] ?? "";
   assert.match(cancelHandler, /disconnectSession\(\)/);
   assert.match(cancelHandler, /setConnectOpen\(false\)/);
-  assert.match(app, /revokeStoredMatrixSession\(\)/);
+  assert.match(app, /signOutMatrixSession\(stored\)/);
 });
 
 test("Matrix crypto WASM, store, and outgoing-request stages retain distinct safe errors", () => {

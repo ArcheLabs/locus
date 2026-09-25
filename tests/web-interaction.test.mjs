@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
   EvmOwnershipSigner,
@@ -6,6 +7,9 @@ import {
   SolanaOwnershipSigner,
 } from "@jamscript/client";
 import { SolanaSignMessage } from "@solana/wallet-standard-features";
+
+const matrixConnectorSource = readFileSync(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
+const matrixDialogSource = readFileSync(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
 
 const actionRequest = {
   version: 2,
@@ -43,4 +47,16 @@ test("mock Wallet Standard Solana signer returns ED25519 Ownership", async () =>
   const signer = new SolanaOwnershipSigner(account, feature);
   assert.equal((await signer.getController()).public.length, 32);
   assert.equal((await signer.signJamScriptAction(actionRequest)).length, 64);
+});
+
+test("Matrix bootstrap restoration checks the saved transaction before permitting a replacement", () => {
+  const restorePending = matrixConnectorSource.indexOf("const pendingRecord = pendingMatrixBootstrapFor(");
+  const freshSubmission = matrixConnectorSource.indexOf("const submitted = await scoped.bootstrapMatrixController(proof);");
+  assert.ok(restorePending >= 0 && freshSubmission > restorePending);
+  assert.match(matrixConnectorSource, /if \(pendingRecord\) \{[\s\S]*?await settlePending\(pendingRecord\)/);
+  assert.match(matrixConnectorSource, /if \(cause instanceof MatrixBootstrapWaitTimeout\) return false;/);
+  assert.match(matrixConnectorSource, /validUntil: submittedWithValidity\.validUntil \?\? submittedSlot \+ 64/);
+  assert.doesNotMatch(matrixConnectorSource, /catch \(cause\) \{\s*if \(cause instanceof TransactionWaitTimeoutError\) \{\s*removePendingMatrixBootstrap/);
+  assert.match(matrixDialogSource, /Check authorization status/);
+  assert.match(matrixDialogSource, /do not repeat Matrix verification/);
 });

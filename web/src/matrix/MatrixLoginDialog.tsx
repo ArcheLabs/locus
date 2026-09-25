@@ -16,6 +16,9 @@ function verificationTitle(state: MatrixConnectionState): string {
     case "VERIFICATION_CONFIRMING": return "Verification confirmed";
     case "VERIFIED": return "Device verified";
     case "CONTROLLER_BOOTSTRAPPING": return "Authorizing device";
+    case "CONTROLLER_BOOTSTRAP_QUEUED": return "Authorization queued";
+    case "CONTROLLER_BOOTSTRAP_FINALIZING": return "Authorizing device";
+    case "CONTROLLER_BOOTSTRAP_UNKNOWN": return "Authorization status unavailable";
     case "CONTROLLER_AUTHORIZATION_FAILED": return "Authorization needs attention";
     case "READY": return "Connected";
   }
@@ -158,6 +161,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     <Modal open={open} title="Connect Matrix" onClose={cancel} footer={<>
       <button type="button" className="secondary" onClick={cancel}>Cancel</button>
       {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>{working ? "Retrying…" : "Retry authorization"}</button>}
+      {(connectionState === "CONTROLLER_BOOTSTRAP_QUEUED" || connectionState === "CONTROLLER_BOOTSTRAP_FINALIZING" || connectionState === "CONTROLLER_BOOTSTRAP_UNKNOWN") && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>{working ? "Checking…" : "Check authorization status"}</button>}
       {showingVerification && verification?.phase === "requested" && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>{working ? "Starting…" : "Start verification"}</button>}
       {canCompare && <>
         <button type="button" className="secondary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>They don’t match</button>
@@ -176,6 +180,9 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           {connectionState === "VERIFICATION_CONFIRMING" && <p>Verification was confirmed. Locus is waiting for the Matrix cross-signing proof before it can authorize this device.</p>}
           {connectionState === "VERIFIED" && <p>The public M → S → D signatures are verified. Authorizing this device for Locus…</p>}
           {connectionState === "CONTROLLER_BOOTSTRAPPING" && <p>Matrix verification is complete. Waiting for MiniJAM to confirm this device’s controller authorization…</p>}
+          {connectionState === "CONTROLLER_BOOTSTRAP_QUEUED" && <p>The authorization transaction is queued. Keep this window open. Locus will continue checking it in the background; do not repeat Matrix verification.</p>}
+          {connectionState === "CONTROLLER_BOOTSTRAP_FINALIZING" && <p>The authorization transaction was submitted. Waiting for MiniJAM to finalize it…</p>}
+          {connectionState === "CONTROLLER_BOOTSTRAP_UNKNOWN" && <p>The authorization transaction is still pending or its status is temporarily unavailable. Your Matrix device remains verified. Check its status here; do not repeat verification.</p>}
           {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <p>Matrix verification is complete, but Locus could not finish authorizing this device. The error is shown below. Retry after addressing it.</p>}
           {connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ? <p>Preparing the Locus Matrix device. Keep this window open.</p> : null}
           {canCompare && <div className="matrix-sas-emojis" aria-label="Short authentication string emojis">
