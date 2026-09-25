@@ -1,10 +1,10 @@
 import { createClient, type MatrixClient } from "matrix-js-sdk";
-import { MatrixDeviceController } from "@jamscript/client";
+import { decodeMatrixControlClaimProofV1, encodeMatrixControlClaimProofV1, MatrixDeviceController } from "@jamscript/client";
 import { matrixOwnership, type LocusClient } from "@archelabs/locus";
 import type { LocusWebSession } from "../session/types.js";
 import { describeMatrixCause, MatrixConnectorError } from "./MatrixErrors.js";
 import { destroyMatrixCryptoStore, MatrixCryptoDevice, type MatrixVerificationSnapshot } from "./MatrixCryptoDevice.js";
-import { queryMatrixDeviceKeyParity, queryMatrixKeys } from "./MatrixKeysQuery.js";
+import { queryMatrixDeviceKeyParity, queryMatrixKeys, type MatrixDiscoveredKeys } from "./MatrixKeysQuery.js";
 import { clearMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, committedMatrixDeviceId, matrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
 
 export type MatrixStoredSession = MatrixOAuthSession;
@@ -144,27 +144,63 @@ async function ensureMatrixController(
   locus: LocusClient | null,
   subject: ReturnType<typeof matrixOwnership>,
   controller: MatrixDeviceController,
-  proof: Uint8Array | null,
+  keys: MatrixDiscoveredKeys,
 ): Promise<void> {
   if (!locus) throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The selected network is not ready for Matrix identity authorization");
+  const proof = keys.encodedProof;
   if (!proof) throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Verify this Matrix device before authorizing it for Locus");
   const scoped = locus.withSession({ signer: controller, subject });
-  const initialized = await scoped.hasMatrixBootstrapCompleted(subject);
-  if (initialized) {
-    if (!await scoped.isControllerActive(subject, await controller.getController())) {
-      throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "This Matrix device is not an active controller");
-    }
+  const controllerOwnership = await controller.getController();
+  const proofDetails = await matrixProofDiagnostics(keys, subject, controllerOwnership, proof);
+  const [bootstrapUsed, controllerGrant] = await Promise.all([
+    scoped.hasMatrixBootstrapCompleted(subject),
+    scoped.isControllerActive(subject, controllerOwnership),
+  ]);
+  if (bootstrapUsed && !controllerGrant) {
+    throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", `Matrix bootstrap is already marked complete, but this device has no active controller grant. bootstrapUsed=${bootstrapUsed}; controllerGrant=${controllerGrant}; ${proofDetails}`);
+  }
+  if (controllerGrant) {
     return;
   }
+  let submitted: Awaited<ReturnType<typeof scoped.bootstrapMatrixController>> | null = null;
+  let result: Awaited<ReturnType<typeof scoped.waitForAction>> | null = null;
   try {
-    const submitted = await scoped.bootstrapMatrixController(proof);
-    const result = await scoped.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+    submitted = await scoped.bootstrapMatrixController(proof);
+    result = await scoped.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
     if (result.actionReceipt.status !== "applied") {
-      throw new Error(`Matrix controller bootstrap failed${result.errorCode == null ? "" : ` (error ${result.errorCode})`}`);
+      throw new Error("JamScript reported a non-applied controller bootstrap action.");
     }
   } catch (cause) {
-    if (cause instanceof MatrixConnectorError) throw cause;
-    throw new MatrixConnectorError("CONTROLLER_BOOTSTRAP_FAILED", "Matrix controller bootstrap was rejected", { cause });
+    const actionReceipt = result?.actionReceipt;
+    const failureData = cause && typeof cause === "object"
+      ? (cause as { data?: unknown }).data
+      : undefined;
+    const transaction = failureData && typeof failureData === "object"
+      ? failureData as { status?: unknown; error?: unknown; actionReceipts?: unknown }
+      : undefined;
+    const rejectedReceipt = Array.isArray(transaction?.actionReceipts)
+      ? transaction.actionReceipts.find((receipt) => receipt && typeof receipt === "object"
+        && typeof (receipt as { actionHash?: unknown }).actionHash === "string"
+        && (receipt as { actionHash: string }).actionHash.toLowerCase() === submitted?.actionHash.toLowerCase()) as { status?: unknown; errorCode?: unknown } | undefined
+      : undefined;
+    const errorCode = result?.errorCode ?? actionReceipt?.errorCode
+      ?? (typeof rejectedReceipt?.errorCode === "number" ? rejectedReceipt.errorCode : null);
+    const details = [
+      `transactionId=${submitted?.transactionId ?? "not-submitted"}`,
+      `actionHash=${submitted?.actionHash ?? "not-submitted"}`,
+      `actionReceipt.status=${actionReceipt?.status ?? rejectedReceipt?.status ?? "not-received"}`,
+      `errorCode=${errorCode ?? "none"}`,
+      `transactionStatus=${result?.transactionStatus ?? (typeof transaction?.status === "string" ? transaction.status : "unknown")}`,
+      `bootstrapUsed=${bootstrapUsed}`,
+      `controllerGrant=${controllerGrant}`,
+      proofDetails,
+      ...(typeof transaction?.error === "string" ? [`transactionError=${describeMatrixCause(transaction.error)}`] : []),
+    ].join("; ");
+    throw new MatrixConnectorError(
+      "CONTROLLER_BOOTSTRAP_FAILED",
+      `Matrix controller bootstrap failed (${details}). ${describeMatrixCause(cause)}`,
+      { cause },
+    );
   }
 }
 
@@ -185,6 +221,41 @@ export type MatrixConnected = {
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function hex(bytes: Uint8Array): string {
+  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+}
+
+async function matrixProofDiagnostics(
+  keys: MatrixDiscoveredKeys,
+  subject: ReturnType<typeof matrixOwnership>,
+  controller: Awaited<ReturnType<MatrixDeviceController["getController"]>>,
+  proof: Uint8Array,
+): Promise<string> {
+  let proofHash = "unavailable";
+  try {
+    const proofBuffer = Uint8Array.from(proof).buffer;
+    proofHash = hex(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", proofBuffer)));
+  } catch { /* Diagnostics must not block the authorization result. */ }
+  let clientRoundtrip = false;
+  try {
+    clientRoundtrip = sameBytes(encodeMatrixControlClaimProofV1(decodeMatrixControlClaimProofV1(proof)), proof);
+  } catch { /* The exact encoder/decoder failure is represented by false. */ }
+  return [
+    `deviceId=${keys.deviceId}`,
+    `algorithms=${keys.algorithms.join(",")}`,
+    `subjectEqualsMaster=${subject.kind === 0 && sameBytes(subject.public, keys.masterPublicKey)}`,
+    `controllerEqualsDeviceEd25519=${controller.kind === 0 && sameBytes(controller.public, keys.deviceEd25519Key)}`,
+    `masterPublicKey=0x${hex(keys.masterPublicKey)}`,
+    `selfSigningPublicKey=0x${hex(keys.selfSigningPublicKey)}`,
+    `deviceEd25519Key=0x${hex(keys.deviceEd25519Key)}`,
+    `deviceCurve25519Key=0x${hex(keys.deviceCurve25519Key)}`,
+    `encodedProof.length=${proof.length}`,
+    `encodedProof.sha256=0x${proofHash}`,
+    `clientProofRoundtrip=${clientRoundtrip}`,
+    `encodedProof.hex=0x${hex(proof)}`,
+  ].join("; ");
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -245,7 +316,7 @@ async function connectStoredMatrixSession(
     if (keys.verification === "verified" && options.locus) {
       options.onState?.("VERIFIED");
       options.onState?.("CONTROLLER_BOOTSTRAPPING");
-      await ensureMatrixController(options.locus, owner, controller, keys.encodedProof);
+      await ensureMatrixController(options.locus, owner, controller, keys);
     } else if (keys.verification === "pending") {
       options.onState?.("VERIFICATION_REQUIRED");
     } else options.onState?.("VERIFIED");
@@ -357,7 +428,7 @@ async function makeConnected(
           setState("VERIFIED");
           if (locus) {
             setState("CONTROLLER_BOOTSTRAPPING");
-            await ensureMatrixController(locus, owner, controller, refreshed.encodedProof);
+            await ensureMatrixController(locus, owner, controller, refreshed);
             if (!disposed) setState("READY");
           }
           return;
