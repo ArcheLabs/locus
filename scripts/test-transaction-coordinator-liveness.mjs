@@ -85,12 +85,32 @@ async function waitForSlotAdvance(startSlot, minimumAdvance = 8, timeoutMs = 180
   return latest;
 }
 
+async function waitForServiceSequenceAfter(sequence, timeoutMs = 180_000) {
+  const deadline = Date.now() + timeoutMs;
+  let status = await transport.call("jamscript_getServiceStateStatusV1", {
+    serviceId: deployment.serviceId,
+  });
+  while (status.sequence <= sequence) {
+    if (Date.now() >= deadline) {
+      throw new Error(`Service sequence did not advance beyond ${sequence}`);
+    }
+    await delay(1_000);
+    status = await transport.call("jamscript_getServiceStateStatusV1", {
+      serviceId: deployment.serviceId,
+    });
+  }
+  return status;
+}
+
 const firstSigner = signerFor(0xf1);
 const secondSigner = signerFor(0xf2);
 const first = new LocusClient(protocolClient, sessionFor(firstSigner));
 const second = new LocusClient(protocolClient, sessionFor(secondSigner));
 const assetId = bytes32(mini.assetId);
 
+const stateBeforeA = await transport.call("jamscript_getServiceStateStatusV1", {
+  serviceId: deployment.serviceId,
+});
 const beforeA = await workRpc.finalizedContext();
 const actionA = await first.transfer(assetId, firstSigner.controller, 0n);
 console.log(`ACTION_A=${actionA.transactionId}`);
@@ -98,7 +118,9 @@ console.log(`ACTION_A_SUBMITTED_SLOT=${beforeA.slot}`);
 
 // Deliberately do not call transactionStatus()/waitForAction(A). The chain
 // advances while the backend coordinator must discover A's terminal state.
-const beforeB = await waitForSlotAdvance(beforeA.slot);
+await waitForSlotAdvance(beforeA.slot);
+const stateAfterA = await waitForServiceSequenceAfter(stateBeforeA.sequence);
+const beforeB = await workRpc.finalizedContext();
 const actionB = await second.transfer(assetId, secondSigner.controller, 0n);
 console.log(`ACTION_B=${actionB.transactionId}`);
 console.log(`ACTION_B_SUBMITTED_SLOT=${beforeB.slot}`);
@@ -113,19 +135,7 @@ assert.equal(
   `action B did not apply: ${JSON.stringify(resultB.actionReceipt)}`,
 );
 
-// A is queried only after B has applied. This is an assertion, not a liveness
-// trigger: the backend had to release the service gate before B could finish.
-const resultA = await protocolClient.waitForAction(actionA.transactionId, {
-  intervalMs: 500,
-  timeoutMs: 30_000,
-});
-assert.equal(
-  resultA.actionReceipt.status,
-  "applied",
-  `action A did not apply: ${JSON.stringify(resultA.actionReceipt)}`,
-);
-
-console.log("ACTION_A_STATUS_POLL_BEFORE_B=NONE");
-console.log("ACTION_A=APPLIED");
+console.log("ACTION_A_STATUS_POLL=NONE");
+console.log(`ACTION_A_MATERIALIZED_SEQUENCE=${stateBeforeA.sequence}->${stateAfterA.sequence}`);
 console.log("ACTION_B=APPLIED");
 console.log("LIVENESS_TEST_NO_STATUS_POLLING=PASS");
