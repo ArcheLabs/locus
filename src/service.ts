@@ -14,7 +14,7 @@ import {
   ownershipKey,
   verifyEd25519,
 } from "jam";
-import { verifyMatrixOwnershipAuthorization } from "@jamscript/client/ownership/matrix/service";
+import { verifyMatrixOwnershipAuthorizationScriptc } from "@jamscript/client/ownership/matrix/service-scriptc";
 
 const AssetId = fixedBytes(32);
 const OwnerKey = fixedBytes(32);
@@ -245,7 +245,7 @@ export const bootstrapMatrixController = action({
     const subjectKey = ownerKey(input.subject);
     if ((matrixBootstrapUsed.get(subjectKey) ?? 0) === 1) abort(5004);
     if (input.subject.kind !== 0 || ctx.controller.kind !== 0) abort(5005);
-    if (!verifyMatrixOwnershipAuthorization(input.subject, ctx.controller, input.proof, verifyEd25519)) abort(5005);
+    if (!verifyMatrixOwnershipAuthorizationScriptc(input.subject, ctx.controller, input.proof)) abort(5005);
 
     matrixBootstrapUsed.set(subjectKey, 1);
     controllerGrants.set(controllerKey(input.subject, ctx.controller), 1);

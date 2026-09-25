@@ -17,7 +17,8 @@ const adapterDir = path.dirname(adapterEntry);
 const packageRoot = path.resolve(adapterDir, "../../..");
 const adapterFiles = [
   path.join(packageRoot, "src/ownership/matrix/proof-runtime.ts"),
-  path.join(packageRoot, "src/ownership/matrix/service.ts"),
+  path.join(packageRoot, "src/ownership/matrix/service-payload.ts"),
+  path.join(packageRoot, "src/ownership/matrix/service-scriptc.ts"),
 ];
 
 function inlineModule(file, { stripExports = false, removeAdapterImport = false } = {}) {
@@ -29,8 +30,10 @@ function inlineModule(file, { stripExports = false, removeAdapterImport = false 
     if (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) {
       const specifier = node.moduleSpecifier;
       const isAdapterImport = ts.isStringLiteral(specifier)
-        && specifier.text === "@jamscript/client/ownership/matrix/service";
-      if (stripExports || (removeAdapterImport && isAdapterImport)) edits.push([node.getFullStart(), node.end, ""]);
+        && specifier.text === "@jamscript/client/ownership/matrix/service-scriptc";
+      if (stripExports || (removeAdapterImport && isAdapterImport)) {
+        edits.push([node.getFullStart(), node.end, ""]);
+      }
     }
     if (stripExports && ts.canHaveModifiers(node)) {
       for (const modifier of ts.getModifiers(node) ?? []) {
@@ -58,8 +61,6 @@ for (const relative of ["jamscript.toml", ".jamscript/service.json", "deps/jamsc
 }
 
 const adapter = [
-  "type Ownership = { version: number; kind: number; public: Uint8Array };",
-  "type OwnershipAdapter = { readonly id: string; verify(subject: Ownership, controller: Ownership, proof: Uint8Array): boolean };",
   ...adapterFiles.map(file => inlineModule(file, { stripExports: true })),
 ].join("\n\n");
 const source = inlineModule(path.join(root, "src/service.ts"), { removeAdapterImport: true });
