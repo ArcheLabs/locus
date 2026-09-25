@@ -315,11 +315,7 @@ async function connectStoredMatrixSession(
     throwIfAborted(options.signal);
     const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => device.sign(message) });
     const owner = matrixOwnership(keys.masterPublicKey);
-    if (keys.verification === "verified" && options.locus) {
-      options.onState?.("VERIFIED");
-      options.onState?.("CONTROLLER_BOOTSTRAPPING");
-      await ensureMatrixController(options.locus, owner, controller, keys);
-    } else if (keys.verification === "pending") {
+    if (keys.verification === "pending") {
       options.onState?.("VERIFICATION_REQUIRED");
     } else options.onState?.("VERIFIED");
     return await makeConnected(stored, client, device, keys, controller, options.locus, options);
@@ -354,7 +350,7 @@ async function makeConnected(
   let unsubscribeSyncError: () => void = () => {};
   const initialVerification = crypto.currentVerification;
   const initialState: MatrixConnectionState = keys.verification === "verified"
-    ? (locus ? "READY" : "VERIFIED")
+    ? (locus ? "CONTROLLER_BOOTSTRAPPING" : "VERIFIED")
     : initialVerification?.phase === "sas-ready" ? "VERIFICATION_SAS_READY"
       : initialVerification ? "VERIFICATION_REQUESTED" : "VERIFICATION_REQUIRED";
   const session: LocusWebSession = {
@@ -497,6 +493,17 @@ async function makeConnected(
     notify();
   });
   options.onState?.(initialState);
+  if (keys.verification === "verified" && locus) {
+    try {
+      await ensureMatrixController(locus, owner, controller, keys);
+      if (!disposed) setState("READY");
+    } catch (cause) {
+      if (!disposed) {
+        connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
+        setState("CONTROLLER_AUTHORIZATION_FAILED");
+      }
+    }
+  }
   return connected;
 }
 
