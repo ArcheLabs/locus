@@ -15,7 +15,7 @@ import { Modal } from "./components/Modal.js";
 import { AccountMenu } from "./components/AccountMenu.js";
 import { ActionButton } from "./components/ActionButton.js";
 import { AssetIcon } from "./components/AssetIcon.js";
-import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, revokeStoredMatrixSession, type MatrixConnected } from "./matrix/MatrixConnector.js";
+import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, signOutMatrixSession, type MatrixConnected } from "./matrix/MatrixConnector.js";
 import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
 import { completeMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
 import { useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
@@ -86,6 +86,8 @@ export function App() {
   const sessionRestoreAttempted = useRef(false);
   const oauthCallbackAttempted = useRef(false);
   const provisionalMatrixAuth = useRef<MatrixOAuthSession | null>(null);
+  const matrixAuthAbort = useRef<AbortController | null>(null);
+  const matrixRestoreInProgress = useRef(false);
   const { address: appKitAddress, isConnected: appKitConnected, status: appKitStatus } = useAppKitAccount({ namespace: "eip155" });
   const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
   networkIdRef.current = network.networkId;
@@ -99,32 +101,63 @@ export function App() {
   const sessionOwner = session?.owner ?? null;
   const locus = useMemo<LocusClient | null>(() => network.locus?.withSession(session?.ownershipSession ?? null) ?? null, [network.locus, session]);
 
+  function openConnect() {
+    if (matrixRestoreInProgress.current) return;
+    const stored = readStoredMatrixSession();
+    if (!stored) { setConnectOpen(true); return; }
+    matrixRestoreInProgress.current = true;
+    void restoreMatrixSession(stored, { locus: network.locus }).then((connected) => {
+      if (connected.state === "READY") {
+        setSession(connected.session);
+        setConnectOpen(false);
+      } else {
+        setPendingMatrixConnection(connected);
+        setConnectOpen(true);
+        finishRestore("Matrix device keys are ready. Open Element and start verification for the Locus device; the interactive request will appear here. No Locus session is connected yet.");
+      }
+    }).catch((cause) => {
+      finishRestore(`Could not restore the Matrix session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try signing in again."}`);
+      setConnectOpen(true);
+    }).finally(() => { matrixRestoreInProgress.current = false; });
+  }
+
   useEffect(() => {
     if (oauthCallbackAttempted.current || !hasMatrixAuthCallback()) return;
     if (networkMode && (network.status !== "ready" || !network.locus)) return;
     oauthCallbackAttempted.current = true;
     let cancelled = false;
     let authenticationSucceeded = false;
+    const abortController = new AbortController();
+    matrixAuthAbort.current = abortController;
     void completeMatrixAuthCallback().then(async (stored) => {
-      if (!stored || cancelled) return;
+      if (!stored) return;
+      if (cancelled || abortController.signal.aborted) {
+        void revokeMatrixOAuthSession(stored, false).catch(() => undefined);
+        return;
+      }
       authenticationSucceeded = true;
       provisionalMatrixAuth.current = stored;
-      const connected = await connectMatrixTokenSession(stored, { locus: network.locus });
-      if (cancelled) { connected.session.cleanup?.(); return; }
+      const connected = await connectMatrixTokenSession(stored, { locus: network.locus, signal: abortController.signal });
+      if (cancelled || abortController.signal.aborted) { connected.session.cleanup?.(); return; }
       provisionalMatrixAuth.current = null;
       if (connected.state === "READY") setSession(connected.session);
       else {
         setPendingMatrixConnection(connected);
         setConnectOpen(true);
-        finishRestore("Matrix sign-in is not complete. Verify this device before it can control a Locus identity. No session is connected yet.");
+        finishRestore("Matrix device keys are ready. Open Element and start verification for the Locus device; the interactive request will appear here. No Locus session is connected yet.");
       }
     }).catch((cause) => {
+      if (abortController.signal.aborted) return;
       const detail = cause instanceof Error ? cause.message : "Try signing in again.";
       finishRestore(authenticationSucceeded
         ? `Matrix authentication succeeded, but the local crypto device could not be initialized or registered. No Locus session is connected. ${detail}`
         : `Matrix sign-in could not be completed. No session is connected. ${detail}`);
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      abortController.abort();
+      if (matrixAuthAbort.current === abortController) matrixAuthAbort.current = null;
+    };
   }, [finishRestore, network.locus, network.status, networkMode, setSession]);
 
   useEffect(() => {
@@ -137,7 +170,7 @@ export function App() {
         sessionRestoreAttempted.current = true;
         void restoreMatrixSession(matrixStored, { locus: network.locus }).then((connected) => {
           if (connected.state === "READY") setSession(connected.session);
-          else { setPendingMatrixConnection(connected); setConnectOpen(true); finishRestore("Matrix sign-in is not complete. Verify this device before it can control a Locus identity. No session is connected yet."); }
+          else { setPendingMatrixConnection(connected); setConnectOpen(true); finishRestore("Matrix device keys are ready. Open Element and start verification for the Locus device; the interactive request will appear here. No Locus session is connected yet."); }
         }).catch((cause) => finishRestore(`Could not restore the Matrix session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try signing in again."}`));
         return;
       }
@@ -189,7 +222,6 @@ export function App() {
   }, [appKitAddress, appKitConnected, appKitStatus, session, setSession]);
 
   function disconnectSession() {
-    const provisional = provisionalMatrixAuth.current;
     provisionalMatrixAuth.current = null;
     window.localStorage.removeItem("locus.session.v1");
     try { session?.cleanup?.(); } catch { /* Local sign-out must complete even if a wallet cleanup fails. */ }
@@ -198,22 +230,39 @@ export function App() {
     }
     setPendingMatrixConnection(null);
     finishRestore();
-    if (session?.kind === "matrix" || !session) {
-      const durable = readStoredMatrixSession();
-      const revocations = [
-        ...(durable ? [revokeStoredMatrixSession()] : []),
-        ...(provisional && provisional.accessToken !== durable?.accessToken ? [revokeMatrixOAuthSession(provisional)] : []),
-      ];
-      void Promise.all(revocations).catch((cause) => notify(cause instanceof Error ? `Signed out locally, but Matrix token revocation failed: ${cause.message}` : "Signed out locally, but Matrix token revocation failed."));
-    }
     setSession(null);
   }
 
-  function cancelMatrixSignIn(connection: MatrixConnected | null) {
-    if (connection && connection !== pendingMatrixConnection) {
-      try { connection.session.cleanup?.(); } catch { /* Continue clearing the provisional Matrix sign-in. */ }
+  function signOutMatrix(storedOverride?: MatrixOAuthSession | null) {
+    const stored = storedOverride ?? pendingMatrixConnection?.stored ?? readStoredMatrixSession() ?? provisionalMatrixAuth.current;
+    provisionalMatrixAuth.current = null;
+    matrixAuthAbort.current?.abort();
+    matrixAuthAbort.current = null;
+    window.localStorage.removeItem("locus.session.v1");
+    try { session?.cleanup?.(); } catch { /* Continue local Matrix sign-out. */ }
+    if (pendingMatrixConnection && pendingMatrixConnection.session !== session) {
+      try { pendingMatrixConnection.session.cleanup?.(); } catch { /* Continue local Matrix sign-out. */ }
     }
-    disconnectSession();
+    setPendingMatrixConnection(null);
+    setSession(null);
+    finishRestore();
+    void signOutMatrixSession(stored).catch((cause) => notify(cause instanceof Error ? cause.message : "Matrix sign-out cleanup needs attention."));
+  }
+
+  function clearSavedSession() {
+    window.localStorage.removeItem("locus.session.v1");
+    if (readStoredMatrixSession()) signOutMatrix();
+    else {
+      void signOutMatrixSession().catch((cause) => notify(cause instanceof Error ? cause.message : "Could not clear the saved sign-in."));
+      finishRestore();
+    }
+  }
+
+  function cancelMatrixSignIn(connection: MatrixConnected | null) {
+    const authenticated = connection ?? pendingMatrixConnection;
+    const stored = authenticated?.stored ?? provisionalMatrixAuth.current ?? readStoredMatrixSession();
+    if (authenticated || provisionalMatrixAuth.current) signOutMatrix(stored);
+    else disconnectSession();
     setConnectOpen(false);
   }
 
@@ -407,7 +456,7 @@ export function App() {
             {networkMode
               ? <NetworkSwitcher compact />
               : <span className="mobile-demo-indicator"><span className="status-dot ready" aria-hidden="true" />Demo</span>}
-            <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} onConnect={() => setConnectOpen(true)} onDisconnect={disconnectSession} onClearSavedSession={disconnectSession} />
+            <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} onConnect={openConnect} onDisconnect={disconnectSession} onSignOutMatrix={signOutMatrix} onClearSavedSession={clearSavedSession} />
           </div>
         </div>
       </header>
@@ -415,7 +464,7 @@ export function App() {
       <main className="main">
         <header className="topbar">
           <ThemeControl />
-          <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} onConnect={() => setConnectOpen(true)} onDisconnect={disconnectSession} onClearSavedSession={disconnectSession} />
+          <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} onConnect={openConnect} onDisconnect={disconnectSession} onSignOutMatrix={signOutMatrix} onClearSavedSession={clearSavedSession} />
         </header>
 
         {networkMode && network.status !== "ready" && (
@@ -426,8 +475,8 @@ export function App() {
         )}
 
         {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} amount={amount} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={updateRecipient} onAmount={updateAmount} onMax={() => updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : "")} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
-        {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} onRetry={() => setRefreshToken((value) => value + 1)} onCreate={() => { if (!session) { setConnectOpen(true); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} onSend={networkMode ? (asset) => { if ("assetId" in asset) chooseNetworkAsset(asset); } : (asset) => { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); setPage("send"); }} />}
-        {page === "swap" && <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} locus={locus} assets={assets} session={session !== null} onConnect={() => setConnectOpen(true)} onApplied={recordSwap} onNotify={notify} />}
+        {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} onRetry={() => setRefreshToken((value) => value + 1)} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} onSend={networkMode ? (asset) => { if ("assetId" in asset) chooseNetworkAsset(asset); } : (asset) => { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); setPage("send"); }} />}
+        {page === "swap" && <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} locus={locus} assets={assets} session={session !== null} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} />}
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>
       <nav className="mobile-bottom-nav" aria-label="Primary">

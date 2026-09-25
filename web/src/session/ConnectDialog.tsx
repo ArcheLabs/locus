@@ -150,7 +150,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, locu
       {error && <div className="transaction-error">{error}</div>}
       <p className="modal-note">Locus keeps assets attached to Ownership. Wallets only authorize actions.</p>
     </Modal>
-    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onCancel={onCancelMatrix} onConnected={onConnected} locus={locus} initialConnection={initialMatrixConnection} />
+    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onCancel={onCancelMatrix} onConnected={(session) => { onConnected(session); setMatrixOpen(false); onClose(); }} locus={locus} initialConnection={initialMatrixConnection} />
     </>
   );
 }

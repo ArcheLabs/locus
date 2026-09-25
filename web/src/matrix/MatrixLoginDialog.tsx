@@ -1,9 +1,24 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "../components/Modal.js";
 import type { LocusWebSession } from "../session/types.js";
-import { connectMatrixSession, discoverHomeserver, revokeStoredMatrixSession, type MatrixConnected } from "./MatrixConnector.js";
+import { connectMatrixSession, type MatrixConnected, type MatrixConnectionState } from "./MatrixConnector.js";
+import { discoverHomeserver } from "./MatrixConnector.js";
 import { beginMatrixOAuth, beginMatrixSso } from "./MatrixOAuth.js";
 import type { LocusClient } from "@archelabs/locus";
+
+function verificationTitle(state: MatrixConnectionState): string {
+  switch (state) {
+    case "AUTHENTICATED": return "Signed in to Matrix";
+    case "DEVICE_KEYS_READY": return "Locus device is ready";
+    case "VERIFICATION_REQUIRED": return "Verification required";
+    case "VERIFICATION_REQUESTED": return "Verification requested";
+    case "VERIFICATION_SAS_READY": return "Compare these emoji";
+    case "VERIFICATION_CONFIRMING": return "Verification confirmed";
+    case "VERIFIED": return "Device verified";
+    case "CONTROLLER_BOOTSTRAPPING": return "Authorizing this device for Locus…";
+    case "READY": return "Connected";
+  }
+}
 
 export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus, initialConnection = null }: {
   open: boolean;
@@ -22,16 +37,37 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [pendingConnection, setPendingConnection] = useState<MatrixConnected | null>(initialConnection);
+  const [connectionState, setConnectionState] = useState<MatrixConnectionState>(initialConnection?.state ?? "AUTHENTICATED");
+  const [, refreshConnection] = useState(0);
   const authAttempt = useRef(0);
+  const passwordAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (initialConnection) {
-      setPendingConnection(initialConnection);
-      setUserId(initialConnection.stored.userId);
-      setHomeserver(initialConnection.stored.homeserver);
-      setError("This device needs Matrix verification before it can control a Locus identity.");
-    }
+    if (!initialConnection) return;
+    setPendingConnection(initialConnection);
+    setConnectionState(initialConnection.state);
+    setUserId(initialConnection.stored.userId);
+    setHomeserver(initialConnection.stored.homeserver);
+    setError(initialConnection.error);
   }, [initialConnection]);
+
+  useEffect(() => {
+    if (!pendingConnection) return;
+    const refresh = () => {
+      setConnectionState(pendingConnection.state);
+      setError(pendingConnection.error);
+      refreshConnection((value) => value + 1);
+      if (pendingConnection.state === "READY") {
+        const connected = pendingConnection;
+        setPendingConnection(null);
+        onConnected(connected.session);
+        onClose();
+      }
+    };
+    const unsubscribe = pendingConnection.subscribe(refresh);
+    refresh();
+    return unsubscribe;
+  }, [onClose, onConnected, pendingConnection]);
 
   async function startOAuth() {
     setWorking(true);
@@ -59,36 +95,51 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
 
   async function passwordLogin() {
     const attempt = ++authAttempt.current;
+    const abortController = new AbortController();
+    passwordAbort.current = abortController;
     setWorking(true);
     setError("");
     try {
-      const connected = pendingConnection
-        ? await pendingConnection.checkVerification()
-        : await connectMatrixSession(userId.trim(), password, advanced ? homeserver.trim() || undefined : undefined, { locus });
+      const connected = await connectMatrixSession(
+        userId.trim(),
+        password,
+        advanced ? homeserver.trim() || undefined : undefined,
+        { locus, onState: setConnectionState, signal: abortController.signal },
+      );
       if (attempt !== authAttempt.current) {
         connected.session.cleanup?.();
-        void revokeStoredMatrixSession().catch(() => undefined);
         return;
       }
-      if (connected.state === "AWAITING_VERIFICATION") {
-        setPendingConnection(connected);
-        setError("Verify the device named “Locus” in Element, then check again here.");
+      if (connected.state === "READY") {
+        onConnected(connected.session);
+        onClose();
         return;
       }
-      if (connected.state !== "READY") throw new Error("This Matrix device is verified but is not authorized as an active Locus controller.");
-      setPendingConnection(null);
-      onConnected(connected.session);
+      setPendingConnection(connected);
+      setConnectionState(connected.state);
+      setError(connected.error);
       setPassword("");
-      onClose();
     } catch (cause) {
       if (attempt === authAttempt.current) setError(cause instanceof Error ? cause.message : "Matrix sign-in failed.");
     } finally {
+      if (passwordAbort.current === abortController) passwordAbort.current = null;
       if (attempt === authAttempt.current) { setPassword(""); setWorking(false); }
     }
   }
 
+  async function performVerification(action: () => Promise<void>) {
+    if (!pendingConnection) return;
+    setWorking(true);
+    setError("");
+    try { await action(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : "Matrix verification failed."); }
+    finally { setWorking(false); }
+  }
+
   function cancel() {
     authAttempt.current += 1;
+    passwordAbort.current?.abort();
+    passwordAbort.current = null;
     onCancel(pendingConnection);
     setPendingConnection(null);
     setPassword("");
@@ -99,16 +150,39 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     onClose();
   }
 
-  const awaitingVerification = pendingConnection?.state === "AWAITING_VERIFICATION";
+  const verification = pendingConnection?.verification ?? null;
+  const showingVerification = Boolean(pendingConnection);
+  const canCompare = connectionState === "VERIFICATION_SAS_READY" && verification?.phase === "sas-ready";
   return (
     <Modal open={open} title="Connect Matrix" onClose={cancel} footer={<>
       <button type="button" className="secondary" onClick={cancel}>Cancel</button>
-      {awaitingVerification ? <button type="button" className="primary modal-primary" disabled={working} onClick={passwordLogin}>{working ? "Checking…" : "Check verification"}</button> : null}
+      {showingVerification && verification?.phase === "requested" && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>{working ? "Starting…" : "Start verification"}</button>}
+      {canCompare && <>
+        <button type="button" className="secondary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>They don’t match</button>
+        <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>They match</button>
+      </>}
     </>}>
       <p className="modal-lead">Use your Matrix cross-signing master key as the Locus Ownership. A verified Matrix device signs through its device key.</p>
-      {awaitingVerification ? <div className="verification-card">
-        <strong>Verify this Matrix device</strong>
-        <p>Open Element or another trusted Matrix client and verify the device named “Locus”. Locus keeps this device ID stable across sign-in and browser restarts.</p>
+      {showingVerification ? <div className="matrix-verification-flow" aria-live="polite">
+        <section className="verification-card">
+          <strong>{verificationTitle(connectionState)}</strong>
+          {connectionState === "VERIFICATION_REQUIRED" && <p>Open Element and choose Verify for the Locus device. Keep this window open. A verification request will appear here.</p>}
+          {connectionState === "VERIFICATION_REQUESTED" && (verification?.phase === "sas-waiting"
+            ? <p>Locus accepted the request from Element device <code>{verification.otherDeviceId}</code>. Waiting for Element to accept SAS verification…</p>
+            : <p>A verification request arrived from Element device <code>{verification?.otherDeviceId ?? "Unknown device"}</code>. Start the SAS verification here.</p>)}
+          {connectionState === "VERIFICATION_SAS_READY" && <p>Compare these emoji with the other device in Element. Confirm only when all seven match.</p>}
+          {connectionState === "VERIFICATION_CONFIRMING" && <p>Verification was confirmed. Locus is waiting for the Matrix cross-signing proof before it can authorize this device.</p>}
+          {connectionState === "VERIFIED" && <p>The public M → S → D signatures are verified. Authorizing this device for Locus…</p>}
+          {connectionState === "CONTROLLER_BOOTSTRAPPING" && <p>Authorizing this device for Locus…</p>}
+          {connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ? <p>Preparing the Locus Matrix device. Keep this window open.</p> : null}
+          {canCompare && <div className="matrix-sas-emojis" aria-label="Short authentication string emojis">
+            {verification.emojis.map((emoji, index) => <span className="matrix-sas-emoji" key={`${index}-${emoji.symbol}`} title={emoji.description}><span aria-hidden="true">{emoji.symbol}</span><small>{emoji.description}</small></span>)}
+          </div>}
+          {verification?.phase === "sas-waiting" && <p>Waiting for Element to accept SAS verification…</p>}
+          {verification?.phase === "confirming" && <p>Waiting for Element to confirm and publish the cross-signing proof…</p>}
+          {verification?.phase === "cancelled" && <p>The verification was cancelled. Start a new verification from Element when you are ready.</p>}
+          {verification && verification.phase !== "done" && <button type="button" className="text-button" disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>Cancel verification</button>}
+        </section>
       </div> : <>
         <label className="matrix-id-field">Matrix ID<input autoComplete="username" value={userId} placeholder="@alice:example.org" onChange={(event) => setUserId(event.target.value)} /></label>
         <button type="button" className="primary matrix-auth-button" disabled={working || !userId.trim()} onClick={startOAuth}>{working ? "Opening Matrix sign-in…" : "Continue with Matrix"}</button>

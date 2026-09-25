@@ -60,21 +60,30 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-export function matrixDeviceId(homeserver: string, userId: string): string {
-  const key = `${DEVICE_KEY_PREFIX}${homeserver}|${userId}`;
-  const existing = window.localStorage.getItem(key);
-  if (existing && /^[A-Z0-9_-]{1,255}$/.test(existing)) return existing;
-  const oldSessionDeviceId = window.sessionStorage.getItem(key);
-  if (oldSessionDeviceId && /^[A-Z0-9_-]{1,255}$/.test(oldSessionDeviceId)) return oldSessionDeviceId;
+export function matrixDeviceId(_homeserver: string, _userId: string): string {
+  // This helper is for a new authentication flow only. A durable device ID is
+  // reused exclusively by restoreMatrixSession after server/local key parity.
+  // New sign-ins always receive a fresh ID so a deleted Matrix device cannot
+  // be resurrected from an old IndexedDB store.
   const created = `LOCUS-${randomUrlSafe(18).replace(/[-_]/g, "").toUpperCase()}`;
-  window.sessionStorage.setItem(key, created);
   return created;
 }
 
 export function commitMatrixDeviceId(homeserver: string, userId: string, deviceId: string): void {
   if (!/^[A-Z0-9_-]{1,255}$/.test(deviceId)) throw matrixError("Matrix returned an invalid device ID; sign in again.");
-  const key = `${DEVICE_KEY_PREFIX}${homeserver}|${userId}`;
+  const key = `${DEVICE_KEY_PREFIX}${homeserver.replace(/\/$/, "")}|${userId}`;
   window.localStorage.setItem(key, deviceId);
+  window.sessionStorage.removeItem(key);
+}
+
+export function committedMatrixDeviceId(homeserver: string, userId: string): string | null {
+  const value = window.localStorage.getItem(`${DEVICE_KEY_PREFIX}${homeserver.replace(/\/$/, "")}|${userId}`);
+  return value && /^[A-Z0-9_-]{1,255}$/.test(value) ? value : null;
+}
+
+export function clearMatrixDeviceId(homeserver: string, userId: string, expectedDeviceId?: string): void {
+  const key = `${DEVICE_KEY_PREFIX}${homeserver.replace(/\/$/, "")}|${userId}`;
+  if (expectedDeviceId === undefined || window.localStorage.getItem(key) === expectedDeviceId) window.localStorage.removeItem(key);
   window.sessionStorage.removeItem(key);
 }
 
@@ -272,18 +281,28 @@ export async function refreshMatrixOAuthToken(stored: MatrixOAuthSession, persis
   if (persist) persistMatrixSession(stored);
 }
 
-export async function revokeMatrixOAuthSession(stored: MatrixOAuthSession): Promise<void> {
-  if (stored.authType === "oauth" && stored.revocationEndpoint && stored.refreshToken && stored.clientId) {
-    const response = await fetch(stored.revocationEndpoint, {
-      method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ token: stored.refreshToken, token_type_hint: "refresh_token", client_id: stored.clientId }),
-    });
-    if (!response.ok) throw matrixError(`Matrix token revocation failed (HTTP ${response.status}); this browser was signed out locally.`);
-  } else {
+export async function revokeMatrixOAuthSession(stored: MatrixOAuthSession, clearLocal = true): Promise<void> {
+  const failures: string[] = [];
+  try {
     const response = await fetch(`${stored.homeserver.replace(/\/$/, "")}/_matrix/client/v3/logout`, {
       method: "POST", headers: { authorization: `Bearer ${stored.accessToken}` },
     });
-    if (!response.ok) throw matrixError(`Matrix sign-out failed (HTTP ${response.status}); this browser was signed out locally.`);
+    if (!response.ok) failures.push(`Matrix device logout failed (HTTP ${response.status})`);
+  } catch (cause) { failures.push(`Matrix device logout failed: ${cause instanceof Error ? cause.message : "network error"}`); }
+
+  if (stored.authType === "oauth" && stored.revocationEndpoint && stored.refreshToken && stored.clientId) {
+    try {
+      const response = await fetch(stored.revocationEndpoint, {
+        method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ token: stored.refreshToken, token_type_hint: "refresh_token", client_id: stored.clientId }),
+      });
+      if (!response.ok) failures.push(`Matrix OAuth token revocation failed (HTTP ${response.status})`);
+    } catch (cause) { failures.push(`Matrix OAuth token revocation failed: ${cause instanceof Error ? cause.message : "network error"}`); }
   }
-  window.localStorage.removeItem("locus.matrix.session.v1");
+
+  if (clearLocal) {
+    window.localStorage.removeItem(MATRIX_SESSION_KEY);
+    window.sessionStorage.removeItem(MATRIX_SESSION_KEY);
+  }
+  if (failures.length) throw matrixError(`${failures.join("; ")}. This browser was signed out locally.`);
 }

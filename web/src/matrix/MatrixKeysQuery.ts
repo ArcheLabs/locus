@@ -15,6 +15,13 @@ type KeysQueryResponse = {
   device_keys?: Record<string, Record<string, MatrixSignedKey>>;
 };
 
+export type MatrixDeviceKeyParity =
+  | { status: "missing-device" }
+  | { status: "missing-ed25519" }
+  | { status: "missing-curve25519" }
+  | { status: "mismatch"; serverEd25519: string; serverCurve25519: string }
+  | { status: "match" };
+
 export type MatrixDiscoveredKeys = {
   userId: string;
   masterPublicKey: Uint8Array;
@@ -87,6 +94,40 @@ async function matrixJson<T>(homeserver: string, accessToken: string | undefined
     throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", `Matrix keys query failed with HTTP ${response.status}${detail ? ` (${detail})` : ""}.`);
   }
   return parsed as T;
+}
+
+function normalizedKey(value: string): string {
+  return value.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+}
+
+/** Compare the local OlmMachine identity key pair with this exact server device. */
+export async function queryMatrixDeviceKeyParity(
+  userId: string,
+  deviceId: string,
+  homeserver: string,
+  accessToken: string,
+  local: { ed25519: string; curve25519: string },
+  fetchImpl: typeof fetch = fetch,
+): Promise<MatrixDeviceKeyParity> {
+  validUserId(userId);
+  const response = await matrixJson<KeysQueryResponse>(
+    homeserver,
+    accessToken,
+    "/_matrix/client/v3/keys/query",
+    { device_keys: { [userId]: [deviceId] } },
+    fetchImpl,
+  );
+  const device = response.device_keys?.[userId]?.[deviceId];
+  if (!device) return { status: "missing-device" };
+  const serverEd25519 = device.keys?.[`ed25519:${deviceId}`];
+  if (!serverEd25519) return { status: "missing-ed25519" };
+  const serverCurve25519 = device.keys?.[`curve25519:${deviceId}`];
+  if (!serverCurve25519) return { status: "missing-curve25519" };
+  if (normalizedKey(serverEd25519) !== normalizedKey(local.ed25519)
+    || normalizedKey(serverCurve25519) !== normalizedKey(local.curve25519)) {
+    return { status: "mismatch", serverEd25519, serverCurve25519 };
+  }
+  return { status: "match" };
 }
 
 /** Query M→S→D public evidence. The homeserver `verified` flag is intentionally ignored. */

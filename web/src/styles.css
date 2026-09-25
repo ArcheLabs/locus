@@ -163,6 +163,10 @@ button:disabled { cursor: not-allowed; }
 .advanced-toggle { display: block; margin-top: 16px; }
 .verification-card { border: 1px solid var(--warning-border); background: var(--warning-soft); border-radius: 12px; padding: 15px; color: var(--warning); }
 .verification-card p { font-size: 13px; line-height: 1.5; margin: 7px 0 0; }
+.matrix-sas-emojis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 18px 0 8px; }
+.matrix-sas-emoji { min-width: 0; min-height: 76px; display: grid; place-items: center; align-content: center; gap: 5px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); }
+.matrix-sas-emoji > span { font-size: 29px; line-height: 1; }
+.matrix-sas-emoji small { max-width: 100%; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
 .disconnected-session { position: relative; }
 .session-restore-alert { position: absolute; z-index: 90; top: calc(100% + 10px); right: 0; width: min(390px, calc(100vw - 32px)); padding: 16px; border: 1px solid var(--danger-border); border-radius: 14px; background: var(--surface); box-shadow: 0 18px 38px var(--shadow); color: var(--text); }
 .session-restore-alert strong { display: block; color: var(--danger-strong); }
