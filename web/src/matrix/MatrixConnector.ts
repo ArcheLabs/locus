@@ -417,7 +417,10 @@ async function makeConnected(
           throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Matrix has not published the completed M → S → D verification proof yet. Wait briefly, then retry.");
         }
         await ensureMatrixController(locus, owner, controller, refreshed);
-        if (!disposed) setState("READY");
+        if (!disposed) {
+          connected.error = "";
+          setState("READY");
+        }
       } catch (cause) {
         if (!disposed) {
           connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
@@ -435,7 +438,7 @@ async function makeConnected(
     notify();
   };
   unsubscribeSyncError = crypto.subscribeSyncError((message) => {
-    if (disposed) return;
+    if (disposed || connected.state === "CONTROLLER_BOOTSTRAPPING" || connected.state === "CONTROLLER_AUTHORIZATION_FAILED") return;
     connected.error = message;
     notify();
   });

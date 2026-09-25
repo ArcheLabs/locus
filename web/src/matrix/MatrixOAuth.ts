@@ -249,8 +249,8 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
   const loginToken = url.searchParams.get("loginToken") ?? new URLSearchParams(url.hash.replace(/^#/, "")).get("loginToken");
   if (oauthCode || oauthState || oauthError) {
     // The authorization code arrives in the fragment. Remove it before any
-    // network await so wallet SDKs and other page scripts never retain it in
-    // their source URL or diagnostics.
+    // network await so Locus callbacks and later page diagnostics do not keep
+    // the one-time code in the address bar.
     clearAuthCallbackUrl();
     const raw = window.sessionStorage.getItem(OAUTH_FLOW_KEY);
     if (!raw) throw matrixError("Matrix OAuth callback has no matching sign-in request. Start sign-in again.");
