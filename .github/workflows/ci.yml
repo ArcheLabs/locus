@@ -14,7 +14,7 @@ on:
 env:
   JAMSCRIPT_VERSION: v0.1.0-rc.7
 # Pinned source revision is validated by JamScript CI before consumer checks.
-  JAMSCRIPT_CLIENT_REF: 4855697974c4ac04ffc7462e22860ac42083990
+  JAMSCRIPT_CLIENT_REF: 18794690b8b857ccf854419ca1b8e15f921095ec
   NODE_VERSION: 24.15.0
 
 jobs:
@@ -34,7 +34,7 @@ jobs:
           JAMSCRIPT_CLIENT_REF: ${{ env.JAMSCRIPT_CLIENT_REF }}
         run: |
           git clone --no-checkout https://github.com/ArcheLabs/JamScript.git "$RUNNER_TEMP/jamscript"
-          git -C "$RUNNER_TEMP/jamscript" fetch --depth=64 origin codex/locus-local-identity-primitives
+          git -C "$RUNNER_TEMP/jamscript" fetch --depth=64 origin codex/network-boundary-refactor
           git -C "$RUNNER_TEMP/jamscript" checkout --detach "$JAMSCRIPT_CLIENT_REF"
           npm --prefix "$RUNNER_TEMP/jamscript/packages/client" ci --ignore-scripts --no-audit --no-fund
           mkdir -p "$RUNNER_TEMP/jamscript-client"
@@ -86,6 +86,9 @@ jobs:
       - name: SDK and ownership model tests
         run: npm test
 
+      - name: Verify Ownership Matrix adapter boundary
+        run: ./scripts/check-ownership-adapter-boundary.sh
+
       - name: Build frontend prototype
         run: |
           npm --prefix web install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false "$JAMSCRIPT_CLIENT_TARBALL"
@@ -101,7 +104,7 @@ jobs:
           export JAMSCRIPT_GUEST_BUILD_MODE=cargo
           export JAMSCRIPT_CLANG="$(command -v clang)"
           export JAMSCRIPT_LLVM_AR="$(command -v llvm-ar || command -v ar)"
-          "$JAMSCRIPT_SOURCE_CLI" build . --output ./dist
+          LOCUS_JAMSCRIPT_CLI="$JAMSCRIPT_SOURCE_CLI" npm run build
 
   consumer-registry:
     name: Consumer CI (published registry)

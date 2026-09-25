@@ -1,6 +1,10 @@
-import { matrixOwnership } from "../../../sdk/src/ownership.ts";
 import type { Ownership } from "../../../sdk/src/types.ts";
-import { encodeMatrixControlClaimProofV1, type MatrixControlClaimProofV1 } from "@jamscript/client";
+import {
+  createMatrixControlClaimProofV1,
+  encodeMatrixControlClaimProofV1,
+  matrixMasterOwnership,
+  type MatrixControlClaimProofV1,
+} from "@jamscript/client/ownership/matrix";
 import { describeMatrixCause, MatrixConnectorError } from "./MatrixErrors.ts";
 
 type MatrixSignedKey = {
@@ -154,7 +158,7 @@ export async function queryMatrixKeys(userId: string, deviceId: string, homeserv
       throw error;
     }
   })();
-  const proof: MatrixControlClaimProofV1 | null = selfSigningSignature ? {
+  const proof: MatrixControlClaimProofV1 | null = selfSigningSignature ? createMatrixControlClaimProofV1({
     userId,
     selfSigningPublicKey,
     masterSignature,
@@ -163,7 +167,7 @@ export async function queryMatrixKeys(userId: string, deviceId: string, homeserv
     deviceCurve25519Key,
     deviceEd25519Key,
     selfSigningSignature,
-  } : null;
+  }) : null;
   return {
     userId,
     masterPublicKey,
@@ -190,7 +194,7 @@ export async function resolveMatrixMasterOwnership(userId: string, homeserver: s
   const response = await matrixJson<KeysQueryResponse>(homeserver, accessToken, "/_matrix/client/v3/keys/query", { device_keys: { [userId]: [] } });
   const [, value] = firstKey(response.master_keys?.[userId], "ed25519:", "cross-signing master key");
   const publicKey = fixedBase64(value, 32, "master public key");
-  const ownership = matrixOwnership(publicKey);
+  const ownership = matrixMasterOwnership(publicKey);
   recipientCache.set(key, { expiresAt: Date.now() + 5 * 60_000, ownership });
   return { ...ownership, public: ownership.public.slice() };
 }

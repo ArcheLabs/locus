@@ -9,11 +9,13 @@ if [[ -z "${JAMSCRIPT_CLI}" || ! -x "${JAMSCRIPT_CLI}" ]]; then
   exit 2
 fi
 
-"${JAMSCRIPT_CLI}" check "${ROOT_DIR}"
-generated="$(mktemp)"
-trap 'rm -f "${generated}"' EXIT
-"${JAMSCRIPT_CLI}" abi "${ROOT_DIR}" >"${generated}"
-diff -u "${ROOT_DIR}/abi/service.abi.json" "${generated}"
+generated_project="$(mktemp -d)"
+generated_abi="$(mktemp)"
+trap 'rm -rf "${generated_project}"; rm -f "${generated_abi}"' EXIT
+node "${ROOT_DIR}/scripts/bundle-service.mjs" "${ROOT_DIR}" "${generated_project}"
+"${JAMSCRIPT_CLI}" check "${generated_project}"
+"${JAMSCRIPT_CLI}" abi "${generated_project}" >"${generated_abi}"
+diff -u "${ROOT_DIR}/abi/service.abi.json" "${generated_abi}"
 
 grep -q '^language_version = "0.3"$' "${ROOT_DIR}/deps/jamscript.lock"
 grep -q '^abi_version = 1$' "${ROOT_DIR}/deps/jamscript.lock"
