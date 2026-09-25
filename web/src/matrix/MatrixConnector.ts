@@ -2,7 +2,7 @@ import { createClient, type MatrixClient } from "matrix-js-sdk";
 import { decodeMatrixControlClaimProofV1, encodeMatrixControlClaimProofV1, MatrixDeviceController, ownershipKey } from "@jamscript/client";
 import { matrixOwnership, type LocusClient } from "@archelabs/locus";
 import type { LocusWebSession } from "../session/types.js";
-import { describeMatrixCause, MatrixConnectorError } from "./MatrixErrors.js";
+import { describeMatrixCause, matrixControllerReceiptFailure, MatrixConnectorError } from "./MatrixErrors.js";
 import { destroyMatrixCryptoStore, MatrixCryptoDevice, type MatrixVerificationSnapshot } from "./MatrixCryptoDevice.js";
 import { queryMatrixDeviceKeyParity, queryMatrixKeys, type MatrixDiscoveredKeys } from "./MatrixKeysQuery.js";
 import { clearMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, committedMatrixDeviceId, matrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
@@ -291,7 +291,7 @@ async function ensureMatrixController(
           }
           if (receipt && receipt.status !== "applied") {
             removePendingMatrixBootstrap(pendingIdentity);
-            throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", `Locus rejected the Matrix controller authorization (error code ${receipt.errorCode ?? "none"}). ${proofDetails}`);
+            throw matrixControllerReceiptFailure(receipt.errorCode, proofDetails);
           }
           if (receipt?.status === "applied" && await inspectChainAuthorization() === "ready") return "ready";
         }

@@ -49,3 +49,21 @@ export function matrixCryptoStageFailure(code: MatrixErrorCode, message: string,
   if (cause instanceof MatrixConnectorError && cause.code === code) return cause;
   return new MatrixConnectorError(code, `${message} ${describeMatrixCause(cause)}`, { cause });
 }
+
+export function matrixControllerReceiptFailure(errorCode: number | null | undefined, proofDetails = ""): MatrixConnectorError {
+  const code = typeof errorCode === "number" && Number.isInteger(errorCode) && errorCode >= 0
+    ? errorCode >>> 0
+    : null;
+  if (code !== null && code >= 0x8000_0000) {
+    const runtimeClass = code === 0x8000_0001 ? "FATAL_UNCAUGHT" : "JAMSCRIPT_RUNTIME_FATAL";
+    const hex = `0x${code.toString(16).padStart(8, "0")}`;
+    return new MatrixConnectorError(
+      "CONTROLLER_NOT_AUTHORIZED",
+      `Internal JamScript runtime error during Matrix controller authorization (${runtimeClass}, ${hex}).`,
+    );
+  }
+  return new MatrixConnectorError(
+    "CONTROLLER_NOT_AUTHORIZED",
+    `Locus rejected the Matrix controller authorization (application error code ${code ?? "none"}). ${proofDetails}`,
+  );
+}

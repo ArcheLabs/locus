@@ -6,7 +6,7 @@ import { encodeAddress } from "@polkadot/util-crypto";
 import { selectNetwork } from "../web/src/network/selection.ts";
 import { queryMatrixKeys } from "../web/src/matrix/MatrixKeysQuery.ts";
 import { beginMatrixOAuth, commitMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, completeMatrixAuthCallback, discoverMatrixAuthMetadata, matrixDeviceId, persistMatrixSession, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
-import { describeMatrixCause, matrixCryptoStageFailure } from "../web/src/matrix/MatrixErrors.ts";
+import { describeMatrixCause, matrixControllerReceiptFailure, matrixCryptoStageFailure } from "../web/src/matrix/MatrixErrors.ts";
 import { createHash } from "node:crypto";
 import { resolveLocusMode, buildLocusMode } from "../web/src/network/mode.ts";
 import { parseThemePreference, resolveTheme, THEME_STORAGE_KEY } from "../web/src/theme/theme.ts";
@@ -84,6 +84,19 @@ test("Locus IDs round-trip the canonical Ownership encoding", () => {
   assert.equal(locusId.startsWith("locus:"), true);
   assert.deepEqual(decoded, owner);
   assert.throws(() => parseLocusId("locus:not-valid"));
+});
+
+test("Matrix controller authorization distinguishes JamScript fatal codes from business rejection", () => {
+  const fatal = matrixControllerReceiptFailure(2_147_483_649, "sensitive proof details");
+  assert.equal(fatal.code, "CONTROLLER_NOT_AUTHORIZED");
+  assert.match(fatal.message, /Internal JamScript runtime error/);
+  assert.match(fatal.message, /FATAL_UNCAUGHT, 0x80000001/);
+  assert.doesNotMatch(fatal.message, /Locus rejected|sensitive proof details/);
+
+  const rejected = matrixControllerReceiptFailure(5005, "proof diagnostics");
+  assert.match(rejected.message, /Locus rejected/);
+  assert.match(rejected.message, /application error code 5005/);
+  assert.match(rejected.message, /proof diagnostics/);
 });
 
 test("network amounts remain exact bigint values", () => {
