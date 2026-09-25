@@ -17,7 +17,7 @@ import { ActionButton } from "./components/ActionButton.js";
 import { AssetIcon } from "./components/AssetIcon.js";
 import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, signOutMatrixSession, type MatrixConnected } from "./matrix/MatrixConnector.js";
 import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
-import { completeMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
+import { completeMatrixAuthCallback, hasMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
 import { useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
 import type { Eip1193Provider } from "@jamscript/client";
 import { OwnershipInput } from "./locus/OwnershipInput.js";
@@ -91,12 +91,6 @@ export function App() {
   const { address: appKitAddress, isConnected: appKitConnected, status: appKitStatus } = useAppKitAccount({ namespace: "eip155" });
   const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
   networkIdRef.current = network.networkId;
-
-  function hasMatrixAuthCallback(): boolean {
-    const url = new URL(window.location.href);
-    const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
-    return ["code", "loginToken", "matrix_sso_state", "error"].some((key) => url.searchParams.has(key) || fragment.has(key));
-  }
 
   const sessionOwner = session?.owner ?? null;
   const locus = useMemo<LocusClient | null>(() => network.locus?.withSession(session?.ownershipSession ?? null) ?? null, [network.locus, session]);

@@ -18,6 +18,7 @@ export type MatrixConnectionState =
   | "VERIFICATION_CONFIRMING"
   | "VERIFIED"
   | "CONTROLLER_BOOTSTRAPPING"
+  | "CONTROLLER_AUTHORIZATION_FAILED"
   | "READY";
 
 export type MatrixConnectionOptions = {
@@ -217,6 +218,7 @@ export type MatrixConnected = {
   startVerification: () => Promise<void>;
   confirmVerification: (matches: boolean) => Promise<void>;
   cancelVerification: () => Promise<void>;
+  retryControllerAuthorization: () => Promise<void>;
 };
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
@@ -395,6 +397,35 @@ async function makeConnected(
       if (!connected.verification) return;
       await crypto.cancelVerification(connected.verification.flowId, authenticatedHttp(stored.homeserver, stored));
     },
+    retryControllerAuthorization: async () => {
+      if (disposed) throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The Matrix session was disconnected. Reconnect before retrying authorization.");
+      connected.error = "";
+      setState("CONTROLLER_BOOTSTRAPPING");
+      try {
+        const refreshed = await queryMatrixKeys(
+          stored.userId,
+          stored.deviceId,
+          stored.homeserver,
+          stored.accessToken,
+          (input, init) => authenticatedFetch(stored, input, init),
+        );
+        if (!sameBytes(refreshed.deviceEd25519Key, connected.keys.deviceEd25519Key)) {
+          throw new MatrixConnectorError("STALE_MATRIX_DEVICE", "The Matrix device key changed during verification. Sign in again to create a new device.");
+        }
+        connected.keys = refreshed;
+        if (refreshed.verification !== "verified" || refreshed.selfSigningSignature === null) {
+          throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Matrix has not published the completed M → S → D verification proof yet. Wait briefly, then retry.");
+        }
+        await ensureMatrixController(locus, owner, controller, refreshed);
+        if (!disposed) setState("READY");
+      } catch (cause) {
+        if (!disposed) {
+          connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
+          setState("CONTROLLER_AUTHORIZATION_FAILED");
+        }
+        throw cause;
+      }
+    },
   };
 
   const notify = () => { for (const listener of listeners) listener(); };
@@ -427,6 +458,7 @@ async function makeConnected(
         if (refreshed.verification === "verified" && refreshed.selfSigningSignature !== null) {
           setState("VERIFIED");
           if (locus) {
+            connected.error = "";
             setState("CONTROLLER_BOOTSTRAPPING");
             await ensureMatrixController(locus, owner, controller, refreshed);
             if (!disposed) setState("READY");
@@ -435,16 +467,21 @@ async function makeConnected(
         }
         if (attempt < 9) await new Promise((resolve) => window.setTimeout(resolve, 1_500));
       }
+      throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Element completed SAS verification, but Matrix has not published the M → S → D proof yet. Wait briefly, then retry.");
     } catch (cause) {
       if (!disposed) {
         connected.error = cause instanceof Error ? cause.message : "Could not confirm the Matrix cross-signing proof.";
-        notify();
+        setState("CONTROLLER_AUTHORIZATION_FAILED");
       }
     } finally { checkingProof = false; }
   };
   unsubscribeCrypto = crypto.subscribeVerification((snapshot) => {
     if (disposed) return;
     connected.verification = snapshot;
+    if (connected.state === "CONTROLLER_BOOTSTRAPPING" || connected.state === "CONTROLLER_AUTHORIZATION_FAILED") {
+      notify();
+      return;
+    }
     connected.error = "";
     if (connected.keys.verification !== "verified") {
       if (!snapshot) setState("VERIFICATION_REQUIRED");

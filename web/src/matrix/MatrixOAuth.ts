@@ -42,6 +42,16 @@ type OAuthFlow = {
 };
 
 type LegacySsoFlow = { homeserver: string; deviceId: string; state: string; redirectUri: string };
+type MatrixCallbackPayload = { search: string; hash: string };
+
+declare global {
+  interface Window {
+    __locusMatrixAuthCallback?: {
+      hasPending: () => boolean;
+      take: () => MatrixCallbackPayload | null;
+    };
+  }
+}
 
 function matrixError(message: string, cause?: unknown): MatrixConnectorError {
   return new MatrixConnectorError("OAUTH_FAILED", message, cause === undefined ? undefined : { cause });
@@ -124,6 +134,20 @@ function redirectUri(): string {
   url.search = "";
   url.hash = "";
   return url.toString();
+}
+
+export function hasMatrixAuthCallback(): boolean {
+  if (window.__locusMatrixAuthCallback?.hasPending()) return true;
+  const url = new URL(window.location.href);
+  const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
+  return ["code", "loginToken", "matrix_sso_state", "error"].some((key) => url.searchParams.has(key) || fragment.has(key));
+}
+
+function clearAuthCallbackUrl(): void {
+  const cleanUrl = new URL(window.location.href);
+  cleanUrl.search = "";
+  cleanUrl.hash = "";
+  window.history.replaceState(window.history.state, "", cleanUrl.toString());
 }
 
 function matrixWebClientUris(): { clientUri: string; redirectUri: string } {
@@ -213,7 +237,10 @@ async function whoAmI(homeserver: string, accessToken: string): Promise<string> 
 }
 
 export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession | null> {
-  const url = new URL(window.location.href);
+  const captured = window.__locusMatrixAuthCallback?.take();
+  const url = captured
+    ? new URL(`${window.location.origin}${window.location.pathname}${captured.search}${captured.hash}`)
+    : new URL(window.location.href);
   const fragment = new URLSearchParams(url.hash.replace(/^#/, ""));
   const oauthCode = url.searchParams.get("code") ?? fragment.get("code");
   const oauthState = url.searchParams.get("state") ?? fragment.get("state");
@@ -221,6 +248,10 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
   const ssoState = url.searchParams.get("matrix_sso_state");
   const loginToken = url.searchParams.get("loginToken") ?? new URLSearchParams(url.hash.replace(/^#/, "")).get("loginToken");
   if (oauthCode || oauthState || oauthError) {
+    // The authorization code arrives in the fragment. Remove it before any
+    // network await so wallet SDKs and other page scripts never retain it in
+    // their source URL or diagnostics.
+    clearAuthCallbackUrl();
     const raw = window.sessionStorage.getItem(OAUTH_FLOW_KEY);
     if (!raw) throw matrixError("Matrix OAuth callback has no matching sign-in request. Start sign-in again.");
     window.sessionStorage.removeItem(OAUTH_FLOW_KEY);
@@ -234,10 +265,6 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
     });
     const tokens = await parseTokenResponse(response, "Matrix OAuth token exchange");
     const userId = await whoAmI(flow.homeserver, tokens.access_token!);
-    const cleanUrl = new URL(window.location.href);
-    cleanUrl.search = "";
-    cleanUrl.hash = "";
-    window.history.replaceState({}, "", cleanUrl.toString());
     const stored: MatrixOAuthSession = {
       accessToken: tokens.access_token!, refreshToken: tokens.refresh_token,
       expiresAtMs: typeof tokens.expires_in === "number" ? Date.now() + tokens.expires_in * 1000 : undefined,
@@ -247,6 +274,7 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
     return stored;
   }
   if (loginToken || ssoState) {
+    clearAuthCallbackUrl();
     const raw = window.sessionStorage.getItem(SSO_FLOW_KEY);
     if (!raw) throw matrixError("Matrix SSO callback has no matching sign-in request. Start sign-in again.");
     const flow = JSON.parse(raw) as LegacySsoFlow;
@@ -258,10 +286,6 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
     });
     const payload = await response.json().catch(() => ({})) as { access_token?: string; refresh_token?: string; expires_in_ms?: number; user_id?: string; device_id?: string };
     if (!response.ok || !payload.access_token || !payload.user_id || !payload.device_id) throw matrixError(`Matrix SSO login failed (HTTP ${response.status}).`);
-    const cleanUrl = new URL(window.location.href);
-    cleanUrl.search = "";
-    cleanUrl.hash = "";
-    window.history.replaceState({}, "", cleanUrl.toString());
     const stored: MatrixOAuthSession = { accessToken: payload.access_token, refreshToken: payload.refresh_token, expiresAtMs: typeof payload.expires_in_ms === "number" ? Date.now() + payload.expires_in_ms : undefined, userId: payload.user_id, deviceId: payload.device_id, homeserver: flow.homeserver, authType: "legacy" };
     return stored;
   }

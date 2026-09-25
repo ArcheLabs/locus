@@ -7,6 +7,30 @@
     <meta name="color-scheme" content="light dark" />
     <title>Locus</title>
     <script>
+      (() => {
+        const url = new URL(window.location.href);
+        const search = url.search;
+        const hash = url.hash;
+        const query = new URLSearchParams(search);
+        const fragment = new URLSearchParams(hash.replace(/^#/, ""));
+        const keys = ["code", "loginToken", "matrix_sso_state", "error"];
+        if (!keys.some((key) => query.has(key) || fragment.has(key))) return;
+
+        let pending = { search, hash };
+        window.__locusMatrixAuthCallback = {
+          hasPending: () => pending !== null,
+          take: () => {
+            const callback = pending;
+            pending = null;
+            return callback;
+          },
+        };
+        url.search = "";
+        url.hash = "";
+        window.history.replaceState(window.history.state, "", url.toString());
+      })();
+    </script>
+    <script>
       try {
         const choice = localStorage.getItem("locus.theme.v1");
         const dark = choice === "dark" || (choice !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);

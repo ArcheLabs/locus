@@ -15,7 +15,8 @@ function verificationTitle(state: MatrixConnectionState): string {
     case "VERIFICATION_SAS_READY": return "Compare these emoji";
     case "VERIFICATION_CONFIRMING": return "Verification confirmed";
     case "VERIFIED": return "Device verified";
-    case "CONTROLLER_BOOTSTRAPPING": return "Authorizing this device for Locus…";
+    case "CONTROLLER_BOOTSTRAPPING": return "Authorizing device";
+    case "CONTROLLER_AUTHORIZATION_FAILED": return "Authorization needs attention";
     case "READY": return "Connected";
   }
 }
@@ -156,6 +157,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   return (
     <Modal open={open} title="Connect Matrix" onClose={cancel} footer={<>
       <button type="button" className="secondary" onClick={cancel}>Cancel</button>
+      {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>{working ? "Retrying…" : "Retry authorization"}</button>}
       {showingVerification && verification?.phase === "requested" && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>{working ? "Starting…" : "Start verification"}</button>}
       {canCompare && <>
         <button type="button" className="secondary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>They don’t match</button>
@@ -173,7 +175,8 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           {connectionState === "VERIFICATION_SAS_READY" && <p>Compare these emoji with the other device in Element. Confirm only when all seven match.</p>}
           {connectionState === "VERIFICATION_CONFIRMING" && <p>Verification was confirmed. Locus is waiting for the Matrix cross-signing proof before it can authorize this device.</p>}
           {connectionState === "VERIFIED" && <p>The public M → S → D signatures are verified. Authorizing this device for Locus…</p>}
-          {connectionState === "CONTROLLER_BOOTSTRAPPING" && <p>Authorizing this device for Locus…</p>}
+          {connectionState === "CONTROLLER_BOOTSTRAPPING" && <p>Matrix verification is complete. Submitting the controller authorization to MiniJAM…</p>}
+          {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <p>Matrix verification is complete, but Locus could not finish authorizing this device. The error is shown below. Retry after addressing it.</p>}
           {connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ? <p>Preparing the Locus Matrix device. Keep this window open.</p> : null}
           {canCompare && <div className="matrix-sas-emojis" aria-label="Short authentication string emojis">
             {verification.emojis.map((emoji, index) => <span className="matrix-sas-emoji" key={`${index}-${emoji.symbol}`} title={emoji.description}><span aria-hidden="true">{emoji.symbol}</span><small>{emoji.description}</small></span>)}
