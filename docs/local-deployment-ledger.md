@@ -1,9 +1,29 @@
 # MiniJAM Local deployment ledger
 
-The production web app currently targets **MiniJAM Local / Development**. The
-active Locus Service is `3083943385` with code hash
-`0xd0458437d18c4af8a012a96edcf84d66c5a881034cb063bfc51c7a9d25ab0a1`.
-`3302613027` is retained as the rollback deployment.
+The production web app currently targets **MiniJAM Local / Development**.
+Service `3083943385` (code hash
+`0xd0458437d18c4af8a012a96edcf84d66c5a881034cb063bfc51c7a9d25ab0a1`) remains
+the live service until the rc.8 cutover is complete. The new immutable candidate
+is Service `797069104` with code hash
+`0x9c9cd5766cbdc8cdaa927103899283e974c5cdf9367e49d76369a8d335bd1cb8` and
+service key
+`0xeeb9c2c46f5fff320952ceb77bef3f4152a37e679e92e28603682de5ad8ec254`.
+It was built reproducibly with published `jams v0.1.0-rc.8` and the verified
+canonical rc.8 toolchain (SHA-256
+`f804235bdae7239e57d9a7eb0d4413df65d1f785c05aa0cb4af5a28297548d03`), then
+registered in the existing JamScript Backend. `3302613027` remains the rollback
+deployment.
+
+The public descriptor is kept at `web/public/deployments/local.json`; a copy of
+the prior live descriptor is retained at
+`web/public/deployments/local-3083943385.json`. The runtime catalog is bound to
+the candidate's genesis and Service ID. Do not switch the served static build
+until the final CI and browser bootstrap checks pass.
+
+Service `615639671` is an unused finalized candidate that reused the live
+service key and therefore could not register in the production Backend. It is
+not active or catalogued. Keep its receipt for audit; do not use it for the
+cutover.
 
 Finalized deployments `2262072784` and `2671640402` are unused historical
 deployments. They are not registered as active services, are not present in the

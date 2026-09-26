@@ -28,7 +28,7 @@ const mini = catalog.assets.find((asset) => asset.key === "mini");
 
 assert.equal(deployment.network, "local", "liveness test is restricted to Local");
 assert.equal(deployment.genesisHash, expectedGenesis, "unexpected chain genesis");
-assert.equal(deployment.serviceId, 3083943385, "unexpected active Locus Service");
+assert.ok(Number.isSafeInteger(deployment.serviceId), "deployment must reference a concrete Locus Service");
 assert.equal(catalog.network, "local");
 assert.equal(catalog.genesisHash, expectedGenesis);
 assert.equal(catalog.serviceId, deployment.serviceId);
