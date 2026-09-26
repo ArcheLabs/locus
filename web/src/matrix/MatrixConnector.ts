@@ -353,6 +353,7 @@ export type MatrixConnected = {
   state: MatrixConnectionState;
   verification: MatrixVerificationSnapshot | null;
   error: string;
+  freshDevice: boolean;
   subscribe: (listener: () => void) => () => void;
   requestOwnUserVerification: () => Promise<void>;
   startVerification: () => Promise<void>;
@@ -458,7 +459,7 @@ async function connectStoredMatrixSession(
     if (keys.verification === "pending") {
       options.onState?.("VERIFICATION_REQUIRED");
     } else options.onState?.("VERIFIED");
-    return await makeConnected(stored, client, device, keys, controller, options.locus, options);
+    return await makeConnected(stored, client, device, keys, controller, options.locus, options, freshDevice);
   } catch (cause) {
     try { cryptoDevice.current?.dispose(); } catch { /* Preserve the original connection error. */ }
     client.stopClient();
@@ -480,6 +481,7 @@ async function makeConnected(
   controller: MatrixDeviceController,
   locus: LocusClient | null,
   options: MatrixConnectionOptions,
+  freshDevice: boolean,
 ): Promise<MatrixConnected> {
   const owner = matrixOwnership(keys.masterPublicKey);
   const currentController = await controller.getController();
@@ -520,6 +522,7 @@ async function makeConnected(
     state: initialState,
     verification: initialVerification,
     error: "",
+    freshDevice,
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     requestOwnUserVerification: async () => {
       await crypto.requestOwnUserVerification(authenticatedHttp(stored.homeserver, stored));

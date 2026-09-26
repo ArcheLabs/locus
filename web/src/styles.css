@@ -141,9 +141,13 @@ button:disabled { cursor: not-allowed; }
 .account-heading { border-bottom: 1px solid var(--border); margin-bottom: 4px; }
 .account-detail code { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
 .account-status { color: var(--warning); font-size: 12px; }
-.account-action { display: flex; align-items: center; gap: 8px; padding: 10px; border-radius: 9px; cursor: pointer; }
+.account-action { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 9px; cursor: pointer; }
 .account-action:hover { background: var(--surface-hover); }
 .account-action.danger { color: var(--danger-strong); }
+.account-action-copy { display: grid; gap: 2px; min-width: 0; }
+.account-action-copy strong { font: inherit; }
+.account-action-copy small { color: var(--text-secondary); font-size: 12px; line-height: 1.35; white-space: normal; }
+.account-action.danger .account-action-copy small { color: var(--text-secondary); }
 .text-button { border: 0; background: transparent; color: var(--accent); padding: 0; font-weight: 650; }
 .latest-assets h2 { margin: 2px 0 14px; font-size: 20px; letter-spacing: -.3px; }
 .latest-list { overflow: hidden; }

@@ -13,9 +13,11 @@ type Props = {
   open: boolean;
   onClose: () => void;
   onCancelMatrix: (connection: MatrixConnected | null) => void;
+  onMatrixSelected: () => void;
   onConnected: (session: LocusWebSession) => void;
-  onEvmConnectRequested: () => void;
+  onEvmConnectRequested: () => Promise<boolean>;
   onEvmConnectCancelled: () => void;
+  evmAccountAvailable?: boolean;
   evmError?: string;
   locus: import("@archelabs/locus").LocusClient | null;
   initialMatrixConnection?: MatrixConnected | null;
@@ -26,7 +28,7 @@ function available(kind: SessionKind): boolean {
   return true;
 }
 
-export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEvmConnectRequested, onEvmConnectCancelled, evmError = "", locus, initialMatrixConnection = null }: Props) {
+export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected, onConnected, onEvmConnectRequested, onEvmConnectCancelled, evmError = "", evmAccountAvailable = false, locus, initialMatrixConnection = null }: Props) {
   const [connecting, setConnecting] = useState<SessionKind | null>(null);
   const [error, setError] = useState("");
   const [accountOptions, setAccountOptions] = useState<BrowserAccountOption[]>([]);
@@ -36,11 +38,18 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
   const [waitingForEvm, setWaitingForEvm] = useState(false);
   const evmRequestInFlight = useRef(false);
   const evmRequestGeneration = useRef(0);
+  const appKitModalOpen = useRef(false);
   const { open: openAppKit, close: closeAppKit } = useAppKit();
+  const closeAppKitRef = useRef(closeAppKit);
+  closeAppKitRef.current = closeAppKit;
   const options = useMemo(() => connectorInfo.map((entry) => ({ ...entry, available: available(entry.kind) })), []);
 
   useEffect(() => {
     if (!open) {
+      if (appKitModalOpen.current) {
+        appKitModalOpen.current = false;
+        void closeAppKitRef.current();
+      }
       setSelectedKind(null);
       setAccountOptions([]);
       setSelectedAccount("");
@@ -63,12 +72,17 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
       evmRequestGeneration.current += 1;
       setWaitingForEvm(false);
       onEvmConnectCancelled();
+      if (appKitModalOpen.current) {
+        appKitModalOpen.current = false;
+        void closeAppKitRef.current();
+      }
     }
   }, [evmError, onEvmConnectCancelled]);
 
   async function chooseConnector(kind: SessionKind) {
     if (connecting !== null || evmRequestInFlight.current) return;
     if (kind === "matrix") {
+      onMatrixSelected();
       onClose();
       setMatrixOpen(true);
       return;
@@ -78,13 +92,30 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
       const requestGeneration = ++evmRequestGeneration.current;
       setError("");
       setWaitingForEvm(true);
-      onEvmConnectRequested();
-      try { await openAppKit({ view: "Connect", namespace: "eip155" }); }
+      try {
+        // A wallet that is already connected to Locus should restore directly.
+        // Opening AppKit first leaves mobile wallets on a stale "already linked"
+        // screen even though the EIP-1193 account is already usable.
+        const reconnected = await onEvmConnectRequested();
+        if (requestGeneration !== evmRequestGeneration.current) return;
+        if (reconnected) {
+          evmRequestInFlight.current = false;
+          setWaitingForEvm(false);
+          onClose();
+          return;
+        }
+        appKitModalOpen.current = true;
+        await openAppKit({ view: "Connect", namespace: "eip155" });
+      }
       catch (cause) {
         if (requestGeneration !== evmRequestGeneration.current) return;
         evmRequestInFlight.current = false;
         setWaitingForEvm(false);
         onEvmConnectCancelled();
+        if (appKitModalOpen.current) {
+          appKitModalOpen.current = false;
+          void closeAppKit();
+        }
         setError(cause instanceof Error ? cause.message : "Unable to open the EVM wallet selector.");
       }
       return;
@@ -117,7 +148,10 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
     evmRequestGeneration.current += 1;
     setWaitingForEvm(false);
     onEvmConnectCancelled();
-    void closeAppKit();
+    if (appKitModalOpen.current) {
+      appKitModalOpen.current = false;
+      void closeAppKit();
+    }
   }
 
   function closeConnectDialog() {
@@ -155,7 +189,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
             <IdentityOption
               kind={entry.kind}
               title={entry.label}
-              description={waitingForEvm && entry.kind === "evm" ? "Approve or cancel the pending wallet request" : connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}
+              description={waitingForEvm && entry.kind === "evm" ? evmAccountAvailable ? "Reconnecting the selected wallet account…" : "Approve or cancel the wallet request" : connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}
               variant="comfortable"
               disabled={connecting !== null || waitingForEvm || !entry.available}
               trailing="arrow"

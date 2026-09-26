@@ -72,10 +72,11 @@ export class EvmSessionBridge {
     void this.reconcile();
   }
 
-  beginConnection(): void {
+  async beginConnection(): Promise<boolean> {
     this.pending = true;
     this.expectedAddress = null;
-    void this.reconcile();
+    await this.reconcile();
+    return this.options.getSession()?.kind === "evm";
   }
 
   beginRestore(address: string): void {
@@ -154,7 +155,10 @@ export class EvmSessionBridge {
     if (!address) return;
     try {
       const session = await this.options.createSession(provider, address);
-      if (this.disposed || provider !== this.provider || !this.pending) return;
+      if (this.disposed || provider !== this.provider || !this.pending) {
+        try { session.cleanup?.(); } catch { /* The abandoned connection must not stay active in memory. */ }
+        return;
+      }
       this.options.commitSession(session);
       this.committedProvider = provider;
       this.pending = false;

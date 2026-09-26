@@ -13,6 +13,7 @@ import { resolveRecipient, detectRecipientType, type RecipientType } from "./loc
 import { transferAndWait, type SendState } from "./locus/transaction.js";
 import { useSession } from "./session/SessionProvider.js";
 import { connectEvmProvider, restoreBrowserSession, watchBrowserSession } from "./session/connectors.js";
+import { activeSessionKind, markSessionDisconnected, setActiveSessionKind } from "./session/sessionPersistence.js";
 import { EvmSessionBridge } from "./session/EvmSessionBridge.js";
 import { ConnectDialog } from "./session/ConnectDialog.js";
 import { CreateAssetDialog, ReceiveDialog, ReviewDialog } from "./locus/dialogs.js";
@@ -111,7 +112,6 @@ export function App() {
   const oauthCallbackAttempted = useRef(false);
   const provisionalMatrixAuth = useRef<MatrixOAuthSession | null>(null);
   const matrixAuthAbort = useRef<AbortController | null>(null);
-  const matrixRestoreInProgress = useRef(false);
   const { address: appKitAddress } = useAppKitAccount({ namespace: "eip155" });
   const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
   const sessionRef = useRef(session);
@@ -220,7 +220,6 @@ export function App() {
       sessionRestoreAbort.current = null;
       matrixAuthAbort.current?.abort();
       matrixAuthAbort.current = null;
-      matrixRestoreInProgress.current = false;
       finishRestore("Sign-in restoration timed out. You are not connected; your saved sign-in is still available. Try connecting again.");
     }, 30_000);
     return () => {
@@ -230,23 +229,7 @@ export function App() {
   }, [evmBridge, finishRestore, lifecycle]);
 
   function openConnect() {
-    if (matrixRestoreInProgress.current) return;
-    const stored = readStoredMatrixSession();
-    if (!stored) { setConnectOpen(true); return; }
-    matrixRestoreInProgress.current = true;
-    void restoreMatrixSession(stored, { locus: network.locus }).then((connected) => {
-      if (connected.state === "READY") {
-        setSession(connected.session);
-        setConnectOpen(false);
-      } else {
-        setPendingMatrixConnection(connected);
-        setConnectOpen(true);
-        finishRestore(matrixRestoreMessage(connected));
-      }
-    }).catch((cause) => {
-      finishRestore(`Could not restore the Matrix session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try signing in again."}`);
-      setConnectOpen(true);
-    }).finally(() => { matrixRestoreInProgress.current = false; });
+    setConnectOpen(true);
   }
 
   useEffect(() => {
@@ -291,58 +274,73 @@ export function App() {
   useEffect(() => {
     if (lifecycle !== "restoring" || sessionRestoreAttempted.current || oauthCallbackAttempted.current) return;
     let saved: { kind?: "evm" | "polkadot" | "solana"; address?: string; connectionId?: string } | null = null;
+    const preferredKind = activeSessionKind(window.localStorage);
     try {
-      const matrixStored = readStoredMatrixSession();
-      if (matrixStored) {
-        if (networkMode && (network.status === "error" || network.status === "unconfigured")) {
-          sessionRestoreAttempted.current = true;
-          finishRestore(`The saved Matrix sign-in remains available, but the selected Locus network is unavailable. ${network.error?.message ?? "Reconnect to the network and try again."}`);
-          return;
-        }
-        if (networkMode && (network.status !== "ready" || !network.locus)) return;
-        sessionRestoreAttempted.current = true;
-        const restoreId = ++sessionRestoreEpoch.current;
-        const abortController = new AbortController();
-        sessionRestoreAbort.current = abortController;
-        void restoreMatrixSession(matrixStored, { locus: network.locus, signal: abortController.signal }).then((connected) => {
-          if (abortController.signal.aborted || restoreId !== sessionRestoreEpoch.current) { connected.session.cleanup?.(); return; }
-          if (connected.state === "READY") setSession(connected.session);
-          else { setPendingMatrixConnection(connected); setConnectOpen(true); finishRestore(matrixRestoreMessage(connected)); }
-        }).catch((cause) => {
-          if (abortController.signal.aborted || restoreId !== sessionRestoreEpoch.current) return;
-          finishRestore(`Could not restore the Matrix session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try signing in again."}`);
-        }).finally(() => {
-          if (sessionRestoreAbort.current === abortController) sessionRestoreAbort.current = null;
-        });
-        return;
+      if (preferredKind !== "matrix") {
+        const stored = window.localStorage.getItem("locus.session.v1");
+        if (stored) saved = JSON.parse(stored) as { kind?: "evm" | "polkadot" | "solana"; address?: string; connectionId?: string };
       }
-      if (window.localStorage.getItem("locus.matrix.session.v1") || window.sessionStorage.getItem("locus.matrix.session.v1")) {
-        sessionRestoreAttempted.current = true;
-        finishRestore("The saved Matrix sign-in is incomplete and could not be read. No session is connected; sign out to clear it or try signing in again.");
-        return;
-      }
-      const stored = window.localStorage.getItem("locus.session.v1");
-      if (stored) saved = JSON.parse(stored) as { kind?: "evm" | "polkadot" | "solana"; address?: string; connectionId?: string };
     } catch {
       finishRestore("The saved wallet session could not be read. It has been kept so you can retry.");
       return;
     }
-    if (!saved?.kind || !saved.address) { sessionRestoreAttempted.current = true; finishRestore(); return; }
-    sessionRestoreAttempted.current = true;
-    const restoreId = ++sessionRestoreEpoch.current;
-    if (saved.kind === "evm") {
-      evmBridge.beginRestore(saved.address);
+    // Restore the last selected Ownership first. A dormant Matrix login may
+    // remain saved for later use, but must never override an EVM session that
+    // the user explicitly connected after it.
+    if (saved?.kind && saved.address) {
+      sessionRestoreAttempted.current = true;
+      const restoreId = ++sessionRestoreEpoch.current;
+      if (saved.kind === "evm") {
+        evmBridge.beginRestore(saved.address);
+        return;
+      }
+      const restore = restoreBrowserSession(saved.kind, saved.connectionId ?? saved.address);
+      void restore.then((restored) => {
+        if (restoreId !== sessionRestoreEpoch.current) { restored.cleanup?.(); return; }
+        if (restored.address.toLowerCase() !== saved!.address!.toLowerCase()) throw new Error("The restored wallet account changed.");
+        setSession(restored);
+      }).catch((cause) => {
+        if (restoreId !== sessionRestoreEpoch.current) return;
+        finishRestore(`Could not restore the wallet session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try connecting again."}`);
+      });
       return;
     }
-    const restore = restoreBrowserSession(saved.kind, saved.connectionId ?? saved.address);
-    void restore.then((restored) => {
-      if (restoreId !== sessionRestoreEpoch.current) { restored.cleanup?.(); return; }
-      if (restored.address.toLowerCase() !== saved!.address!.toLowerCase()) throw new Error("The restored wallet account changed.");
-      setSession(restored);
-    }).catch((cause) => {
-      if (restoreId !== sessionRestoreEpoch.current) return;
-      finishRestore(`Could not restore the wallet session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try connecting again."}`);
-    });
+    if (preferredKind && preferredKind !== "matrix") {
+      sessionRestoreAttempted.current = true;
+      finishRestore("The saved wallet session is no longer available. Choose a connection method to sign in again.");
+      return;
+    }
+    const matrixStored = readStoredMatrixSession();
+    if (matrixStored) {
+      if (networkMode && (network.status === "error" || network.status === "unconfigured")) {
+        sessionRestoreAttempted.current = true;
+        finishRestore(`The saved Matrix sign-in remains available, but the selected Locus network is unavailable. ${network.error?.message ?? "Reconnect to the network and try again."}`);
+        return;
+      }
+      if (networkMode && (network.status !== "ready" || !network.locus)) return;
+      sessionRestoreAttempted.current = true;
+      const restoreId = ++sessionRestoreEpoch.current;
+      const abortController = new AbortController();
+      sessionRestoreAbort.current = abortController;
+      void restoreMatrixSession(matrixStored, { locus: network.locus, signal: abortController.signal }).then((connected) => {
+        if (abortController.signal.aborted || restoreId !== sessionRestoreEpoch.current) { connected.session.cleanup?.(); return; }
+        if (connected.state === "READY") setSession(connected.session);
+        else { setPendingMatrixConnection(connected); setConnectOpen(true); finishRestore(matrixRestoreMessage(connected)); }
+      }).catch((cause) => {
+        if (abortController.signal.aborted || restoreId !== sessionRestoreEpoch.current) return;
+        finishRestore(`Could not restore the Matrix session. You remain disconnected. ${cause instanceof Error ? cause.message : "Try signing in again."}`);
+      }).finally(() => {
+        if (sessionRestoreAbort.current === abortController) sessionRestoreAbort.current = null;
+      });
+      return;
+    }
+    if (window.localStorage.getItem("locus.matrix.session.v1") || window.sessionStorage.getItem("locus.matrix.session.v1")) {
+      sessionRestoreAttempted.current = true;
+      finishRestore("The saved Matrix sign-in is incomplete and could not be read. No session is connected; sign out to clear it or try signing in again.");
+      return;
+    }
+    sessionRestoreAttempted.current = true;
+    finishRestore();
   }, [evmBridge, finishRestore, lifecycle, network.locus, network.status, networkMode, setSession, session]);
 
   useEffect(() => {
@@ -356,6 +354,7 @@ export function App() {
   }, [clearSession, session]);
 
   function disconnectSession() {
+    markSessionDisconnected(window.localStorage);
     evmBridge.explicitDisconnect();
     setEvmConnectError("");
     provisionalMatrixAuth.current = null;
@@ -394,6 +393,14 @@ export function App() {
   function cancelMatrixSignIn(connection: MatrixConnected | null) {
     const authenticated = connection ?? pendingMatrixConnection;
     const stored = authenticated?.stored ?? provisionalMatrixAuth.current ?? readStoredMatrixSession();
+    if (authenticated && authenticated.session !== session) {
+      try { authenticated.session.cleanup?.(); } catch { /* Retire the dialog's crypto client before changing its stored device state. */ }
+    }
+    if (authenticated && !authenticated.freshDevice) {
+      disconnectSession();
+      setConnectOpen(false);
+      return;
+    }
     if (authenticated || provisionalMatrixAuth.current) signOutMatrix(stored);
     else disconnectSession();
     setConnectOpen(false);
@@ -604,7 +611,7 @@ export function App() {
         ))}
       </nav>
       {toast && <div className="toast" role="status">{toast}</div>}
-      <ConnectDialog open={connectOpen} onClose={() => { evmBridge.cancelConnection(); setConnectOpen(false); setPendingMatrixConnection(null); }} onCancelMatrix={cancelMatrixSignIn} onConnected={setSession} onEvmConnectRequested={() => { setEvmConnectError(""); evmBridge.beginConnection(); }} onEvmConnectCancelled={() => evmBridge.cancelConnection()} evmError={evmConnectError} locus={network.locus} initialMatrixConnection={pendingMatrixConnection} />
+      <ConnectDialog open={connectOpen} onClose={() => { evmBridge.cancelConnection(); setConnectOpen(false); }} onCancelMatrix={cancelMatrixSignIn} onMatrixSelected={() => setActiveSessionKind(window.localStorage, "matrix")} onConnected={(next) => { setSession(next); if (next.kind === "matrix") setPendingMatrixConnection(null); }} onEvmConnectRequested={() => { setActiveSessionKind(window.localStorage, "evm"); setEvmConnectError(""); return evmBridge.beginConnection(); }} onEvmConnectCancelled={() => evmBridge.cancelConnection()} evmError={evmConnectError} evmAccountAvailable={Boolean(walletProvider && appKitAddress)} locus={network.locus} initialMatrixConnection={pendingMatrixConnection} />
       {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={resolvedRecipient} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
       <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
       <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} networkId={network.networkId} serviceId={network.deployment?.serviceId ?? null} onClose={() => setCreateAssetOpen(false)} onCreated={() => void refreshAssets()} />

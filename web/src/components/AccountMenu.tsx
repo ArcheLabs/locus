@@ -35,8 +35,14 @@ export function AccountMenu({ session, lifecycle, restoreError, onConnect, onDis
       <div className="account-detail"><small>Owner</small><code>{locusId}</code></div>
       <div className="account-detail"><small>Controller</small><code>{formatLocusId(session.controller)}</code><span className="account-status">{session.kind === "matrix" ? `Verified Matrix device ${session.matrix?.deviceId} controls this master Ownership` : "Signs as this Ownership controller"}</span></div>
       <DropdownMenu.Item className="account-action" onSelect={() => void copy()}><Copy size={15} aria-hidden="true" /> {copied ? "Copied" : "Copy Locus ID"}</DropdownMenu.Item>
-      <DropdownMenu.Item className="account-action" onSelect={onDisconnect}><Unplug size={15} aria-hidden="true" /> Disconnect</DropdownMenu.Item>
-      {session.kind === "matrix" && <DropdownMenu.Item className="account-action danger" onSelect={onSignOutMatrix}><LogOut size={15} aria-hidden="true" /> Sign out Matrix</DropdownMenu.Item>}
+      <DropdownMenu.Item className="account-action" onSelect={onDisconnect}>
+        <Unplug size={15} aria-hidden="true" />
+        <span className="account-action-copy"><strong>Disconnect Locus</strong>{session.kind === "matrix" ? <small>Keep this verified Matrix device</small> : session.kind === "evm" ? <small>Keep the wallet connected; choose EVM to reconnect</small> : null}</span>
+      </DropdownMenu.Item>
+      {session.kind === "matrix" && <DropdownMenu.Item className="account-action danger" onSelect={onSignOutMatrix}>
+        <LogOut size={15} aria-hidden="true" />
+        <span className="account-action-copy"><strong>Sign out Matrix</strong><small>Removes this device; next login needs verification</small></span>
+      </DropdownMenu.Item>}
     </DropdownMenu.Content></DropdownMenu.Portal>
   </DropdownMenu.Root>;
 }

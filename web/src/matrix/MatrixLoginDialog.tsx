@@ -2,14 +2,14 @@ import { useEffect, useRef, useState } from "react";
 import { Modal } from "../components/Modal.js";
 import { IdentityIcon } from "../components/IdentityIcon.js";
 import type { LocusWebSession } from "../session/types.js";
-import { connectMatrixPasswordSession, type MatrixConnected, type MatrixConnectionState } from "./MatrixConnector.js";
+import { connectMatrixPasswordSession, readStoredMatrixSession, restoreMatrixSession, signOutMatrixSession, type MatrixConnected, type MatrixConnectionState } from "./MatrixConnector.js";
 import { beginMatrixOAuth, beginMatrixSso, discoverMatrixAuthCapabilities, type MatrixAuthCapabilities } from "./MatrixOAuth.js";
 import { DEFAULT_MATRIX_PROVIDER, resolveMatrixServer } from "./MatrixProvider.js";
 import type { LocusClient } from "@archelabs/locus";
 import { ArrowLeft, ArrowRight, Check, ClipboardCopy, LogIn, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { ActionButton } from "../components/ActionButton.js";
 
-type MatrixLoginStage = "provider" | "custom-server" | "discovering" | "legacy-options" | "password" | "verification";
+type MatrixLoginStage = "saved-account" | "provider" | "custom-server" | "discovering" | "legacy-options" | "password" | "verification";
 
 function verificationTitle(state: MatrixConnectionState): string {
   switch (state) {
@@ -37,7 +37,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   locus: LocusClient | null;
   initialConnection?: MatrixConnected | null;
 }) {
-  const [stage, setStage] = useState<MatrixLoginStage>(initialConnection ? "verification" : "provider");
+  const [stage, setStage] = useState<MatrixLoginStage>(initialConnection ? "verification" : readStoredMatrixSession() ? "saved-account" : "provider");
   const [returnStage, setReturnStage] = useState<"provider" | "custom-server">("provider");
   const [selectedServer, setSelectedServer] = useState("");
   const [customServer, setCustomServer] = useState("");
@@ -54,13 +54,20 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   const passwordAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!initialConnection) return;
-    setPendingConnection(initialConnection);
-    setConnectionState(initialConnection.state);
-    setSelectedServer(initialConnection.stored.homeserver);
-    setStage("verification");
-    setError(initialConnection.error);
-  }, [initialConnection]);
+    if (!open) return;
+    if (initialConnection) {
+      setPendingConnection(initialConnection);
+      setConnectionState(initialConnection.state);
+      setSelectedServer(initialConnection.stored.homeserver);
+      setStage("verification");
+      setError(initialConnection.error);
+      return;
+    }
+    setPendingConnection(null);
+    setConnectionState("AUTHENTICATED");
+    setStage(readStoredMatrixSession() ? "saved-account" : "provider");
+    setError("");
+  }, [initialConnection, open]);
 
   useEffect(() => {
     if (!pendingConnection) return;
@@ -156,6 +163,62 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     } finally {
       if (passwordAbort.current === abortController) passwordAbort.current = null;
       if (attempt === authAttempt.current) { setPassword(""); setWorking(false); }
+    }
+  }
+
+  async function reconnectSavedMatrixDevice() {
+    const stored = readStoredMatrixSession();
+    if (!stored) {
+      setStage("provider");
+      setError("The saved Matrix session is no longer available. Sign in to Matrix to create a device.");
+      return;
+    }
+    const attempt = ++authAttempt.current;
+    setWorking(true);
+    setError("");
+    try {
+      const connected = await restoreMatrixSession(stored, { locus, onState: setConnectionState });
+      if (attempt !== authAttempt.current) {
+        connected.session.cleanup?.();
+        return;
+      }
+      if (connected.state === "READY") {
+        onConnected(connected.session);
+        onClose();
+        return;
+      }
+      setPendingConnection(connected);
+      setConnectionState(connected.state);
+      setSelectedServer(stored.homeserver);
+      setStage("verification");
+      setError(connected.error);
+    } catch (cause) {
+      if (attempt === authAttempt.current) {
+        setStage(readStoredMatrixSession() ? "saved-account" : "provider");
+        setError(cause instanceof Error ? cause.message : "Could not restore the saved Matrix device.");
+      }
+    } finally {
+      if (attempt === authAttempt.current) setWorking(false);
+    }
+  }
+
+  async function useDifferentMatrixAccount() {
+    const stored = readStoredMatrixSession();
+    if (!stored) {
+      setStage("provider");
+      return;
+    }
+    setWorking(true);
+    setError("");
+    try {
+      await signOutMatrixSession(stored);
+      setPendingConnection(null);
+      setStage("provider");
+    } catch (cause) {
+      setStage(readStoredMatrixSession() ? "saved-account" : "provider");
+      setError(cause instanceof Error ? cause.message : "Could not sign out of the saved Matrix device.");
+    } finally {
+      setWorking(false);
     }
   }
 
@@ -257,6 +320,18 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           {verification && verification.phase !== "done" && <ActionButton size="small" variant="tertiary" icon={X} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>Cancel verification</ActionButton>}
         </section>
       </div> : <>
+        {stage === "saved-account" && (() => {
+          const stored = readStoredMatrixSession();
+          return stored ? <div className="matrix-login-options">
+            <div className="matrix-provider-choice">
+              <span className="identity-icon-slot"><IdentityIcon kind="matrix" size={24} /></span>
+              <span className="matrix-provider-copy"><strong>{stored.userId}</strong><small>Reconnect this Matrix account with its saved Locus device</small></span>
+              <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void reconnectSavedMatrixDevice()}>Reconnect Matrix</ActionButton>
+            </div>
+            <ActionButton variant="secondary" icon={ArrowRight} fullWidth disabled={working} onClick={() => void useDifferentMatrixAccount()}>Sign in with another Matrix account</ActionButton>
+            <p className="auth-caption">Using another account removes this saved Locus device. The new device will need verification.</p>
+          </div> : <div className="matrix-discovery-status" role="status">The saved Matrix session is unavailable. Choose a Matrix sign-in method.</div>;
+        })()}
         {stage === "provider" && <div className="matrix-login-options">
           <div className="matrix-provider-choice">
             <span className="identity-icon-slot"><IdentityIcon kind="matrix" size={24} /></span>
