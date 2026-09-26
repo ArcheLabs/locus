@@ -142,9 +142,9 @@ to mock data; Demo Mode is explicit and is only for the frontend prototype.
 ## Published platform baseline
 
 The consumer baseline uses the published [JamScript
-`v0.1.0-rc.7`](https://github.com/ArcheLabs/JamScript/releases/tag/v0.1.0-rc.7)
+`v0.1.0-rc.8`](https://github.com/ArcheLabs/JamScript/releases/tag/v0.1.0-rc.8)
 CLI/toolchain and [Backend
-`backend-v0.1.0-rc.7`](https://github.com/ArcheLabs/JamScript/releases/tag/backend-v0.1.0-rc.7).
-The published npm client is pinned separately in `releases.lock`. Locus does
-not reproduce JamScript compiler, runtime, or Ownership protocol features
-locally.
+`backend-v0.1.0-rc.8`](https://github.com/ArcheLabs/JamScript/releases/tag/backend-v0.1.0-rc.8).
+The client SDK package pin is tracked separately in `releases.lock`; Locus CI
+builds it from the pinned JamScript source commit. Locus does not reproduce
+JamScript compiler, runtime, or Ownership protocol features locally.
