@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { formatLocusId, parseUnits, randomAssetId, type LocusClient, type OwnershipPreparationPhase } from "@archelabs/locus";
 import { Modal } from "../components/Modal.js";
+import { ActionButton } from "../components/ActionButton.js";
+import { Check, CirclePlus, ClipboardCopy, RefreshCw, SearchCheck, X } from "lucide-react";
 import type { LocusWebSession } from "../session/types.js";
 import type { AssetView } from "./assets.js";
 import type { RecipientResolution } from "./recipients.js";
@@ -42,7 +44,7 @@ export function ReviewDialog({
       open={open}
       title="Review transfer"
       onClose={onClose}
-      footer={<><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="button" className="primary modal-primary" disabled={!resolution.valid} onClick={onConfirm}>Confirm</button></>}
+      footer={<><ActionButton variant="secondary" icon={X} onClick={onClose}>Cancel</ActionButton><ActionButton variant="primary" icon={Check} disabled={!resolution.valid} onClick={onConfirm}>Confirm</ActionButton></>}
     >
       <div className="review-summary">
         <AssetIcon asset={asset} />
@@ -75,7 +77,7 @@ export function ReceiveDialog({ open, asset, session, onClose }: { open: boolean
       <p className="modal-lead">Share this Locus ID to receive {asset?.symbol ?? "the asset"}.</p>
       {!session ? <div className="empty-state">Connect an Ownership session before receiving. Demo Mode does not submit receive actions.</div> : <>
         <div className="receive-code"><code>{locusId}</code></div>
-        <button type="button" className="secondary full" onClick={copy}>{copied ? "Copied" : "Copy Locus ID"}</button>
+        <ActionButton variant="secondary" icon={ClipboardCopy} fullWidth onClick={copy}>{copied ? "Copied" : "Copy Locus ID"}</ActionButton>
         <p className="modal-note">Receiving is an Ownership operation; no destination chain or bridge is involved.</p>
       </>}
     </Modal>
@@ -422,9 +424,9 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
 
   return (
     <Modal open={open} title="Create asset" onClose={onClose} footer={<>
-      <button type="button" className="secondary" onClick={onClose}>Close</button>
-      {pendingSubmitted && <button type="button" className="secondary" disabled={stage === "FINALIZING"} onClick={() => void resumePending(pending!)}>{stage === "FINALIZING" ? "Checking…" : "Resume finalization"}</button>}
-      {!pending && <button type="button" className="primary modal-primary" disabled={!locus || (!signatureReady && !canRetryPreparation) || stageBusy} onClick={signatureReady ? signAndCreate : () => setPrepareRetry((value) => value + 1)}>{stage === "PREPARING" ? "Preparing…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : "Retry preparation"}</button>}
+      <ActionButton variant="secondary" icon={X} onClick={onClose}>Close</ActionButton>
+      {pendingSubmitted && <ActionButton variant="secondary" icon={RefreshCw} loading={stage === "FINALIZING"} disabled={stage === "FINALIZING"} onClick={() => void resumePending(pending!)}>Resume finalization</ActionButton>}
+      {!pending && <ActionButton variant="primary" icon={stage === "PREPARING" || stage === "SUBMITTING" || stage === "FINALIZING" ? RefreshCw : CirclePlus} loading={stage === "PREPARING" || stage === "SUBMITTING" || stage === "FINALIZING"} disabled={!locus || (!signatureReady && !canRetryPreparation) || stageBusy} onClick={signatureReady ? signAndCreate : () => setPrepareRetry((value) => value + 1)}>{stage === "PREPARING" ? "Preparing…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : "Retry preparation"}</ActionButton>}
     </>}>
       <p className="modal-lead">The connected Ownership becomes the issuer.</p>
       {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><small>Owner / Issuer</small><strong>{session.label}</strong><code>{formatLocusId(session.owner)}</code>{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; subject is the master Ownership</small>}</span></div>}
@@ -441,8 +443,8 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
       </section>
       {pending?.state === "submission-unknown" && <div className="create-asset-recovery">
         <p>This signed action has no known transaction ID. Locus will not create another signature or automatically submit this payload again.</p>
-        <button type="button" className="secondary" disabled={!locus} onClick={() => void checkUnknownSubmission(pending)}>Check asset state</button>
-        <button type="button" className="text-button" onClick={() => dismissUnknownSubmission(pending)}>Dismiss unresolved record</button>
+        <ActionButton variant="secondary" icon={SearchCheck} disabled={!locus} onClick={() => void checkUnknownSubmission(pending)}>Check asset state</ActionButton>
+        <ActionButton variant="tertiary" icon={X} onClick={() => dismissUnknownSubmission(pending)}>Dismiss unresolved record</ActionButton>
       </div>}
       {error && <div className="transaction-error">{error}</div>}
     </Modal>

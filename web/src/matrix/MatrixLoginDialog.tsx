@@ -5,6 +5,8 @@ import { connectMatrixSession, type MatrixConnected, type MatrixConnectionState 
 import { discoverHomeserver } from "./MatrixConnector.js";
 import { beginMatrixOAuth, beginMatrixSso, discoverMatrixAuthCapabilities, type MatrixAuthCapabilities } from "./MatrixOAuth.js";
 import type { LocusClient } from "@archelabs/locus";
+import { Check, ChevronDown, ClipboardCopy, LogIn, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { ActionButton } from "../components/ActionButton.js";
 
 function verificationTitle(state: MatrixConnectionState): string {
   switch (state) {
@@ -185,13 +187,13 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   const legacyCapabilities = authCapabilities?.mode === "legacy" ? authCapabilities : null;
   return (
     <Modal open={open} title="Connect Matrix" onClose={cancel} footer={<>
-      <button type="button" className="secondary" onClick={cancel}>Cancel</button>
-      {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>{working ? "Retrying…" : "Retry authorization"}</button>}
-      {(connectionState === "CONTROLLER_BOOTSTRAP_QUEUED" || connectionState === "CONTROLLER_BOOTSTRAP_FINALIZING" || connectionState === "CONTROLLER_BOOTSTRAP_UNKNOWN") && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>{working ? "Checking…" : "Check authorization status"}</button>}
-      {showingVerification && verification?.phase === "requested" && !verification.startedByLocus && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>{working ? "Starting…" : "Accept verification"}</button>}
+      <ActionButton variant="secondary" icon={X} onClick={cancel}>Cancel</ActionButton>
+      {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <ActionButton variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>Retry authorization</ActionButton>}
+      {(connectionState === "CONTROLLER_BOOTSTRAP_QUEUED" || connectionState === "CONTROLLER_BOOTSTRAP_FINALIZING" || connectionState === "CONTROLLER_BOOTSTRAP_UNKNOWN") && <ActionButton variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>Check authorization status</ActionButton>}
+      {showingVerification && verification?.phase === "requested" && !verification.startedByLocus && <ActionButton variant="primary" icon={ShieldCheck} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>Accept verification</ActionButton>}
       {canCompare && <>
-        <button type="button" className="secondary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>They don’t match</button>
-        <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>They match</button>
+        <ActionButton variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>They don’t match</ActionButton>
+        <ActionButton variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>They match</ActionButton>
       </>}
     </>}>
       <p className="modal-lead">Sign in to Matrix with this homeserver’s supported login method. Then verify Locus as a trusted second Matrix device in Element. A verified device signs through its device key; your cross-signing master key remains the Locus Ownership.</p>
@@ -205,12 +207,12 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
               <li>Accept the incoming verification request for the new <strong>Locus</strong> device. If it is not visible, open Sessions or Security, find the Locus session, and choose Verify.</li>
               <li>Accept SAS verification in Element, then return here and compare the emoji.</li>
             </ol>
-            {(connectionState === "VERIFICATION_REQUIRED" || (connectionState === "VERIFICATION_REQUESTED" && verification?.startedByLocus)) && <button type="button" className="secondary full" disabled={working} onClick={() => void performVerification(() => pendingConnection!.requestOwnUserVerification())}>{working ? "Requesting verification…" : verification?.startedByLocus ? "Retry request delivery" : "Request verification again"}</button>}
+            {(connectionState === "VERIFICATION_REQUIRED" || (connectionState === "VERIFICATION_REQUESTED" && verification?.startedByLocus)) && <ActionButton variant="secondary" icon={RefreshCw} fullWidth loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.requestOwnUserVerification())}>{verification?.startedByLocus ? "Retry request delivery" : "Request verification again"}</ActionButton>}
             <details className="matrix-device-id matrix-device-id--troubleshooting">
               <summary>Troubleshooting: device ID</summary>
               <span>Your Locus Matrix device ID</span>
               <code>{pendingConnection!.stored.deviceId}</code>
-              <button type="button" className="secondary" onClick={() => void copyDeviceId()}>{deviceIdCopied ? "Copied" : "Copy device ID"}</button>
+              <ActionButton size="small" variant="secondary" icon={ClipboardCopy} onClick={() => void copyDeviceId()}>{deviceIdCopied ? "Copied" : "Copy device ID"}</ActionButton>
             </details>
           </>}
           {connectionState === "VERIFICATION_REQUESTED" && !verification?.startedByLocus && (verification?.phase === "sas-waiting"
@@ -232,27 +234,27 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           {verification?.phase === "sas-waiting" && !verification.startedByLocus && <p>Waiting for Element to accept SAS verification…</p>}
           {verification?.phase === "confirming" && <p>Waiting for Element to confirm and publish the cross-signing proof…</p>}
           {verification?.phase === "cancelled" && <p>The verification was cancelled. You can send a fresh request when ready.</p>}
-          {verification && verification.phase !== "done" && <button type="button" className="text-button" disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>Cancel verification</button>}
+          {verification && verification.phase !== "done" && <ActionButton size="small" variant="tertiary" icon={X} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>Cancel verification</ActionButton>}
         </section>
       </div> : <>
         <label className="matrix-id-field">Matrix ID<input autoComplete="username" disabled={working} value={userId} placeholder="@alice:example.org" onChange={(event) => { setUserId(event.target.value); setAuthCapabilities(null); setError(""); setShowPassword(false); }} /></label>
-        <button type="button" className="primary matrix-auth-button" disabled={working || !userId.trim()} onClick={() => void continueWithMatrix()}>{working ? "Checking Matrix sign-in…" : authCapabilities?.mode === "legacy" ? "Refresh sign-in options" : "Continue with Matrix"}</button>
+        <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working || !userId.trim()} onClick={() => void continueWithMatrix()}>{authCapabilities?.mode === "legacy" ? "Refresh sign-in options" : "Continue with Matrix"}</ActionButton>
         <p className="auth-caption">Locus checks Matrix authentication metadata first. OAuth uses authorization code with PKCE S256; legacy methods appear only when the homeserver advertises them.</p>
         {authCapabilities?.mode === "oauth" && <p className="auth-capability-note">This homeserver advertises OAuth. SSO and password fallback are not enabled for this login.</p>}
         {legacyCapabilities && (legacyCapabilities.sso || legacyCapabilities.password) && <div className="legacy-auth-options">
           <strong>Supported sign-in options</strong>
           <p>Matrix OAuth metadata is unavailable. Choose a legacy method advertised by this homeserver.</p>
-          {legacyCapabilities.sso && <button type="button" className="secondary full" disabled={working || !userId.trim()} onClick={() => void startSso()}>Continue with Matrix SSO</button>}
+          {legacyCapabilities.sso && <ActionButton variant="secondary" icon={LogIn} fullWidth disabled={working || !userId.trim()} onClick={() => void startSso()}>Continue with Matrix SSO</ActionButton>}
           {legacyCapabilities.password && <>
-            <button type="button" className="text-button legacy-password-toggle" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Hide password sign-in" : "Use password instead"}</button>
+            <ActionButton size="small" variant="tertiary" icon={ChevronDown} className="legacy-password-toggle" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Hide password sign-in" : "Use password instead"}</ActionButton>
             {showPassword && <div className="password-fallback">
             <label>Password<input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-            <button type="button" className="secondary full" disabled={working || !password} onClick={passwordLogin}>{working ? "Signing in…" : "Sign in with password"}</button>
+            <ActionButton variant="secondary" icon={LogIn} fullWidth loading={working} disabled={working || !password} onClick={passwordLogin}>Sign in with password</ActionButton>
             </div>}
           </>}
         </div>}
         {legacyCapabilities && !legacyCapabilities.sso && !legacyCapabilities.password && <div className="matrix-unsupported-note" role="status">This homeserver does not advertise Matrix SSO or password login. Ask its administrator which sign-in methods are supported.</div>}
-        <button type="button" className="text-button advanced-toggle" onClick={() => { setAdvanced((value) => !value); setAuthCapabilities(null); }}>{advanced ? "Hide homeserver settings" : "Use a custom homeserver"}</button>
+        <ActionButton size="small" variant="tertiary" icon={ChevronDown} className="advanced-toggle" onClick={() => { setAdvanced((value) => !value); setAuthCapabilities(null); }}>{advanced ? "Hide homeserver settings" : "Use a custom homeserver"}</ActionButton>
         {advanced && <label className="matrix-id-field">Homeserver URL<input disabled={working} value={homeserver} placeholder="https://matrix.example.org" onChange={(event) => { setHomeserver(event.target.value); setAuthCapabilities(null); setError(""); setShowPassword(false); }} /></label>}
       </>}
       {error && <div className="transaction-error" role="alert">{error}</div>}

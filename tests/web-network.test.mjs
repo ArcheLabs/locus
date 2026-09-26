@@ -10,6 +10,10 @@ import { describeMatrixCause, matrixControllerReceiptFailure, matrixCryptoStageF
 import { createHash } from "node:crypto";
 import { resolveLocusMode, buildLocusMode } from "../web/src/network/mode.ts";
 import { parseThemePreference, resolveTheme, THEME_STORAGE_KEY } from "../web/src/theme/theme.ts";
+import { EvmSessionBridge } from "../web/src/session/EvmSessionBridge.ts";
+import { clearPersistedWalletSession, persistWalletSession, WALLET_SESSION_KEY } from "../web/src/session/sessionPersistence.ts";
+import { assetBalanceQueryKey, assetIdsQueryKey, assetMetadataQueryKey } from "../web/src/locus/assetQueries.ts";
+import { attachAssetBalances, keepAssetRowsForScope } from "../web/src/locus/assetCache.ts";
 
 function matrixB64(bytes) {
   return Buffer.from(bytes).toString("base64url");
@@ -61,11 +65,221 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
 test("network deployment does not silently configure Testnet as Local", async () => {
   const config = JSON.parse(await fs.readFile(new URL("../web/public/locus-networks.json", import.meta.url), "utf8"));
   assert.equal(config.defaultNetwork, "local");
-  assert.equal(config.networks.local.label, "MiniJAM Local / Development");
+  assert.equal(config.networks.local.label, "DevNet");
   assert.equal(config.networks.local.backendUrl, "/rpc");
   assert.equal(config.networks.local.deploymentUrl, "/deployments/local.json");
   assert.equal(config.networks.testnet.backendUrl, null);
   assert.equal(config.networks.testnet.deploymentUrl, null);
+  assert.equal(config.networks.testnet.label, "TestNet");
+});
+
+function fakeEvmProvider(initialAccounts = []) {
+  const listeners = new Map();
+  return {
+    accounts: initialAccounts,
+    async request({ method }) {
+      assert.equal(method, "eth_accounts");
+      return this.accounts;
+    },
+    on(event, listener) {
+      const set = listeners.get(event) ?? new Set();
+      set.add(listener);
+      listeners.set(event, set);
+    },
+    removeListener(event, listener) { listeners.get(event)?.delete(listener); },
+    emit(event, value) { for (const listener of listeners.get(event) ?? []) listener(value); },
+  };
+}
+
+function fakeSessionHarness() {
+  const entries = new Map();
+  const storage = {
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => entries.set(key, String(value)),
+    removeItem: (key) => entries.delete(key),
+  };
+  let session = null;
+  const commits = [];
+  const clears = [];
+  const makeSession = async (provider, address) => ({
+    kind: "evm",
+    provider,
+    owner: evmOwnership(address),
+    controller: evmOwnership(address),
+    ownershipSession: {},
+    label: `EVM ${address}`,
+    address,
+    connectionId: address,
+  });
+  const bridge = new EvmSessionBridge({
+    getSession: () => session,
+    commitSession: (next) => {
+      persistWalletSession(storage, next);
+      session = next;
+      commits.push(next);
+    },
+    clearSession: () => {
+      clearPersistedWalletSession(storage);
+      session = null;
+      clears.push(true);
+    },
+    createSession: makeSession,
+  });
+  return { bridge, storage, commits, clears, get session() { return session; } };
+}
+
+const flushSessionBridge = async () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test("EVM_CONNECT_RETURN_WITHOUT_REFRESH: bridge reconciles after mobile wallet return", async () => {
+  const harness = fakeSessionHarness();
+  const win = new EventTarget();
+  const doc = new EventTarget();
+  doc.visibilityState = "hidden";
+  harness.bridge.start(win, doc);
+  harness.bridge.beginConnection();
+  win.dispatchEvent(new Event("blur"));
+  doc.visibilityState = "visible";
+  doc.dispatchEvent(new Event("visibilitychange"));
+  const provider = fakeEvmProvider(["0x1111111111111111111111111111111111111111"]);
+  harness.bridge.updateAppKit(provider, provider.accounts[0]);
+  await flushSessionBridge();
+  assert.equal(harness.session?.address, provider.accounts[0]);
+  assert.equal(harness.commits.length, 1);
+  assert.equal(JSON.parse(harness.storage.getItem(WALLET_SESSION_KEY)).address, provider.accounts[0]);
+});
+
+test("EVM provider/address hook orderings reconcile without waiting for a lucky render", async () => {
+  for (const addressFirst of [false, true]) {
+    const harness = fakeSessionHarness();
+    const chosenAddress = "0x2222222222222222222222222222222222222222";
+    const provider = fakeEvmProvider(addressFirst
+      ? [chosenAddress]
+      : ["0x8888888888888888888888888888888888888888", chosenAddress]);
+    harness.bridge.beginConnection();
+    if (addressFirst) {
+      harness.bridge.updateAppKit(undefined, chosenAddress);
+      harness.bridge.updateAppKit(provider, chosenAddress);
+    } else {
+      harness.bridge.updateAppKit(provider, undefined);
+      await flushSessionBridge();
+      assert.equal(harness.session, null, "multiple accounts require the AppKit-selected account hint");
+      harness.bridge.updateAppKit(provider, chosenAddress);
+    }
+    await flushSessionBridge();
+    assert.equal(harness.session?.address, chosenAddress);
+  }
+});
+
+test("EVM_TRANSIENT_DISCONNECT_SAFE: disconnect during wallet handoff preserves session", async () => {
+  const harness = fakeSessionHarness();
+  const provider = fakeEvmProvider(["0x3333333333333333333333333333333333333333"]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, provider.accounts[0]);
+  await flushSessionBridge();
+  harness.bridge.updateAppKit(undefined, undefined);
+  const disconnectedProvider = fakeEvmProvider([]);
+  harness.bridge.updateAppKit(disconnectedProvider, undefined);
+  await flushSessionBridge();
+  assert.equal(harness.session?.address, provider.accounts[0]);
+  assert.equal(harness.clears.length, 0);
+  assert.ok(harness.storage.getItem(WALLET_SESSION_KEY));
+});
+
+test("EVM provider replacement rebuilds the signer against the resumed wallet provider", async () => {
+  const harness = fakeSessionHarness();
+  const address = "0x9999999999999999999999999999999999999999";
+  const firstProvider = fakeEvmProvider([address]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(firstProvider, address);
+  await flushSessionBridge();
+  const resumedProvider = fakeEvmProvider([address]);
+  harness.bridge.updateAppKit(resumedProvider, address);
+  await flushSessionBridge();
+  assert.equal(harness.session?.address, address);
+  assert.equal(harness.session?.provider, resumedProvider);
+  assert.equal(harness.commits.length, 2);
+});
+
+test("EVM_EXPLICIT_DISCONNECT: explicit disconnect clears memory and persistence", async () => {
+  const harness = fakeSessionHarness();
+  const provider = fakeEvmProvider(["0x4444444444444444444444444444444444444444"]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, provider.accounts[0]);
+  await flushSessionBridge();
+  harness.bridge.explicitDisconnect();
+  assert.equal(harness.session, null);
+  assert.equal(harness.storage.getItem(WALLET_SESSION_KEY), null);
+});
+
+test("EVM_ACCOUNT_CHANGED: confirmed account change invalidates the old signer", async () => {
+  const harness = fakeSessionHarness();
+  const oldAddress = "0x5555555555555555555555555555555555555555";
+  const newAddress = "0x6666666666666666666666666666666666666666";
+  const provider = fakeEvmProvider([oldAddress]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, oldAddress);
+  await flushSessionBridge();
+  provider.accounts = [newAddress];
+  provider.emit("accountsChanged", provider.accounts);
+  assert.equal(harness.session, null);
+  assert.equal(harness.storage.getItem(WALLET_SESSION_KEY), null);
+});
+
+test("EVM_REFRESH_RESTORE: refresh restores the exact session already persisted at commit", async () => {
+  const first = fakeSessionHarness();
+  const address = "0x7777777777777777777777777777777777777777";
+  const provider = fakeEvmProvider([address]);
+  first.bridge.beginConnection();
+  first.bridge.updateAppKit(provider, address);
+  await flushSessionBridge();
+  const stored = JSON.parse(first.storage.getItem(WALLET_SESSION_KEY));
+  const restored = fakeSessionHarness();
+  restored.bridge.beginRestore(stored.address);
+  restored.bridge.updateAppKit(fakeEvmProvider([address]), address);
+  await flushSessionBridge();
+  assert.equal(restored.session?.address, address);
+  assert.equal(restored.session?.connectionId, stored.connectionId);
+  assert.equal(restored.storage.getItem(WALLET_SESSION_KEY), first.storage.getItem(WALLET_SESSION_KEY));
+});
+
+test("asset queries separate network/service metadata from per-Ownership balances", () => {
+  const ownerA = formatLocusId(evmOwnership("0x0000000000000000000000000000000000000001"));
+  const ownerB = formatLocusId(evmOwnership("0x0000000000000000000000000000000000000002"));
+  const meta = assetMetadataQueryKey("local", 797069104, "0xAA");
+  assert.deepEqual(meta, ["locus", "assets", "metadata", "local", 797069104, "0xaa"]);
+  assert.deepEqual(assetIdsQueryKey("local", 797069104), assetIdsQueryKey("local", 797069104));
+  assert.notDeepEqual(assetIdsQueryKey("local", 797069104), assetIdsQueryKey("testnet", 797069104));
+  assert.notDeepEqual(assetMetadataQueryKey("local", 797069104, "0x01"), assetMetadataQueryKey("local", 797069105, "0x01"));
+  assert.notDeepEqual(assetBalanceQueryKey("local", 797069104, ownerA, "0x01"), assetBalanceQueryKey("local", 797069104, ownerB, "0x01"));
+  assert.notDeepEqual(assetBalanceQueryKey("local", 797069104, ownerA, "0x01"), meta);
+});
+
+test("ASSET_INITIAL_LOAD and ASSET_BACKGROUND_REFETCH_KEEPS_ROWS retain cached metadata", () => {
+  const initial = keepAssetRowsForScope({ scope: "", rows: [] }, "local:797069104", [{ assetIdHex: "0x01", name: "DOT" }]);
+  assert.equal(initial.rows.length, 1);
+  const refetch = keepAssetRowsForScope(initial, "local:797069104", []);
+  assert.deepEqual(refetch.rows, initial.rows);
+  const updated = keepAssetRowsForScope(refetch, "local:797069104", [{ assetIdHex: "0x01", name: "Polkadot" }]);
+  assert.equal(updated.rows[0].name, "Polkadot");
+});
+
+test("ASSET_SINGLE_BALANCE_FAILURE_KEEPS_ASSETS and ASSET_SESSION_CHANGE_KEEPS_METADATA", () => {
+  const metadata = [{ assetIdHex: "0x01", name: "DOT" }, { assetIdHex: "0x02", name: "MINI" }];
+  const balances = new Map([["0x02", 4n]]); // one query can fail without deleting catalog rows
+  const rows = attachAssetBalances(metadata, balances, true);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].balance, null);
+  assert.equal(rows[1].balance, 4n);
+  const sessionSwitch = keepAssetRowsForScope({ scope: "local:797069104", rows: metadata }, "local:797069104", []);
+  assert.deepEqual(sessionSwitch.rows, metadata);
+});
+
+test("ASSET_TRANSIENT_NETWORK_RECONNECT_KEEPS_STALE_DATA but ASSET_NETWORK_SWITCH_INVALIDATES_SCOPE", () => {
+  const cached = { scope: "local:797069104", rows: [{ assetIdHex: "0x01", name: "DOT" }] };
+  const reconnect = keepAssetRowsForScope(cached, "local:797069104", []);
+  assert.deepEqual(reconnect.rows, cached.rows);
+  const switched = keepAssetRowsForScope(cached, "testnet:797069104", []);
+  assert.deepEqual(switched.rows, []);
 });
 
 test("network recipient resolution uses canonical ownership decoders", () => {

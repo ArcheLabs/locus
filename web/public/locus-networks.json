@@ -3,12 +3,12 @@
   "defaultNetwork": "local",
   "networks": {
     "local": {
-      "label": "MiniJAM Local / Development",
+      "label": "DevNet",
       "backendUrl": "/rpc",
       "deploymentUrl": "/deployments/local.json"
     },
     "testnet": {
-      "label": "Testnet",
+      "label": "TestNet",
       "backendUrl": null,
       "deploymentUrl": null
     }

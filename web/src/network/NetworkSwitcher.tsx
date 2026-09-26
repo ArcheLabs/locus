@@ -32,7 +32,7 @@ export function NetworkSwitcher({ compact = false }: { compact?: boolean }) {
                 onSelect={() => switchNetwork(id)}
               >
                 <DropdownMenu.ItemIndicator className="network-option-check"><Check size={15} aria-hidden="true" /></DropdownMenu.ItemIndicator>
-                <span><strong>{entry.label}</strong><small>{id === "local" ? "Local development" : "MiniJAM Testnet"}</small></span>
+                <span><strong>{entry.label}</strong></span>
               </DropdownMenu.RadioItem>
             );
           })}
@@ -51,7 +51,7 @@ export function NetworkSwitcher({ compact = false }: { compact?: boolean }) {
               <span className={`status-dot network-compact-status ${status}`} aria-hidden="true" />
             </> : <>
               <span className={`status-dot ${status}`} aria-hidden="true" />
-              <span><strong>{selected.label}</strong><small>{statusLabel(status)}</small></span>
+              <span><strong>{selected.label}</strong></span>
               <span className="network-chevron"><ChevronDown size={16} aria-hidden="true" /></span>
             </>}
           </button>

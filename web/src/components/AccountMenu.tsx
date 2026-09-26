@@ -1,20 +1,21 @@
 import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
-import { ChevronDown, Copy, LogOut, Unplug, UserRound } from "lucide-react";
+import { ChevronDown, Copy, LogOut, RefreshCw, Trash2, Unplug, UserRound } from "lucide-react";
 import { formatLocusId } from "@archelabs/locus";
 import type { LocusWebSession } from "../session/types.js";
 import { IdentityIcon } from "./IdentityIcon.js";
 import type { SessionLifecycle } from "../session/SessionProvider.js";
 import { useState } from "react";
+import { ActionButton } from "./ActionButton.js";
 
 export function AccountMenu({ session, lifecycle, restoreError, onConnect, onDisconnect, onSignOutMatrix, onClearSavedSession }: { session: LocusWebSession | null; lifecycle: SessionLifecycle; restoreError?: string; onConnect: () => void; onDisconnect: () => void; onSignOutMatrix: () => void; onClearSavedSession: () => void }) {
   const [copied, setCopied] = useState(false);
   if (!session) return <div className="disconnected-session">
-    <button type="button" className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring"}><span className="identity-icon-slot"><UserRound className="identity-icon account-placeholder-icon" size={24} aria-hidden="true" /></span><span>{lifecycle === "restoring" ? "Restoring…" : "Connect"}</span></button>
+    <ActionButton variant="secondary" icon={UserRound} className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring"}>{lifecycle === "restoring" ? "Restoring…" : "Connect"}</ActionButton>
     {restoreError && <section className="session-restore-alert" role="alert">
       <strong>Not connected</strong>
       <p>{restoreError}</p>
-      <button type="button" className="secondary" onClick={onConnect}>Try another sign-in</button>
-      <button type="button" className="text-button" onClick={onClearSavedSession}>Clear saved session</button>
+      <ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={onConnect}>Try another sign-in</ActionButton>
+      <ActionButton size="small" variant="tertiary" icon={Trash2} onClick={onClearSavedSession}>Clear saved session</ActionButton>
     </section>}
   </div>;
   const locusId = formatLocusId(session.owner);

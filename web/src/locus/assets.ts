@@ -24,6 +24,8 @@ export type AssetView = {
   presentation: AssetPresentation;
 };
 
+export type AssetMetadata = Omit<AssetView, "balance">;
+
 export type CuratedCatalogEntry = {
   key: string;
   assetId: string;
@@ -110,6 +112,57 @@ function catalogMatchesDeployment(catalog: CuratedCatalog | null, networkId: str
     && catalog.serviceId === deployment.serviceId;
 }
 
+export async function loadAssetIds(locus: LocusClient): Promise<AssetId[]> {
+  return locus.listAssets();
+}
+
+export async function loadAssetMetadataForId(
+  locus: LocusClient,
+  assetId: AssetId,
+  catalog: CuratedCatalog | null = null,
+  networkId = "local",
+  deployment?: DeploymentDescriptor | null,
+): Promise<AssetMetadata> {
+  const catalogEnabled = !!deployment && catalogMatchesDeployment(catalog, networkId, deployment);
+  const curatedById = new Map((catalogEnabled ? catalog.assets : []).map((entry) => [entry.assetId.toLowerCase(), entry]));
+  const asset = await locus.getAsset(assetId);
+  if (!asset) throw new Error(`asset ${toHex(assetId)} disappeared while loading`);
+  const assetIdHex = toHex(assetId).toLowerCase();
+  const name = decodeAssetName(asset.name);
+  const symbol = decodeAssetSymbol(asset.symbol);
+  const issuerKey = toHex(ownershipKey(asset.issuer)).toLowerCase();
+  const candidate = curatedById.get(assetIdHex);
+  const curated = candidate
+    && candidate.name === name
+    && candidate.symbol === symbol
+    && candidate.decimals === asset.decimals
+    && candidate.issuerKey.toLowerCase() === issuerKey
+    ? candidate
+    : null;
+  const presentation: AssetPresentation = curated ? {
+    class: curated.class,
+    curated: true,
+    iconKey: curated.icon,
+    badge: curated.class === "crypto" ? "Test asset" : "Demo equity",
+    ...(curated.unit ? { unit: curated.unit } : {}),
+    disclosure: curated.disclosure,
+  } : CUSTOM_PRESENTATION;
+  return {
+    assetId,
+    assetIdHex,
+    issuer: asset.issuer,
+    name,
+    symbol,
+    decimals: asset.decimals,
+    totalSupply: asset.totalSupply,
+    presentation,
+  };
+}
+
+export async function loadAssetBalance(locus: LocusClient, assetId: AssetId, owner: Ownership): Promise<bigint> {
+  return locus.balanceOf(assetId, owner);
+}
+
 export async function loadAssets(
   locus: LocusClient,
   owner: Ownership | null,
@@ -117,43 +170,14 @@ export async function loadAssets(
   networkId = "local",
   deployment?: DeploymentDescriptor | null,
 ): Promise<AssetView[]> {
-  const ids = await locus.listAssets();
-  const catalogEnabled = !!deployment && catalogMatchesDeployment(catalog, networkId, deployment);
-  const curatedById = new Map((catalogEnabled ? catalog.assets : []).map((entry) => [entry.assetId.toLowerCase(), entry]));
+  const ids = await loadAssetIds(locus);
   return Promise.all(ids.map(async (assetId) => {
-    const asset = await locus.getAsset(assetId);
-    if (!asset) throw new Error(`asset ${toHex(assetId)} disappeared while loading`);
-    const assetIdHex = toHex(assetId).toLowerCase();
-    const name = decodeAssetName(asset.name);
-    const symbol = decodeAssetSymbol(asset.symbol);
-    const issuerKey = toHex(ownershipKey(asset.issuer)).toLowerCase();
-    const candidate = curatedById.get(assetIdHex);
-    const curated = candidate
-      && candidate.name === name
-      && candidate.symbol === symbol
-      && candidate.decimals === asset.decimals
-      && candidate.issuerKey.toLowerCase() === issuerKey
-      ? candidate
-      : null;
-    const presentation: AssetPresentation = curated ? {
-      class: curated.class,
-      curated: true,
-      iconKey: curated.icon,
-      badge: curated.class === "crypto" ? "Test asset" : "Demo equity",
-      ...(curated.unit ? { unit: curated.unit } : {}),
-      disclosure: curated.disclosure,
-    } : CUSTOM_PRESENTATION;
-    return {
-      assetId,
-      assetIdHex,
-      issuer: asset.issuer,
-      name,
-      symbol,
-      decimals: asset.decimals,
-      totalSupply: asset.totalSupply,
-      balance: owner ? await locus.balanceOf(assetId, owner) : null,
-      presentation,
-    };
+    const metadata = await loadAssetMetadataForId(locus, assetId, catalog, networkId, deployment);
+    let balance: bigint | null = null;
+    if (owner) {
+      try { balance = await loadAssetBalance(locus, assetId, owner); } catch { balance = null; }
+    }
+    return { ...metadata, balance };
   }));
 }
 
