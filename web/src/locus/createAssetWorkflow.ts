@@ -1,4 +1,5 @@
 export type CreateAssetStage =
+  | "EDITING"
   | "PREPARING"
   | "AWAITING_WALLET"
   | "SIGNED"
@@ -40,6 +41,13 @@ export class WalletSignatureTimeoutError extends Error {
   constructor(timeoutMs: number) {
     super(`The wallet did not return a signature within ${Math.ceil(timeoutMs / 1000)} seconds after returning to Locus.`);
     this.name = "WalletSignatureTimeoutError";
+  }
+}
+
+export class PreparationTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`Create action preparation did not finish within ${Math.ceil(timeoutMs / 1000)} seconds. It was not signed or submitted.`);
+    this.name = "PreparationTimeoutError";
   }
 }
 
@@ -131,6 +139,32 @@ export function withOperationTimeout<T>(
       (value) => { clearTimeout(timer); resolve(value); },
       (error) => { clearTimeout(timer); reject(error); },
     );
+  });
+}
+
+/**
+ * Bound the preparation UI while reclaiming a prepared action that arrives
+ * after the user has already been told the read timed out.
+ */
+export function withPreparationTimeout<T>(
+  preparation: Promise<T>,
+  timeoutMs: number,
+  abandonLateResult?: (value: T) => void,
+): Promise<T> {
+  let timedOut = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  void preparation.then((value) => {
+    if (!timedOut) return;
+    try { abandonLateResult?.(value); } catch { /* Best-effort release of an unsigned action. */ }
+  }, () => {});
+  const timeout = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      reject(new PreparationTimeoutError(timeoutMs));
+    }, timeoutMs);
+  });
+  return Promise.race([preparation, timeout]).finally(() => {
+    if (timer !== undefined) clearTimeout(timer);
   });
 }
 

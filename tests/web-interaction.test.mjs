@@ -11,11 +11,13 @@ import {
   CREATE_ASSET_PENDING_STORAGE_KEY,
   DuplicateCreateAssetSubmissionError,
   OperationTimeoutError,
+  PreparationTimeoutError,
   WalletSignatureTimeoutError,
   readCreateAssetPendings,
   resumeCreateAssetFinalization,
   submitCreateAssetOnce,
   waitForWalletSignature,
+  withPreparationTimeout,
   withOperationTimeout,
 } from "../web/src/locus/createAssetWorkflow.ts";
 
@@ -207,12 +209,28 @@ test("a saved transaction ID survives reload and finalization resumes the same t
 
 test("create-asset UI prepares before the signature gesture and exposes every action stage", () => {
   const source = readFileSync(new URL("../web/src/locus/dialogs.tsx", import.meta.url), "utf8");
-  for (const state of ["PREPARING", "AWAITING_WALLET", "SIGNED", "SUBMITTING", "SUBMITTED", "FINALIZING", "APPLIED", "FAILED"]) {
+  for (const state of ["EDITING", "PREPARING", "AWAITING_WALLET", "SIGNED", "SUBMITTING", "SUBMITTED", "FINALIZING", "APPLIED", "FAILED"]) {
     assert.ok(source.includes(`case "${state}"`), `missing ${state} stage`);
   }
+  assert.match(source, /CREATE_ASSET_PREPARATION_TIMEOUT_MS = 45_000/);
+  assert.match(source, /Complete asset details/);
+  assert.match(source, /Preparation timed out\. No signature was requested and no transaction was submitted/);
   assert.match(source, /locus\.signPreparedOwnershipAction\(preparedAction\)/);
   assert.match(source, /locus\.abandonPreparedOwnershipAction\(preparedAction\)/);
   assert.match(source, /resumeCreateAssetFinalization/);
   assert.match(source, /submitCreateAssetOnce/);
   assert.doesNotMatch(source, /onClick=\{signAndCreate\}.*Retry preparation/);
+});
+
+test("create-asset preparation timeout is bounded and abandons a late unsigned action", async () => {
+  const stalledPreparation = deferred();
+  const abandoned = [];
+  await assert.rejects(
+    withPreparationTimeout(stalledPreparation.promise, 15, (prepared) => abandoned.push(prepared)),
+    PreparationTimeoutError,
+  );
+  const latePreparedAction = { actionName: "createAsset" };
+  stalledPreparation.resolve(latePreparedAction);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.deepEqual(abandoned, [latePreparedAction]);
 });

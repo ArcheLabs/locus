@@ -11,11 +11,13 @@ import { AssetIcon } from "../components/AssetIcon.js";
 import {
   createAssetPendingKey,
   OperationTimeoutError,
+  PreparationTimeoutError,
   readCreateAssetPendings,
   removeCreateAssetPending,
   resumeCreateAssetFinalization,
   submitCreateAssetOnce,
   waitForWalletSignature,
+  withPreparationTimeout,
   withOperationTimeout,
   writeCreateAssetPending,
   type CreateAssetPendingRecord,
@@ -85,6 +87,7 @@ export function ReceiveDialog({ open, asset, session, onClose }: { open: boolean
 }
 
 const WALLET_SIGNATURE_TIMEOUT_MS = 120_000;
+const CREATE_ASSET_PREPARATION_TIMEOUT_MS = 45_000;
 const SUBMISSION_TIMEOUT_MS = 30_000;
 const CREATE_ASSET_FINALIZATION_TIMEOUT_MS = 180_000;
 
@@ -94,6 +97,7 @@ function bytesToHex(bytes: Uint8Array): string {
 
 function stageLabel(stage: CreateAssetStage): string {
   switch (stage) {
+    case "EDITING": return "Enter asset details";
     case "PREPARING": return "Preparing action";
     case "AWAITING_WALLET": return "Approve in wallet";
     case "SIGNED": return "Signature received";
@@ -134,7 +138,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
   const prepareGeneration = useRef(0);
   const activeResumeKeys = useRef(new Set<string>());
   const [prepareRetry, setPrepareRetry] = useState(0);
-  const [stage, setStage] = useState<CreateAssetStage>("PREPARING");
+  const [stage, setStage] = useState<CreateAssetStage>("EDITING");
   const [stageMessage, setStageMessage] = useState("Enter the asset details to prepare the network action.");
   const [error, setError] = useState("");
   const [pending, setPending] = useState<CreateAssetPendingRecord | null>(null);
@@ -227,11 +231,23 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
       if (!name.trim() && !symbol.trim() && !supply.trim()) return;
       appliedRef.current = false;
     }
-    if (!locus || !session || !pendingScope || pendingRef.current) return;
+    if (pendingRef.current) return;
+    if (!locus || !session || !pendingScope) {
+      setStage("EDITING");
+      setStageMessage(!session
+        ? "Connect an Ownership before preparing this asset action."
+        : !pendingScope
+          ? "Wait for the active network and Service to finish loading."
+          : !locus
+          ? "Waiting for the selected MiniJAM network to become ready."
+          : "Waiting for network access.");
+      setError("");
+      return;
+    }
 
     const decimalCount = Number(decimals);
     if (!name.trim() || !symbol.trim() || !Number.isInteger(decimalCount) || decimalCount < 0 || decimalCount > 38 || !supply.trim()) {
-      setStage("PREPARING");
+      setStage("EDITING");
       setStageMessage("Complete the asset name, symbol, decimals, and initial supply to prepare the action.");
       setError("");
       return;
@@ -249,7 +265,8 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
     setStageMessage("Checking the deployment, finalized state, and Ownership nonce before opening your wallet.");
     setError("");
     const timer = window.setTimeout(() => {
-      void locus.prepareCreateAsset(
+      let lastPhase: OwnershipPreparationPhase | null = null;
+      const preparation = locus.prepareCreateAsset(
         draftAssetId,
         name.trim(),
         symbol.trim(),
@@ -257,8 +274,14 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
         initialSupply,
         undefined,
         (phase) => {
+          lastPhase = phase;
           if (generation === prepareGeneration.current) setStageMessage(preparationPhaseMessage(phase));
         },
+      );
+      void withPreparationTimeout(
+        preparation,
+        CREATE_ASSET_PREPARATION_TIMEOUT_MS,
+        (lateAction) => locus.abandonPreparedOwnershipAction(lateAction),
       )
         .then((preparedAction) => {
           if (generation !== prepareGeneration.current) {
@@ -274,8 +297,14 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
           if (generation !== prepareGeneration.current) return;
           preparedRef.current = null;
           setStage("FAILED");
-          setStageMessage("The action was not signed or submitted. Retry preparation after checking the network connection.");
-          setError(cause instanceof Error ? cause.message : "Unable to prepare the create-asset action.");
+          if (cause instanceof PreparationTimeoutError) {
+            const phase = lastPhase ? preparationPhaseMessage(lastPhase) : "Preparing the Ownership controller.";
+            setStageMessage(`${phase} Preparation timed out. No signature was requested and no transaction was submitted. Refresh the page before retrying if this happens again.`);
+            setError(cause.message);
+          } else {
+            setStageMessage("The action was not signed or submitted. Retry preparation after checking the network connection.");
+            setError(cause instanceof Error ? cause.message : "Unable to prepare the create-asset action.");
+          }
         });
     }, 300);
     return () => {
@@ -426,7 +455,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
     <Modal open={open} title="Create asset" onClose={onClose} footer={<>
       <ActionButton variant="secondary" icon={X} onClick={onClose}>Close</ActionButton>
       {pendingSubmitted && <ActionButton variant="secondary" icon={RefreshCw} loading={stage === "FINALIZING"} disabled={stage === "FINALIZING"} onClick={() => void resumePending(pending!)}>Resume finalization</ActionButton>}
-      {!pending && <ActionButton variant="primary" icon={stage === "PREPARING" || stage === "SUBMITTING" || stage === "FINALIZING" ? RefreshCw : CirclePlus} loading={stage === "PREPARING" || stage === "SUBMITTING" || stage === "FINALIZING"} disabled={!locus || (!signatureReady && !canRetryPreparation) || stageBusy} onClick={signatureReady ? signAndCreate : () => setPrepareRetry((value) => value + 1)}>{stage === "PREPARING" ? "Preparing…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : "Retry preparation"}</ActionButton>}
+      {!pending && <ActionButton variant="primary" icon={stage === "PREPARING" || stage === "SUBMITTING" || stage === "FINALIZING" ? RefreshCw : CirclePlus} loading={stage === "PREPARING" || stage === "SUBMITTING" || stage === "FINALIZING"} disabled={!locus || (!signatureReady && !canRetryPreparation) || stageBusy} onClick={signatureReady ? signAndCreate : () => setPrepareRetry((value) => value + 1)}>{stage === "EDITING" ? !locus ? "Waiting for network…" : !session ? "Connect an Ownership" : "Complete asset details" : stage === "PREPARING" ? "Preparing…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : "Retry preparation"}</ActionButton>}
     </>}>
       <p className="modal-lead">The connected Ownership becomes the issuer.</p>
       {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><small>Owner / Issuer</small><strong>{session.label}</strong><code>{formatLocusId(session.owner)}</code>{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; subject is the master Ownership</small>}</span></div>}
