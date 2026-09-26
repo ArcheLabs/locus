@@ -226,9 +226,10 @@ button:disabled { cursor: not-allowed; }
 .asset-row-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asset-row-info small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asset-disclosure { margin: 16px 0 0; padding: 12px; border-radius: 10px; background: var(--surface-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.5; text-align: left; }
-.asset-class-tabs { display: flex; width: fit-content; }
-.assets-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-bottom: 16px; }
-.assets-toolbar .search { width: 100%; min-width: 0; margin: 0; }
+.asset-class-tabs { display: flex; width: fit-content; min-height: 50px; align-items: center; margin: 0; }
+.asset-class-tabs button { min-height: 40px; }
+.assets-toolbar { display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 12px; margin-bottom: 16px; }
+.assets-toolbar .search { width: 100%; min-width: 0; height: 50px; margin: 0; }
 .asset-filter-mobile { display: none; }
 .asset-row-info { min-width: 0; display: grid; gap: 3px; }
 .asset-row-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

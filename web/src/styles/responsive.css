@@ -186,6 +186,11 @@ textarea {
   .latest-assets { margin-top: 8px; }
   .asset-row { grid-template-columns: auto minmax(0, 1.4fr) minmax(72px, .5fr) minmax(120px, 1fr) auto; }
   .asset-row > span:nth-of-type(3) { display: block; }
+  .assets-toolbar { grid-template-columns: minmax(120px, .38fr) minmax(0, 1fr); gap: 8px; }
+  .asset-filter-tabs { display: none; }
+  .asset-filter-mobile { display: block; min-width: 0; }
+  .asset-filter-mobile select { width: 100%; height: 46px; padding: 0 11px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-size: 16px; }
+  .assets-toolbar .search { height: 46px; min-height: 46px; padding: 11px 13px; font-size: 16px; }
   .activity-row { grid-template-columns: minmax(110px, .8fr) minmax(70px, .6fr) minmax(130px, 1.5fr) minmax(110px, .9fr) minmax(100px, 1fr); }
 }
 
@@ -249,11 +254,11 @@ textarea {
   .connection-card p { overflow-wrap: anywhere; }
   .connection-card .secondary { justify-content: center; min-height: 44px; }
   .assets-layout { grid-template-columns: minmax(0, 1fr); gap: 22px; }
-  .assets-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-bottom: 14px; }
-  .assets-toolbar .search { min-height: 46px; padding: 11px 13px; font-size: 16px; }
+  .assets-toolbar { display: grid; grid-template-columns: minmax(110px, .38fr) minmax(0, 1fr); gap: 8px; margin-bottom: 14px; }
+  .assets-toolbar .search { height: 46px; min-height: 46px; padding: 11px 13px; font-size: 16px; }
   .asset-filter-tabs { display: none; }
   .asset-filter-mobile { display: block; min-width: 0; }
-  .asset-filter-mobile select { width: 100%; min-height: 46px; padding: 0 11px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-size: 16px; }
+  .asset-filter-mobile select { width: 100%; height: 46px; min-height: 46px; padding: 0 11px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); font-size: 16px; }
   .asset-list { overflow: visible; background: transparent; border: 0; box-shadow: none; display: grid; gap: 9px; }
   .asset-row {
     grid-template-columns: 42px minmax(0, 1fr) minmax(70px, auto);
