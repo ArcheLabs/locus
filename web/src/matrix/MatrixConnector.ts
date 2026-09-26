@@ -366,6 +366,7 @@ export type MatrixConnected = {
   verification: MatrixVerificationSnapshot | null;
   error: string;
   subscribe: (listener: () => void) => () => void;
+  requestOwnUserVerification: () => Promise<void>;
   startVerification: () => Promise<void>;
   confirmVerification: (matches: boolean) => Promise<void>;
   cancelVerification: () => Promise<void>;
@@ -532,6 +533,9 @@ async function makeConnected(
     verification: initialVerification,
     error: "",
     subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    requestOwnUserVerification: async () => {
+      await crypto.requestOwnUserVerification(authenticatedHttp(stored.homeserver, stored));
+    },
     startVerification: async () => {
       if (!connected.verification) throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "Waiting for an incoming verification request from Element.");
       await crypto.startVerification(connected.verification.flowId, authenticatedHttp(stored.homeserver, stored));
@@ -658,6 +662,14 @@ async function makeConnected(
           setState("CONTROLLER_AUTHORIZATION_FAILED");
         }
       });
+  }
+  if (keys.verification !== "verified") {
+    void connected.requestOwnUserVerification().catch((cause) => {
+      if (!disposed) {
+        connected.error = cause instanceof Error ? cause.message : "Locus could not request verification from your other Matrix devices.";
+        notify();
+      }
+    });
   }
   return connected;
 }

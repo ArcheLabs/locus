@@ -59,7 +59,7 @@ function matrixRestoreMessage(connected: MatrixConnected): string {
   if (connected.state === "CONTROLLER_AUTHORIZATION_FAILED") {
     return `Matrix verification is complete, but controller authorization failed. ${connected.error}`;
   }
-  return "Matrix device keys are ready. Open Element and start verification for the Locus device; the interactive request will appear here. No Locus session is connected yet.";
+  return "Matrix device keys are ready. Locus is requesting SAS verification from your other Matrix devices. Switch to Element, accept the request, then return here to compare emoji. No Locus session is connected yet.";
 }
 
 function networkErrorMessage(error: Error | null, endpoint?: string): string {
@@ -501,7 +501,7 @@ export function App() {
       <ConnectDialog open={connectOpen} onClose={() => { setConnectOpen(false); setPendingMatrixConnection(null); }} onCancelMatrix={cancelMatrixSignIn} onConnected={setSession} locus={network.locus} initialMatrixConnection={pendingMatrixConnection} />
       {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={resolvedRecipient} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
       <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
-      <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} onClose={() => setCreateAssetOpen(false)} onCreated={() => setRefreshToken((value) => value + 1)} />
+      <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} networkId={network.networkId} serviceId={network.deployment?.serviceId ?? null} onClose={() => setCreateAssetOpen(false)} onCreated={() => setRefreshToken((value) => value + 1)} />
       <AssetDetailModal asset={detailAsset} networkMode={networkMode} onClose={() => setDetailAsset(null)} onReceive={(asset) => { setDetailAsset(null); setReceiveAsset(asset); }} onSend={(asset) => { setDetailAsset(null); if (networkMode && "assetId" in asset) chooseNetworkAsset(asset); else { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); setPage("send"); } }} />
     </div>
   );

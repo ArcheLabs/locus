@@ -7,6 +7,7 @@ import {
   KeysQueryRequest,
   KeysUploadRequest,
   OlmMachine,
+  OwnUserIdentity,
   RoomMessageRequest,
   RequestType,
   Sas,
@@ -87,6 +88,7 @@ type VerificationOutgoingRequest = ToDeviceRequest | RoomMessageRequest;
 export type MatrixVerificationSnapshot = {
   flowId: string;
   otherDeviceId: string;
+  startedByLocus: boolean;
   phase: "requested" | "sas-waiting" | "sas-ready" | "confirming" | "done" | "cancelled";
   emojis: { symbol: string; description: string }[];
 };
@@ -105,6 +107,7 @@ export class MatrixCryptoDevice {
   private readonly acceptedFlows = new Set<string>();
   private readonly startedSasFlows = new Set<string>();
   private activeFlowId: string | null = null;
+  private ownVerificationInFlight: Promise<void> | null = null;
   readonly machine: OlmMachine;
   readonly deviceId: string;
 
@@ -235,7 +238,8 @@ export class MatrixCryptoDevice {
   private async readVerificationSnapshot(request: VerificationRequest, http: MatrixHttp): Promise<MatrixVerificationSnapshot> {
     const flowId = request.flowId;
     const otherDeviceId = this.otherDeviceId(request);
-    const base = { flowId, otherDeviceId, emojis: [] as { symbol: string; description: string }[] };
+    const startedByLocus = request.weStarted();
+    const base = { flowId, otherDeviceId, startedByLocus, emojis: [] as { symbol: string; description: string }[] };
     if (request.isCancelled() || request.phase() === VerificationRequestPhase.Cancelled) return { ...base, phase: "cancelled" };
     if (request.isDone() || request.phase() === VerificationRequestPhase.Done) return { ...base, phase: "done" };
 
@@ -256,7 +260,7 @@ export class MatrixCryptoDevice {
     }
     verification?.free();
 
-    if (this.acceptedFlows.has(flowId) && request.phase() === VerificationRequestPhase.Ready && !this.startedSasFlows.has(flowId)) {
+    if ((this.acceptedFlows.has(flowId) || startedByLocus) && request.phase() === VerificationRequestPhase.Ready && !this.startedSasFlows.has(flowId)) {
       const result = await request.startSas();
       if (result) {
         const [sas, outgoing] = result;
@@ -270,18 +274,90 @@ export class MatrixCryptoDevice {
     return { ...base, phase: this.acceptedFlows.has(flowId) ? "sas-waiting" : "requested" };
   }
 
-  /** Inspect all incoming own-device requests after every /sync response. */
+  /**
+   * Start an interactive verification from this newly signed-in device to the
+   * user's existing Matrix devices. This is the rust-crypto equivalent of
+   * requestOwnUserVerification(); Element can then accept the request.
+   */
+  requestOwnUserVerification(http: MatrixHttp): Promise<void> {
+    if (this.ownVerificationInFlight) return this.ownVerificationInFlight;
+    const request = this.startOwnUserVerification(http);
+    this.ownVerificationInFlight = request;
+    void request.finally(() => {
+      if (this.ownVerificationInFlight === request) this.ownVerificationInFlight = null;
+    }).catch(() => {});
+    return request;
+  }
+
+  private async startOwnUserVerification(http: MatrixHttp): Promise<void> {
+    if (this.disposed) throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "The Matrix crypto device is no longer active.");
+
+    const user = new UserId(this.userId);
+    let requests: VerificationRequest[] = [];
+    try { requests = this.machine.getVerificationRequests(user); }
+    finally { user.free(); }
+    try {
+      const existing = requests.find((request) => this.sameUserRequest(request) && request.weStarted() && !request.isCancelled() && !request.isDone())
+        ?? requests.find((request) => this.sameUserRequest(request) && !request.isCancelled() && !request.isDone());
+      if (existing) {
+        this.activeFlowId = existing.flowId;
+        this.publishVerification(await this.readVerificationSnapshot(existing, http));
+        await this.flush(http);
+        return;
+      }
+    } finally { for (const request of requests) request.free(); }
+
+    const queryUser = new UserId(this.userId);
+    let identity: OwnUserIdentity | undefined;
+    try {
+      const keyQuery = this.machine.queryKeysForUsers([queryUser]);
+      try { await this.sendRequest(keyQuery, http); }
+      finally { keyQuery.free(); }
+    } catch (cause) {
+      if (cause instanceof MatrixConnectorError) throw cause;
+      throw matrixCryptoStageFailure("MATRIX_VERIFICATION_FAILED", "Matrix cross-signing keys could not be queried before starting own-device verification.", cause);
+    }
+
+    // queryKeysForUsers consumes/invalidates its UserId wrapper, so fetch the
+    // identity with a fresh wrapper after the query response is applied.
+    const identityUser = new UserId(this.userId);
+    try {
+      const result = await this.machine.getIdentity(identityUser);
+      if (!(result instanceof OwnUserIdentity)) {
+        result?.free();
+        throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "This Matrix account has no usable cross-signing identity. Complete Matrix cross-signing setup in Element, then retry.");
+      }
+      identity = result;
+    } finally { identityUser.free(); }
+
+    try {
+      const [request, outgoing] = await identity.requestVerification([VerificationMethod.SasV1]);
+      try {
+        this.activeFlowId = request.flowId;
+        this.publishVerification(await this.readVerificationSnapshot(request, http));
+        this.queueVerificationRequest(outgoing);
+        await this.flush(http);
+        await this.refreshVerificationRequests(http);
+      } finally { request.free(); }
+    } catch (cause) {
+      if (cause instanceof MatrixConnectorError) throw cause;
+      throw matrixCryptoStageFailure("MATRIX_VERIFICATION_FAILED", "Locus could not send an own-device verification request to this Matrix account.", cause);
+  } finally { identity.free(); }
+  }
+
+  /** Inspect own-device requests after every /sync response. */
   private async refreshVerificationRequests(http: MatrixHttp): Promise<void> {
     const user = new UserId(this.userId);
     let requests: VerificationRequest[];
     try { requests = this.machine.getVerificationRequests(user); }
     finally { user.free(); }
     try {
-      const incoming = requests.filter((request) => this.sameUserRequest(request) && !request.weStarted());
-      const active = incoming.find((request) => request.flowId === this.activeFlowId && !request.isCancelled() && !request.isDone());
+      const own = requests.filter((request) => this.sameUserRequest(request));
+      const active = own.find((request) => request.flowId === this.activeFlowId && !request.isCancelled() && !request.isDone());
       const candidate = active
-        ?? incoming.find((request) => !request.isCancelled() && !request.isDone())
-        ?? incoming[incoming.length - 1];
+        ?? own.find((request) => request.weStarted() && !request.isCancelled() && !request.isDone())
+        ?? own.find((request) => !request.isCancelled() && !request.isDone())
+        ?? own[own.length - 1];
       if (!candidate) {
         if (this.verificationSnapshot?.phase === "done") {
           this.publishVerification(this.verificationSnapshot);
@@ -305,6 +381,7 @@ export class MatrixCryptoDevice {
     if (!request) throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "This Matrix verification request is no longer available. Ask Element to start it again.");
     try {
       if (!this.sameUserRequest(request)) throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "Only a verification request for your own Matrix account can authorize this device.");
+      if (request.weStarted()) throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "Locus already sent this verification request. Accept it on your other Matrix device.");
       this.activeFlowId = flowId;
       this.acceptedFlows.add(flowId);
       this.queueVerificationRequest(request.acceptWithMethods([VerificationMethod.SasV1]));
@@ -328,11 +405,11 @@ export class MatrixCryptoDevice {
           const outgoing = await verification.confirm();
           for (const item of outgoing) this.queueVerificationRequest(item);
           await this.flush(http);
-          this.publishVerification({ flowId, otherDeviceId: this.otherDeviceId(request), phase: "confirming", emojis: [] });
+          this.publishVerification({ flowId, otherDeviceId: this.otherDeviceId(request), startedByLocus: request.weStarted(), phase: "confirming", emojis: [] });
         } else {
           this.queueVerificationRequest(verification.cancelWithCode("m.mismatched_sas"));
           await this.flush(http);
-          this.publishVerification({ flowId, otherDeviceId: this.otherDeviceId(request), phase: "cancelled", emojis: [] });
+          this.publishVerification({ flowId, otherDeviceId: this.otherDeviceId(request), startedByLocus: request.weStarted(), phase: "cancelled", emojis: [] });
         }
         await this.refreshVerificationRequests(http);
       } finally { verification.free(); }
@@ -352,7 +429,7 @@ export class MatrixCryptoDevice {
         this.queueVerificationRequest(request.cancel());
       }
       await this.flush(http);
-      this.publishVerification({ flowId, otherDeviceId: this.otherDeviceId(request), phase: "cancelled", emojis: [] });
+      this.publishVerification({ flowId, otherDeviceId: this.otherDeviceId(request), startedByLocus: request.weStarted(), phase: "cancelled", emojis: [] });
     } finally { request.free(); }
   }
 

@@ -15,7 +15,7 @@
     "test:matrix-resolver": "node --test apps/matrix-resolver/test.mjs"
   },
   "dependencies": {
-    "@jamscript/client": "0.1.0-rc.3",
+    "@jamscript/client": "0.1.0-rc.4",
     "@polkadot/util-crypto": "^14.0.1",
     "@scure/base": "^2.4.0"
   },

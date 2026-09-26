@@ -11,6 +11,9 @@ import type {
   LocusValue,
   ExactInQuote,
   OwnershipSession,
+  PreparedOwnershipAction,
+  OwnershipPreparationPhase,
+  SignedOwnershipAction,
   Pool,
 } from "./types.js";
 
@@ -209,6 +212,47 @@ export class LocusClient {
     return this.jamClient.waitForAction(transactionId, options);
   }
 
+  async waitForActionByHash(
+    transactionId: string,
+    actionHash: string,
+    options?: { intervalMs?: number; timeoutMs?: number },
+  ) {
+    return this.jamClient.waitForAction(transactionId, actionHash, options);
+  }
+
+  /** Complete all deployment/state reads before the caller opens a wallet. */
+  prepareOwnershipAction(
+    actionName: string,
+    input: Record<string, LocusValue>,
+    options: { onProgress?: (phase: OwnershipPreparationPhase) => void } = {},
+  ): Promise<PreparedOwnershipAction> {
+    const session = this.requireSession();
+    const prepare = this.jamClient.prepareOwnershipAction;
+    if (!prepare) throw new Error("the configured JamScript client does not expose phased Ownership actions");
+    return prepare.call(this.jamClient, actionName, { ...input, subject: session.subject }, session.signer, options);
+  }
+
+  /** Starts the wallet request synchronously when called from a user gesture. */
+  signPreparedOwnershipAction(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction> {
+    this.requireSession();
+    const sign = this.jamClient.signPreparedOwnershipAction;
+    if (!sign) throw new Error("the configured JamScript client does not expose phased Ownership actions");
+    return sign.call(this.jamClient, prepared);
+  }
+
+  abandonPreparedOwnershipAction(prepared: PreparedOwnershipAction): void {
+    const abandon = this.jamClient.abandonPreparedOwnershipAction;
+    if (!abandon) return;
+    abandon.call(this.jamClient, prepared);
+  }
+
+  submitSignedOwnershipAction(signed: SignedOwnershipAction) {
+    this.requireSession();
+    const submit = this.jamClient.submitSignedOwnershipAction;
+    if (!submit) throw new Error("the configured JamScript client does not expose phased Ownership actions");
+    return submit.call(this.jamClient, signed);
+  }
+
   async transactionStatus(transactionId: string) {
     if (!this.jamClient.transactionStatus) throw new Error("the configured JamScript client does not expose transaction status");
     return this.jamClient.transactionStatus(transactionId);
@@ -227,6 +271,29 @@ export class LocusClient {
     initialSupply: Amount,
     initialHolder?: Ownership,
   ): Promise<SubmitActionResult> {
+    return this.submit("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder));
+  }
+
+  prepareCreateAsset(
+    assetId: AssetId,
+    name: string | Uint8Array,
+    symbol: string | Uint8Array,
+    decimals: number,
+    initialSupply: Amount,
+    initialHolder?: Ownership,
+    onProgress?: (phase: OwnershipPreparationPhase) => void,
+  ): Promise<PreparedOwnershipAction> {
+    return this.prepareOwnershipAction("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder), { onProgress });
+  }
+
+  private createAssetInput(
+    assetId: AssetId,
+    name: string | Uint8Array,
+    symbol: string | Uint8Array,
+    decimals: number,
+    initialSupply: Amount,
+    initialHolder?: Ownership,
+  ): Record<string, LocusValue> {
     assertId(assetId, "assetId");
     assertDecimals(decimals);
     assertAmount(initialSupply, "initialSupply");
@@ -240,14 +307,14 @@ export class LocusClient {
     if (!(symbolBytes instanceof Uint8Array) || symbolBytes.length === 0 || symbolBytes.length > 16) {
       throw locusError(LOCUS_ERROR_CODES.INVALID_ASSET_SYMBOL);
     }
-    return this.submit("createAsset", {
+    return {
       assetId,
       name: nameBytes,
       symbol: symbolBytes,
       decimals,
       initialSupply,
       initialHolder: holder,
-    });
+    };
   }
 
   async transfer(assetId: AssetId, to: Ownership, amount: Amount): Promise<SubmitActionResult> {

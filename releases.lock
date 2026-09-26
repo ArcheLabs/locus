@@ -6,7 +6,7 @@ version = "backend-v0.1.0-rc.8"
 
 [jamscript_client]
 package = "@jamscript/client"
-version = "0.1.0-rc.3"
+version = "0.1.0-rc.4"
 
 [minijam]
 version = "stage1-v0.2.0"

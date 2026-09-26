@@ -8,7 +8,7 @@
     "build": "tsc --noEmit && vite build && node scripts/assert-matrix-wasm.mjs && node --experimental-strip-types scripts/assert-production-network.mjs"
   },
   "dependencies": {
-    "@jamscript/client": "0.1.0-rc.3",
+    "@jamscript/client": "0.1.0-rc.4",
     "@matrix-org/matrix-sdk-crypto-wasm": "18.8.0",
     "@polkadot/extension-dapp": "0.63.1",
     "@polkadot/networks": "14.0.3",

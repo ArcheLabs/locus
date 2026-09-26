@@ -24,14 +24,6 @@ function verificationTitle(state: MatrixConnectionState): string {
   }
 }
 
-function elementMobileLaunchUrl(homeserver: string): string {
-  const url = new URL("https://mobile.element.io/");
-  // Element documents this HTTPS universal link for launching the Classic
-  // mobile app with its homeserver preselected. It does not target a request.
-  url.searchParams.set("hs_url", homeserver);
-  return url.toString();
-}
-
 export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus, initialConnection = null }: {
   open: boolean;
   onClose: () => void;
@@ -196,7 +188,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
       <button type="button" className="secondary" onClick={cancel}>Cancel</button>
       {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>{working ? "Retrying…" : "Retry authorization"}</button>}
       {(connectionState === "CONTROLLER_BOOTSTRAP_QUEUED" || connectionState === "CONTROLLER_BOOTSTRAP_FINALIZING" || connectionState === "CONTROLLER_BOOTSTRAP_UNKNOWN") && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>{working ? "Checking…" : "Check authorization status"}</button>}
-      {showingVerification && verification?.phase === "requested" && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>{working ? "Starting…" : "Start verification"}</button>}
+      {showingVerification && verification?.phase === "requested" && !verification.startedByLocus && <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>{working ? "Starting…" : "Accept verification"}</button>}
       {canCompare && <>
         <button type="button" className="secondary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>They don’t match</button>
         <button type="button" className="primary modal-primary" disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>They match</button>
@@ -206,22 +198,25 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
       {showingVerification ? <div className="matrix-verification-flow" aria-live="polite">
         <section className="verification-card">
           <strong>{verificationTitle(connectionState)}</strong>
-          {connectionState === "VERIFICATION_REQUIRED" && <>
-            <p>Element is a trusted second Matrix device for verification; it is not the sign-in method for Locus.</p>
-            <a className="secondary full matrix-open-element" href={elementMobileLaunchUrl(pendingConnection!.stored.homeserver)}>Open Element</a>
-            <p className="matrix-open-element-note">This opens Element with the homeserver selected. It does not jump to the Locus verification request; find the Locus session in Element.</p>
+          {(connectionState === "VERIFICATION_REQUIRED" || (connectionState === "VERIFICATION_REQUESTED" && verification?.startedByLocus)) && <>
+            <p>Locus has requested verification from your other Matrix devices. On this phone, switch to Element and accept the incoming SAS request. Element is a trusted second Matrix device; it is separate from signing in to Locus.</p>
             <ol className="matrix-verification-steps">
-              <li>Open Element.</li>
-              <li>Open <strong>Sessions</strong> or <strong>Security</strong>.</li>
-              <li>Find the device named <strong>Locus</strong> and choose <strong>Verify</strong>.</li>
-              <li>Return here and keep this window open.</li>
-              <li>Compare the SAS emoji shown here with Element.</li>
+              <li>Switch to Element on this phone.</li>
+              <li>Accept the incoming verification request for the new <strong>Locus</strong> device. If it is not visible, open Sessions or Security, find the Locus session, and choose Verify.</li>
+              <li>Accept SAS verification in Element, then return here and compare the emoji.</li>
             </ol>
-            <div className="matrix-device-id"><span>Your Locus device ID</span><code>{pendingConnection!.stored.deviceId}</code><button type="button" className="secondary" onClick={() => void copyDeviceId()}>{deviceIdCopied ? "Copied" : "Copy device ID"}</button></div>
+            {(connectionState === "VERIFICATION_REQUIRED" || (connectionState === "VERIFICATION_REQUESTED" && verification?.startedByLocus)) && <button type="button" className="secondary full" disabled={working} onClick={() => void performVerification(() => pendingConnection!.requestOwnUserVerification())}>{working ? "Requesting verification…" : verification?.startedByLocus ? "Retry request delivery" : "Request verification again"}</button>}
+            <details className="matrix-device-id matrix-device-id--troubleshooting">
+              <summary>Troubleshooting: device ID</summary>
+              <span>Your Locus Matrix device ID</span>
+              <code>{pendingConnection!.stored.deviceId}</code>
+              <button type="button" className="secondary" onClick={() => void copyDeviceId()}>{deviceIdCopied ? "Copied" : "Copy device ID"}</button>
+            </details>
           </>}
-          {connectionState === "VERIFICATION_REQUESTED" && (verification?.phase === "sas-waiting"
+          {connectionState === "VERIFICATION_REQUESTED" && !verification?.startedByLocus && (verification?.phase === "sas-waiting"
             ? <p>Locus accepted the request from Element device <code>{verification.otherDeviceId}</code>. Waiting for Element to accept SAS verification…</p>
-            : <p>A verification request arrived from Element device <code>{verification?.otherDeviceId ?? "Unknown device"}</code>. Start the SAS verification here.</p>)}
+            : <p>A verification request arrived from Element device <code>{verification?.otherDeviceId ?? "Unknown device"}</code>. Accept it here to continue.</p>)}
+          {verification?.startedByLocus && verification.phase === "sas-waiting" && <p>Verification request sent to your other Matrix devices. Accept it in Element; Locus will continue when Element responds.</p>}
           {connectionState === "VERIFICATION_SAS_READY" && <p>Compare these emoji with the other device in Element. Confirm only when all seven match.</p>}
           {connectionState === "VERIFICATION_CONFIRMING" && <p>Verification was confirmed. Locus is waiting for the Matrix cross-signing proof before it can authorize this device.</p>}
           {connectionState === "VERIFIED" && <p>The public M → S → D signatures are verified. Authorizing this device for Locus…</p>}
@@ -234,9 +229,9 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           {canCompare && <div className="matrix-sas-emojis" aria-label="Short authentication string emojis">
             {verification.emojis.map((emoji, index) => <span className="matrix-sas-emoji" key={`${index}-${emoji.symbol}`} title={emoji.description}><span aria-hidden="true">{emoji.symbol}</span><small>{emoji.description}</small></span>)}
           </div>}
-          {verification?.phase === "sas-waiting" && <p>Waiting for Element to accept SAS verification…</p>}
+          {verification?.phase === "sas-waiting" && !verification.startedByLocus && <p>Waiting for Element to accept SAS verification…</p>}
           {verification?.phase === "confirming" && <p>Waiting for Element to confirm and publish the cross-signing proof…</p>}
-          {verification?.phase === "cancelled" && <p>The verification was cancelled. Start a new verification from Element when you are ready.</p>}
+          {verification?.phase === "cancelled" && <p>The verification was cancelled. You can send a fresh request when ready.</p>}
           {verification && verification.phase !== "done" && <button type="button" className="text-button" disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>Cancel verification</button>}
         </section>
       </div> : <>

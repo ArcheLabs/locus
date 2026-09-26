@@ -2,11 +2,16 @@ import type {
   CodecValue,
   Ownership as JamOwnership,
   OwnershipSigner,
+  PreparedOwnershipAction,
+  OwnershipPreparationPhase,
+  SignedOwnershipAction,
   SubmitActionResult,
   TransactionStatusResult,
   FinalizedContext,
   WaitForActionResult,
 } from "@jamscript/client";
+
+export type { PreparedOwnershipAction, SignedOwnershipAction, OwnershipPreparationPhase };
 
 export type Ownership = JamOwnership;
 export type AssetId = Uint8Array;
@@ -62,8 +67,18 @@ export interface JamScriptLikeClient {
   queryLatest(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
   waitForAction(
     transactionId: string,
-    options?: { intervalMs?: number; timeoutMs?: number },
+    optionsOrActionHash?: { intervalMs?: number; timeoutMs?: number } | string,
+    legacyOptions?: { intervalMs?: number; timeoutMs?: number },
   ): Promise<WaitForActionResult>;
+  prepareOwnershipAction?(
+    actionName: string,
+    input: Record<string, CodecValue>,
+    signer: OwnershipSigner,
+    options?: { actAs?: JamOwnership; ttl?: bigint; extrinsics?: Uint8Array[]; onProgress?: (phase: OwnershipPreparationPhase) => void },
+  ): Promise<PreparedOwnershipAction>;
+  signPreparedOwnershipAction?(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction>;
+  abandonPreparedOwnershipAction?(prepared: PreparedOwnershipAction): void;
+  submitSignedOwnershipAction?(signed: SignedOwnershipAction): Promise<SubmitActionResult>;
   transactionStatus?(transactionId: string): Promise<TransactionStatusResult>;
   finalizedContext?(): Promise<FinalizedContext>;
 }

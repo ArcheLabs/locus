@@ -4,22 +4,14 @@ on:
   push:
   pull_request:
   workflow_dispatch:
-    inputs:
-      registry_consumer:
-        description: Validate the published npm client from the registry
-        required: false
-        default: false
-        type: boolean
 
 env:
   JAMSCRIPT_VERSION: v0.1.0-rc.8
-# Pinned source revision is validated by JamScript CI before consumer checks.
-  JAMSCRIPT_CLIENT_REF: 60d9a1fc9327fd54e92e2285748081df64bbcdac
   NODE_VERSION: 24.15.0
 
 jobs:
-  consumer-prepublish:
-    name: Consumer CI (source tarball)
+  consumer:
+    name: Consumer CI (published packages)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,23 +20,20 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
 
-      - name: Pack JamScript client from pinned source
-        env:
-          JAMSCRIPT_CLIENT_REF: ${{ env.JAMSCRIPT_CLIENT_REF }}
+      - name: Install published consumer dependencies
         run: |
-          git clone --no-checkout https://github.com/ArcheLabs/JamScript.git "$RUNNER_TEMP/jamscript"
-          git -C "$RUNNER_TEMP/jamscript" fetch --depth=64 origin "$JAMSCRIPT_VERSION"
-          git -C "$RUNNER_TEMP/jamscript" checkout --detach "$JAMSCRIPT_CLIENT_REF"
-          npm --prefix "$RUNNER_TEMP/jamscript/packages/client" ci --ignore-scripts --no-audit --no-fund
-          mkdir -p "$RUNNER_TEMP/jamscript-client"
-          (cd "$RUNNER_TEMP/jamscript/packages/client" && npm pack --pack-destination "$RUNNER_TEMP/jamscript-client")
-          CLIENT_TARBALL="$(find "$RUNNER_TEMP/jamscript-client" -maxdepth 1 -type f -name 'jamscript-client-*.tgz' -print -quit)"
-          test -n "$CLIENT_TARBALL"
-          echo "JAMSCRIPT_CLIENT_TARBALL=$CLIENT_TARBALL" >> "$GITHUB_ENV"
+          npm ci
+          npm --prefix web ci
 
-      - name: Install source tarball consumer dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false "$JAMSCRIPT_CLIENT_TARBALL"
+      - name: Verify published Client package and phased API
+        run: |
+          npm ls @jamscript/client --depth=0
+          npm --prefix web ls @jamscript/client --depth=0
+          node scripts/assert-published-client.mjs
 
       - name: Install published JamScript CLI
         run: |
@@ -52,36 +41,10 @@ jobs:
             | bash -s -- --version "${JAMSCRIPT_VERSION}"
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Install pinned source ScriptC dependencies
-        working-directory: ${{ runner.temp }}/jamscript/toolchains/scriptc
-        run: npm ci --ignore-scripts --no-audit --no-fund
-
       - name: Verify published toolchain
         run: |
           jams --version
           jams toolchain verify
-
-      - name: Set up Rust for the pinned JamScript CLI
-        uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: nightly-2026-05-02
-
-      - name: Install JamScript CLI build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential clang libclang-dev llvm-dev pkg-config
-
-      - name: Build pinned JamScript source CLI
-        working-directory: ${{ runner.temp }}/jamscript
-        run: |
-          JAMSCRIPT_RELEASE_VERSION="source-${JAMSCRIPT_CLIENT_REF}" cargo build --release --locked --bin jams
-          test -x target/release/jams
-          echo "JAMSCRIPT_SOURCE_CLI=$RUNNER_TEMP/jamscript/target/release/jams" >> "$GITHUB_ENV"
-
-      - name: Verify pinned JamScript source CLI
-        run: |
-          "$JAMSCRIPT_SOURCE_CLI" --version
-          "$JAMSCRIPT_SOURCE_CLI" check --help >/dev/null
 
       - name: SDK and ownership model tests
         run: npm test
@@ -89,62 +52,11 @@ jobs:
       - name: Verify Ownership Matrix adapter boundary
         run: ./scripts/check-ownership-adapter-boundary.sh
 
-      - name: Build frontend prototype
-        run: |
-          npm --prefix web install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false "$JAMSCRIPT_CLIENT_TARBALL"
-          npm run build:web
+      - name: Build web client
+        run: npm run build:web
 
-      - name: Consumer service check and ABI validation
-        run: |
-          LOCUS_JAMSCRIPT_CLI="$JAMSCRIPT_SOURCE_CLI" npm run check
+      - name: Consumer service checks and ABI validation
+        run: npm run check
 
-      - name: Consumer PVM artifact build
-        run: |
-          export JAMSCRIPT_DEV_TOOLCHAIN=1
-          export JAMSCRIPT_GUEST_BUILD_MODE=cargo
-          export JAMSCRIPT_CLANG="$(command -v clang)"
-          export JAMSCRIPT_LLVM_AR="$(command -v llvm-ar || command -v ar)"
-          LOCUS_JAMSCRIPT_CLI="$JAMSCRIPT_SOURCE_CLI" npm run build
-
-  consumer-registry:
-    name: Consumer CI (published registry)
-    if: github.event_name == 'workflow_dispatch' && inputs.registry_consumer == true
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install published consumer dependencies
-        run: npm ci --ignore-scripts --no-audit --no-fund
-
-      - name: Verify registry client
-        run: npm ls @jamscript/client --depth=0
-
-      - name: Install published JamScript CLI
-        run: |
-          curl -fsSL "https://raw.githubusercontent.com/ArcheLabs/JamScript/${JAMSCRIPT_VERSION}/install.sh" \
-            | bash -s -- --version "${JAMSCRIPT_VERSION}"
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Verify published toolchain
-        run: |
-          jams --version
-          jams toolchain verify
-
-      - name: SDK and ownership model tests
-        run: npm test
-
-      - name: Build frontend prototype
-        run: |
-          npm --prefix web install --ignore-scripts --no-audit --no-fund
-          npm run build:web
-
-      - name: Consumer service check and ABI validation
-        run: jams check .
-
-      - name: Consumer PVM artifact build
-        run: jams build . --output ./dist
+      - name: Build canonical Locus PVM artifact
+        run: npm run build
