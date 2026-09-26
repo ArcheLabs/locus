@@ -319,6 +319,15 @@ textarea {
   .matrix-id-field input,
   .password-fallback input,
   .account-picker select { min-height: 44px; font-size: 16px; }
+  .matrix-verification-steps { font-size: 15px; }
+  .matrix-open-element { display: flex; }
+  .matrix-open-element-note { display: block; }
+  .matrix-device-id { grid-template-columns: minmax(0, 1fr); }
+  .matrix-device-id > span { grid-column: auto; }
+  .matrix-device-id .secondary { width: 100%; justify-content: center; }
+  .matrix-auth-button,
+  .legacy-auth-options .full,
+  .password-fallback .full { width: 100%; min-height: 48px; justify-content: center; }
   .type-menu {
     z-index: 120;
     width: min(calc(100vw - 24px), 420px);

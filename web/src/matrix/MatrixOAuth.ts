@@ -17,6 +17,10 @@ export type MatrixAuthMetadata = {
   code_challenge_methods_supported?: string[];
 };
 
+export type MatrixAuthCapabilities =
+  | { mode: "oauth"; homeserver: string; metadata: MatrixAuthMetadata; sso: false; password: false }
+  | { mode: "legacy"; homeserver: string; sso: boolean; password: boolean };
+
 export type MatrixOAuthSession = {
   accessToken: string;
   refreshToken?: string;
@@ -108,16 +112,15 @@ export async function commitMatrixSessionAfterCryptoSetup<T>(stored: MatrixOAuth
   return result;
 }
 
-export async function discoverMatrixAuthMetadata(homeserver: string): Promise<MatrixAuthMetadata | null> {
-  let response: Response;
-  try {
-    response = await fetch(`${homeserver.replace(/\/$/, "")}/_matrix/client/v1/auth_metadata`, { headers: { accept: "application/json" } });
-  } catch (cause) {
-    throw matrixError("Could not reach Matrix authentication metadata. Check the homeserver URL and try again.", cause);
-  }
-  if (response.status === 404) return null;
-  if (!response.ok) throw matrixError(`Matrix authentication discovery failed (HTTP ${response.status}).`);
-  const metadata = await response.json() as Partial<MatrixAuthMetadata>;
+function normalizedHomeserver(homeserver: string): string {
+  return homeserver.replace(/\/$/, "");
+}
+
+async function responseError(response: Response): Promise<{ errcode?: string; error?: string }> {
+  return response.json().catch(() => ({})) as Promise<{ errcode?: string; error?: string }>;
+}
+
+function validateOAuthMetadata(metadata: Partial<MatrixAuthMetadata>): MatrixAuthMetadata {
   if (!metadata.issuer || !metadata.authorization_endpoint || !metadata.token_endpoint) {
     throw matrixError("The homeserver returned incomplete Matrix OAuth metadata.");
   }
@@ -127,6 +130,53 @@ export async function discoverMatrixAuthMetadata(homeserver: string): Promise<Ma
   if (!metadata.response_modes_supported?.includes("fragment")) throw matrixError("This Matrix server does not support the fragment callback required for secure web sign-in.");
   if (!metadata.code_challenge_methods_supported?.includes("S256")) throw matrixError("This Matrix server does not support PKCE S256.");
   return metadata as MatrixAuthMetadata;
+}
+
+export async function discoverMatrixAuthCapabilities(homeserver: string): Promise<MatrixAuthCapabilities> {
+  const server = normalizedHomeserver(homeserver);
+  let response: Response;
+  try {
+    response = await fetch(`${server}/_matrix/client/v1/auth_metadata`, { headers: { accept: "application/json" } });
+  } catch (cause) {
+    throw matrixError("Could not reach Matrix authentication metadata. Check the homeserver URL and try again.", cause);
+  }
+  if (response.status === 200) {
+    let metadata: Partial<MatrixAuthMetadata>;
+    try { metadata = await response.json() as Partial<MatrixAuthMetadata>; }
+    catch (cause) { throw matrixError("The homeserver returned invalid Matrix OAuth metadata.", cause); }
+    // A homeserver advertising OAuth is an OAuth login path. Runtime failures
+    // must stay OAuth failures; they do not imply that legacy auth is usable.
+    return { mode: "oauth", homeserver: server, metadata: validateOAuthMetadata(metadata), sso: false, password: false };
+  }
+  const metadataError = await responseError(response);
+  if (response.status !== 404 || metadataError.errcode !== "M_UNRECOGNIZED") {
+    throw matrixError(metadataError.error || `Matrix authentication discovery failed (HTTP ${response.status}${metadataError.errcode ? `, ${metadataError.errcode}` : ""}).`);
+  }
+
+  let loginResponse: Response;
+  try {
+    loginResponse = await fetch(`${server}/_matrix/client/v3/login`, { headers: { accept: "application/json" } });
+  } catch (cause) {
+    throw matrixError("Could not discover legacy Matrix login methods.", cause);
+  }
+  if (!loginResponse.ok) {
+    const loginError = await responseError(loginResponse);
+    if (loginResponse.status === 404 && loginError.errcode === "M_UNRECOGNIZED") {
+      return { mode: "legacy", homeserver: server, sso: false, password: false };
+    }
+    throw matrixError(loginError.error || `Legacy Matrix login discovery failed (HTTP ${loginResponse.status}${loginError.errcode ? `, ${loginError.errcode}` : ""}).`);
+  }
+  let login: { flows?: Array<{ type?: unknown }> };
+  try { login = await loginResponse.json() as { flows?: Array<{ type?: unknown }> }; }
+  catch (cause) { throw matrixError("The homeserver returned invalid legacy Matrix login flows.", cause); }
+  const flowTypes = new Set((login.flows ?? []).map((flow) => flow.type).filter((type): type is string => typeof type === "string"));
+  return { mode: "legacy", homeserver: server, sso: flowTypes.has("m.login.sso"), password: flowTypes.has("m.login.password") };
+}
+
+/** Compatibility helper for callers that only need to check OAuth metadata. */
+export async function discoverMatrixAuthMetadata(homeserver: string): Promise<MatrixAuthMetadata | null> {
+  const capabilities = await discoverMatrixAuthCapabilities(homeserver);
+  return capabilities.mode === "oauth" ? capabilities.metadata : null;
 }
 
 function redirectUri(): string {
@@ -153,20 +203,22 @@ function clearAuthCallbackUrl(): void {
 function matrixWebClientUris(): { clientUri: string; redirectUri: string } {
   const callback = new URL(redirectUri());
   if (callback.protocol !== "https:") {
-    throw matrixError("Matrix OAuth web sign-in requires Locus to be opened over HTTPS. This local HTTP preview cannot register an OAuth callback; use Matrix SSO here, or open the HTTPS Locus site.");
+    throw matrixError("Matrix OAuth web sign-in requires Locus to be opened over HTTPS. Open the HTTPS Locus site and start Matrix sign-in again.");
   }
   return { clientUri: new URL("/", callback.origin).toString(), redirectUri: callback.toString() };
 }
 
-export async function beginMatrixOAuth(homeserver: string, userId: string): Promise<void> {
-  const metadata = await discoverMatrixAuthMetadata(homeserver);
-  if (!metadata) throw matrixError("OAuth is not available on this Matrix server. Choose Matrix SSO or the legacy password option.");
-  if (!metadata.registration_endpoint) throw matrixError("This Matrix server does not advertise OAuth client registration.");
+export async function beginMatrixOAuth(homeserver: string, userId: string, discovered?: MatrixAuthCapabilities): Promise<void> {
+  const capabilities = discovered ?? await discoverMatrixAuthCapabilities(homeserver);
+  if (capabilities.mode !== "oauth" || capabilities.homeserver !== normalizedHomeserver(homeserver)) {
+    throw matrixError("Matrix OAuth is not advertised by this homeserver.");
+  }
+  const metadata = capabilities.metadata;
   const deviceId = matrixDeviceId(homeserver, userId);
   const { clientUri, redirectUri: uri } = matrixWebClientUris();
   let registration: Response;
   try {
-    registration = await fetch(metadata.registration_endpoint, {
+    registration = await fetch(metadata.registration_endpoint!, {
       method: "POST",
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify({
@@ -210,7 +262,10 @@ export async function beginMatrixOAuth(homeserver: string, userId: string): Prom
   window.location.assign(authorization.toString());
 }
 
-export async function beginMatrixSso(homeserver: string, userId: string): Promise<void> {
+export async function beginMatrixSso(homeserver: string, userId: string, capabilities: MatrixAuthCapabilities): Promise<void> {
+  if (capabilities.mode !== "legacy" || !capabilities.sso || capabilities.homeserver !== normalizedHomeserver(homeserver)) {
+    throw matrixError("This homeserver has not advertised Matrix SSO login.");
+  }
   const deviceId = matrixDeviceId(homeserver, userId);
   const state = randomUrlSafe();
   const uri = new URL(redirectUri());
@@ -245,6 +300,7 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
   const oauthCode = url.searchParams.get("code") ?? fragment.get("code");
   const oauthState = url.searchParams.get("state") ?? fragment.get("state");
   const oauthError = url.searchParams.get("error") ?? fragment.get("error");
+  const oauthErrorDescription = url.searchParams.get("error_description") ?? fragment.get("error_description");
   const ssoState = url.searchParams.get("matrix_sso_state");
   const loginToken = url.searchParams.get("loginToken") ?? new URLSearchParams(url.hash.replace(/^#/, "")).get("loginToken");
   if (oauthCode || oauthState || oauthError) {
@@ -256,7 +312,7 @@ export async function completeMatrixAuthCallback(): Promise<MatrixOAuthSession |
     if (!raw) throw matrixError("Matrix OAuth callback has no matching sign-in request. Start sign-in again.");
     window.sessionStorage.removeItem(OAUTH_FLOW_KEY);
     const flow = JSON.parse(raw) as OAuthFlow;
-    if (oauthError) throw matrixError(`Matrix sign-in was not completed: ${oauthError}.`);
+    if (oauthError) throw matrixError(`Matrix sign-in was not completed: ${oauthError}${oauthErrorDescription ? ` — ${oauthErrorDescription}` : ""}.`);
     if (!oauthCode || oauthState !== flow.state) throw matrixError("Matrix OAuth state did not match. Start sign-in again.");
     const response = await fetch(flow.tokenEndpoint, {
       method: "POST",

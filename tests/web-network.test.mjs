@@ -5,7 +5,7 @@ import { formatUnits, parseUnits, evmOwnership, polkadotOwnership, solanaOwnersh
 import { encodeAddress } from "@polkadot/util-crypto";
 import { selectNetwork } from "../web/src/network/selection.ts";
 import { queryMatrixKeys } from "../web/src/matrix/MatrixKeysQuery.ts";
-import { beginMatrixOAuth, commitMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, completeMatrixAuthCallback, discoverMatrixAuthMetadata, matrixDeviceId, persistMatrixSession, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
+import { beginMatrixOAuth, beginMatrixSso, commitMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, completeMatrixAuthCallback, discoverMatrixAuthCapabilities, discoverMatrixAuthMetadata, matrixDeviceId, persistMatrixSession, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
 import { describeMatrixCause, matrixControllerReceiptFailure, matrixCryptoStageFailure } from "../web/src/matrix/MatrixErrors.ts";
 import { createHash } from "node:crypto";
 import { resolveLocusMode, buildLocusMode } from "../web/src/network/mode.ts";
@@ -168,6 +168,139 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
     globalThis.window = originalWindow;
     globalThis.fetch = originalFetch;
   }
+});
+
+test("OAuth metadata selects OAuth only and never probes or redirects to legacy SSO", async () => {
+  const storage = () => {
+    const entries = new Map();
+    return { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, String(value)), removeItem: (key) => entries.delete(key) };
+  };
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.window = {
+    localStorage: storage(), sessionStorage: storage(),
+    location: { href: "https://locus.example/app", origin: "https://locus.example", assign: (url) => requests.push({ redirect: String(url) }) },
+  };
+  globalThis.fetch = async (url, init = {}) => {
+    const target = String(url);
+    requests.push({ url: target, method: init.method ?? "GET" });
+    if (target.endsWith("/_matrix/client/v1/auth_metadata")) return new Response(JSON.stringify({
+      issuer: "https://auth.example.org/", authorization_endpoint: "https://auth.example.org/auth", token_endpoint: "https://auth.example.org/token",
+      registration_endpoint: "https://auth.example.org/register", revocation_endpoint: "https://auth.example.org/revoke",
+      response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"], response_modes_supported: ["fragment"], code_challenge_methods_supported: ["S256"],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    if (target.endsWith("/register")) return new Response(JSON.stringify({ client_id: "locus-client" }), { status: 201, headers: { "content-type": "application/json" } });
+    if (target.endsWith("/_matrix/client/v3/login")) return new Response(JSON.stringify({ errcode: "M_UNRECOGNIZED" }), { status: 404 });
+    throw new Error(`Unexpected request ${target}`);
+  };
+  try {
+    const capabilities = await discoverMatrixAuthCapabilities("https://example.org/");
+    assert.equal(capabilities.mode, "oauth");
+    assert.equal(capabilities.sso, false);
+    assert.equal(capabilities.password, false);
+    await beginMatrixOAuth("https://example.org", "@alice:example.org", capabilities);
+    assert.equal(requests.some(({ url }) => url?.endsWith("/_matrix/client/v3/login")), false);
+    assert.equal(requests.some(({ redirect }) => redirect?.includes("/login/sso/redirect")), false);
+    assert.equal(requests.some(({ redirect }) => redirect?.startsWith("https://auth.example.org/auth?")), true);
+  } finally { globalThis.window = originalWindow; globalThis.fetch = originalFetch; }
+});
+
+test("legacy SSO is shown and usable only when /login advertises m.login.sso", async () => {
+  const storage = () => {
+    const entries = new Map();
+    return { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, String(value)), removeItem: (key) => entries.delete(key) };
+  };
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const sessionStorage = storage();
+  const assigned = [];
+  const requests = [];
+  globalThis.window = {
+    localStorage: storage(), sessionStorage,
+    location: { href: "https://locus.example/app", origin: "https://locus.example", assign: (url) => assigned.push(String(url)) },
+    history: { replaceState() {} },
+  };
+  globalThis.fetch = async (url, init = {}) => {
+    const target = String(url);
+    requests.push({ target, method: init.method ?? "GET" });
+    if (target.endsWith("/_matrix/client/v1/auth_metadata")) return new Response(JSON.stringify({ errcode: "M_UNRECOGNIZED" }), { status: 404 });
+    if (target.endsWith("/_matrix/client/v3/login") && !init.method) return new Response(JSON.stringify({ flows: [{ type: "m.login.sso" }] }), { status: 200 });
+    if (target.endsWith("/_matrix/client/v3/login") && init.method === "POST") return new Response(JSON.stringify({ access_token: "sso-access", user_id: "@alice:example.org", device_id: "ELEMENT-LOGIN" }), { status: 200 });
+    throw new Error(`Unexpected request ${target}`);
+  };
+  try {
+    const capabilities = await discoverMatrixAuthCapabilities("https://example.org");
+    assert.deepEqual(capabilities, { mode: "legacy", homeserver: "https://example.org", sso: true, password: false });
+    await beginMatrixSso("https://example.org", "@alice:example.org", capabilities);
+    assert.equal(new URL(assigned[0]).pathname, "/_matrix/client/v3/login/sso/redirect");
+    assert.equal(requests.some(({ target }) => target.endsWith("/login/sso/redirect")), false, "the redirect is a browser navigation, never an unguarded fetch");
+    const flow = JSON.parse(sessionStorage.getItem("locus.matrix.sso-flow.v1"));
+    globalThis.window.location.href = `https://locus.example/app?matrix_sso_state=${flow.state}&loginToken=temporary-token`;
+    const completed = await completeMatrixAuthCallback();
+    assert.equal(completed.authType, "legacy");
+    assert.equal(completed.userId, "@alice:example.org");
+    assert.equal(completed.deviceId, "ELEMENT-LOGIN");
+    assert.equal(requests.some(({ target, method }) => target.endsWith("/login") && method === "POST"), true);
+  } finally { globalThis.window = originalWindow; globalThis.fetch = originalFetch; }
+});
+
+test("legacy password and unsupported homeservers follow advertised login flows only", async () => {
+  const originalFetch = globalThis.fetch;
+  let flows = [];
+  let loginStatus = 200;
+  globalThis.fetch = async (url) => {
+    const target = String(url);
+    if (target.endsWith("/auth_metadata")) return new Response(JSON.stringify({ errcode: "M_UNRECOGNIZED" }), { status: 404 });
+    if (target.endsWith("/v3/login")) return loginStatus === 200
+      ? new Response(JSON.stringify({ flows }), { status: 200 })
+      : new Response(JSON.stringify({ errcode: "M_UNRECOGNIZED" }), { status: loginStatus });
+    throw new Error(`Unexpected request ${target}`);
+  };
+  try {
+    flows = [{ type: "m.login.password" }];
+    assert.deepEqual(await discoverMatrixAuthCapabilities("https://password.example"), { mode: "legacy", homeserver: "https://password.example", sso: false, password: true });
+    flows = [{ type: "m.login.dummy" }];
+    assert.deepEqual(await discoverMatrixAuthCapabilities("https://unsupported.example"), { mode: "legacy", homeserver: "https://unsupported.example", sso: false, password: false });
+    loginStatus = 404;
+    assert.deepEqual(await discoverMatrixAuthCapabilities("https://no-login.example"), { mode: "legacy", homeserver: "https://no-login.example", sso: false, password: false });
+  } finally { globalThis.fetch = originalFetch; }
+  const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  assert.match(dialog, /legacyCapabilities\.password &&/);
+  assert.match(dialog, /legacyCapabilities\.sso &&/);
+  assert.match(dialog, /does not advertise Matrix SSO or password login/);
+});
+
+test("OAuth runtime errors stay actionable and do not unlock legacy fallbacks", async () => {
+  const storage = () => {
+    const entries = new Map();
+    return { getItem: (key) => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, String(value)), removeItem: (key) => entries.delete(key) };
+  };
+  const originalWindow = globalThis.window;
+  const originalFetch = globalThis.fetch;
+  const requests = [];
+  globalThis.window = { localStorage: storage(), sessionStorage: storage(), location: { href: "https://locus.example/app", origin: "https://locus.example", assign() {} } };
+  globalThis.fetch = async (url, init = {}) => {
+    const target = String(url);
+    requests.push(target);
+    if (target.endsWith("/auth_metadata")) return new Response(JSON.stringify({
+      issuer: "https://auth.example/", authorization_endpoint: "https://auth.example/auth", token_endpoint: "https://auth.example/token",
+      registration_endpoint: "https://auth.example/register", revocation_endpoint: "https://auth.example/revoke",
+      response_types_supported: ["code"], grant_types_supported: ["authorization_code", "refresh_token"], response_modes_supported: ["fragment"], code_challenge_methods_supported: ["S256"],
+    }), { status: 200 });
+    if (target.endsWith("/register")) return new Response(JSON.stringify({ error_description: "registration is disabled by the homeserver" }), { status: 400 });
+    throw new Error(`Unexpected request ${target}`);
+  };
+  try {
+    const capabilities = await discoverMatrixAuthCapabilities("https://example.org");
+    await assert.rejects(beginMatrixOAuth("https://example.org", "@alice:example.org", capabilities), /registration is disabled by the homeserver/);
+    assert.equal(capabilities.mode, "oauth");
+    assert.equal(requests.some((url) => url.endsWith("/v3/login")), false);
+    assert.equal(requests.some((url) => url.endsWith("/login/sso/redirect")), false);
+  } finally { globalThis.window = originalWindow; globalThis.fetch = originalFetch; }
+  const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(dialog, /setShowLegacy/);
+  assert.match(dialog, /setError\(cause instanceof Error \? cause\.message/);
 });
 
 test("Matrix OAuth callback returns a provisional session; committed sessions support refresh and revocation", async () => {

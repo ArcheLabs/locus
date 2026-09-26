@@ -60,3 +60,21 @@ test("Matrix bootstrap restoration checks the saved transaction before permittin
   assert.match(matrixDialogSource, /Check authorization status/);
   assert.match(matrixDialogSource, /do not repeat Matrix verification/);
 });
+
+test("mobile Matrix verification clearly separates sign-in from Element SAS and exposes the Locus device ID", async () => {
+  const responsive = readFileSync(new URL("../web/src/styles/responsive.css", import.meta.url), "utf8");
+  assert.match(matrixDialogSource, /connectionState === "VERIFICATION_REQUIRED"/);
+  assert.match(matrixDialogSource, /Open Element\./);
+  assert.match(matrixDialogSource, /Sessions/);
+  assert.match(matrixDialogSource, /Security/);
+  assert.match(matrixDialogSource, /Find the device named <strong>Locus<\/strong>/);
+  assert.match(matrixDialogSource, /pendingConnection!\.stored\.deviceId/);
+  assert.match(matrixDialogSource, /Copy device ID/);
+  assert.match(matrixDialogSource, /navigator\.clipboard\.writeText\(deviceId\)/);
+  assert.match(matrixDialogSource, /trusted second Matrix device for verification; it is not the sign-in method/);
+  assert.match(matrixDialogSource, /https:\/\/mobile\.element\.io\//);
+  assert.match(matrixDialogSource, /searchParams\.set\("hs_url", homeserver\)/);
+  assert.match(matrixDialogSource, /does not jump to the Locus verification request/);
+  assert.match(responsive, /\.matrix-device-id \.secondary \{ width: 100%;/);
+  assert.doesNotMatch(matrixDialogSource, /element:\/\//);
+});
