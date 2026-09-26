@@ -34,7 +34,7 @@ jobs:
           JAMSCRIPT_CLIENT_REF: ${{ env.JAMSCRIPT_CLIENT_REF }}
         run: |
           git clone --no-checkout https://github.com/ArcheLabs/JamScript.git "$RUNNER_TEMP/jamscript"
-          git -C "$RUNNER_TEMP/jamscript" fetch --depth=64 origin codex/network-boundary-refactor
+          git -C "$RUNNER_TEMP/jamscript" fetch --depth=64 origin "$JAMSCRIPT_VERSION"
           git -C "$RUNNER_TEMP/jamscript" checkout --detach "$JAMSCRIPT_CLIENT_REF"
           npm --prefix "$RUNNER_TEMP/jamscript/packages/client" ci --ignore-scripts --no-audit --no-fund
           mkdir -p "$RUNNER_TEMP/jamscript-client"
