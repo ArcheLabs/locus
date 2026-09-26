@@ -21,9 +21,11 @@ Ownership that signed the action. Locus permits a direct owner
 by locus.controller-grant.v1; a revoked pair is final in v1.
 
 Matrix uses the cross-signing master key as the subject
-Ownership(ED25519_KEY, M) and a verified device key as controller D. The M→S→D
-evidence is checked by JamScript's deterministic
-verifyMatrixCrossSigning primitive during bootstrapMatrixController. The outer
+Ownership(ED25519_KEY, M) and a verified device key as controller D. The
+JamScript Ownership Matrix adapter checks M→S→D evidence using provider-neutral
+deterministic JamScript cryptographic primitives during
+bootstrapMatrixController. JamScript Core does not implement Matrix-specific
+verification, and Locus delegates proof verification to the adapter. The outer
 SignedActionV2 proves possession of D, so the proof payload does not duplicate
 a controller signature.
 

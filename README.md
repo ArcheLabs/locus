@@ -10,22 +10,36 @@ supports single-pool exact-input swaps when operator-managed liquidity exists.
 Asset → Ownership
 ```
 
-JamScript authenticates the cryptographic controller and exposes the pure
-Matrix M→S→D proof verifier. Locus receives the authenticated signer as
-`ctx.controller`, keeps controller grants and Matrix bootstrap tombstones in
-its own managed state, and applies the grant to a stable `subject`. Assets,
+JamScript Core authenticates the cryptographic controller of each signed
+action and exposes provider-neutral cryptographic primitives. Matrix M→S→D
+verification is implemented by the JamScript Ownership Matrix adapter on top
+of those primitives. Locus consumes that adapter and does not implement
+Matrix cryptography. It keeps controller grants and Matrix bootstrap tombstones
+in its own managed state, and applies each grant to a stable `subject`. Assets,
 balances, allowances, and identity authorization therefore share one Locus
 state root. Locus does not use a network-scoped Ownership Control service.
 
 ## Consumer-mode development
 
-Locus is built as an external JamScript consumer. A clean checkout uses only
-the published `jams` binary, its managed toolchain bundle, and the published
-`@jamscript/client` package. It does not require a JamScript source checkout,
-ScriptC invocation, or a local MiniJAM source tree.
+Locus uses the published JamScript `jams` CLI and managed toolchain. The
+`@jamscript/client@0.1.0-rc.3` package is not yet published to npm: Locus CI
+packs it from JamScript source commit
+`60d9a1fc9327fd54e92e2285748081df64bbcdac`, fetched through the published
+`v0.1.0-rc.8` tag. A clean checkout therefore needs this source checkout to
+pack the client dependency; bare `npm install` is not sufficient yet.
 
 ```bash
-npm install
+JAMSCRIPT_SOURCE_DIR="$(mktemp -d)/jamscript"
+JAMSCRIPT_CLIENT_PACK_DIR="$(mktemp -d)"
+git clone --no-checkout https://github.com/ArcheLabs/JamScript.git "$JAMSCRIPT_SOURCE_DIR"
+git -C "$JAMSCRIPT_SOURCE_DIR" fetch --depth=64 origin v0.1.0-rc.8
+git -C "$JAMSCRIPT_SOURCE_DIR" checkout --detach 60d9a1fc9327fd54e92e2285748081df64bbcdac
+npm --prefix "$JAMSCRIPT_SOURCE_DIR/packages/client" ci --ignore-scripts --no-audit --no-fund
+mkdir -p "$JAMSCRIPT_CLIENT_PACK_DIR"
+npm --prefix "$JAMSCRIPT_SOURCE_DIR/packages/client" pack --pack-destination "$JAMSCRIPT_CLIENT_PACK_DIR"
+CLIENT_TARBALL="$JAMSCRIPT_CLIENT_PACK_DIR/jamscript-client-0.1.0-rc.3.tgz"
+npm install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false "$CLIENT_TARBALL"
+npm --prefix web install --ignore-scripts --no-audit --no-fund --no-save --package-lock=false "$CLIENT_TARBALL"
 jams check .
 jams abi .
 jams build . --output ./dist
@@ -98,13 +112,11 @@ deterministic mock signer tests run with `npm test`; real browser wallet smoke
 tests still require the corresponding wallet extension or Wallet Standard
 provider to be installed.
 
-The current JamScript source contains the Matrix proof codec, TS/Rust parity
-vectors, and the deterministic `verifyMatrixCrossSigning` primitive. The
-next `@jamscript/client@0.1.0-rc.3` prerelease removes platform ControlClaim
-ingress APIs while preserving the proof codec and wallet signers. Locus uses
-its own `LocusClient` identity methods and injects `subject` into business
-payloads; it does not submit `actAs`. A clean consumer checkout must use the
-packed client prerelease before the human npm publish step.
+The pinned JamScript client source contains the Matrix proof codec and the
+Ownership Matrix client/service adapters. Its service adapter verifies M→S→D
+using provider-neutral JamScript primitives; Locus delegates verification to
+that adapter. Locus uses its own `LocusClient` identity methods and injects
+`subject` into business payloads; it does not submit `actAs`.
 
 Stop the Vite preview with `Ctrl-C`. If it was started in the Docker preview
 container used by this checkout, stop it with:
