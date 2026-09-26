@@ -118,6 +118,15 @@ function preparationPhaseMessage(phase: OwnershipPreparationPhase): string {
   }
 }
 
+type CreateAssetPreparationRequest = {
+  id: number;
+  assetId: Uint8Array;
+  name: string;
+  symbol: string;
+  decimals: number;
+  initialSupply: bigint;
+};
+
 export function CreateAssetDialog({ open, locus, session, networkId, serviceId, onClose, onCreated }: {
   open: boolean;
   locus: LocusClient | null;
@@ -136,8 +145,9 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
   const preparedRef = useRef<typeof prepared>(null);
   const appliedRef = useRef(false);
   const prepareGeneration = useRef(0);
+  const prepareRequestId = useRef(0);
   const activeResumeKeys = useRef(new Set<string>());
-  const [prepareRetry, setPrepareRetry] = useState(0);
+  const [prepareRequest, setPrepareRequest] = useState<CreateAssetPreparationRequest | null>(null);
   const [stage, setStage] = useState<CreateAssetStage>("EDITING");
   const [stageMessage, setStageMessage] = useState("Enter the asset details to prepare the network action.");
   const [error, setError] = useState("");
@@ -154,11 +164,57 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
   }
 
   function resetDraft() {
+    setPrepareRequest(null);
     setName("");
     setSymbol("");
     setDecimals("0");
     setSupply("");
     setDraftAssetId(randomAssetId());
+  }
+
+  const decimalCount = Number(decimals);
+  let draftSupply: bigint | null = null;
+  if (supply.trim() && Number.isInteger(decimalCount) && decimalCount >= 0 && decimalCount <= 38) {
+    try { draftSupply = parseUnits(supply.trim(), decimalCount); } catch { draftSupply = null; }
+  }
+  const assetDetailsComplete = Boolean(
+    name.trim() && symbol.trim() && decimals.trim() && supply.trim()
+      && Number.isInteger(decimalCount) && decimalCount >= 0 && decimalCount <= 38
+      && draftSupply !== null,
+  );
+
+  function requestPreparation() {
+    if (!locus || !session || !pendingScope || pendingRef.current || !assetDetailsComplete || draftSupply === null) return;
+    setError("");
+    setStage("PREPARING");
+    setStageMessage("Preparing the create action. No wallet request is open yet.");
+    setPrepareRequest({
+      id: ++prepareRequestId.current,
+      assetId: draftAssetId.slice(),
+      name: name.trim(),
+      symbol: symbol.trim(),
+      decimals: decimalCount,
+      initialSupply: draftSupply,
+    });
+  }
+
+  function editAssetDetails() {
+    if (preparedRef.current) locus?.abandonPreparedOwnershipAction(preparedRef.current);
+    preparedRef.current = null;
+    setPrepared(null);
+    setPrepareRequest(null);
+    setStage("EDITING");
+    setStageMessage("Update the asset details, then prepare the action again.");
+    setError("");
+  }
+
+  function onAssetDetailChange(update: () => void) {
+    update();
+    if (stage === "FAILED" && pendingRef.current === null) {
+      setStage("EDITING");
+      setStageMessage("Asset details changed. Prepare the action again when ready.");
+      setError("");
+    }
   }
 
   async function resumePending(record: CreateAssetPendingRecord) {
@@ -225,6 +281,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
     setPrepared(null);
     if (!open) {
       appliedRef.current = false;
+      setPrepareRequest(null);
       return;
     }
     if (appliedRef.current) {
@@ -238,26 +295,15 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
         ? "Connect an Ownership before preparing this asset action."
         : !pendingScope
           ? "Wait for the active network and Service to finish loading."
-          : !locus
-          ? "Waiting for the selected MiniJAM network to become ready."
-          : "Waiting for network access.");
+          : "Waiting for the selected MiniJAM network to become ready.");
       setError("");
       return;
     }
 
-    const decimalCount = Number(decimals);
-    if (!name.trim() || !symbol.trim() || !Number.isInteger(decimalCount) || decimalCount < 0 || decimalCount > 38 || !supply.trim()) {
+    if (!prepareRequest) {
       setStage("EDITING");
       setStageMessage("Complete the asset name, symbol, decimals, and initial supply to prepare the action.");
       setError("");
-      return;
-    }
-    let initialSupply: bigint;
-    try { initialSupply = parseUnits(supply.trim(), decimalCount); }
-    catch (cause) {
-      setStage("FAILED");
-      setStageMessage("The asset details could not be prepared.");
-      setError(cause instanceof Error ? cause.message : "Enter a valid initial supply.");
       return;
     }
 
@@ -267,11 +313,11 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
     const timer = window.setTimeout(() => {
       let lastPhase: OwnershipPreparationPhase | null = null;
       const preparation = locus.prepareCreateAsset(
-        draftAssetId,
-        name.trim(),
-        symbol.trim(),
-        decimalCount,
-        initialSupply,
+        prepareRequest.assetId,
+        prepareRequest.name,
+        prepareRequest.symbol,
+        prepareRequest.decimals,
+        prepareRequest.initialSupply,
         undefined,
         (phase) => {
           lastPhase = phase;
@@ -312,7 +358,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
       if (preparedRef.current) locus.abandonPreparedOwnershipAction(preparedRef.current);
       preparedRef.current = null;
     };
-  }, [open, locus, session, pendingScope, name, symbol, decimals, supply, draftAssetId, prepareRetry]);
+  }, [open, locus, session, pendingScope, prepareRequest]);
 
   async function checkUnknownSubmission(record: CreateAssetPendingRecord) {
     if (!locus || record.state !== "submission-unknown") return;
@@ -346,10 +392,10 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
     preparedRef.current = null;
     setPrepared(null);
     setDraftAssetId(randomAssetId());
-    setStage("PREPARING");
+    setStage("EDITING");
     setStageMessage("Recovery record dismissed. Prepare the action again only after checking the chain.");
     setError("");
-    setPrepareRetry((value) => value + 1);
+    setPrepareRequest(null);
   }
 
   async function signAndCreate() {
@@ -435,7 +481,6 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
         setStage("FAILED");
         setStageMessage("No transaction was submitted. You can retry after reviewing the error.");
         setError(message);
-        setPrepareRetry((value) => value + 1);
       } else {
         setStage("FAILED");
         setStageMessage(errorPending.transactionId
@@ -448,22 +493,25 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
 
   const pendingSubmitted = pending?.state === "submitted";
   const signatureReady = stage === "AWAITING_WALLET" && prepared !== null && pending === null;
-  const stageBusy = stage === "PREPARING" || stage === "SIGNED" || stage === "SUBMITTING" || stage === "SUBMITTED" || stage === "FINALIZING";
-  const canRetryPreparation = stage === "FAILED" && pending === null;
+  const signatureInProgress = stage === "AWAITING_WALLET" && prepared === null;
+  const stageBusy = stage === "PREPARING" || signatureInProgress || stage === "SIGNED" || stage === "SUBMITTING" || stage === "SUBMITTED" || stage === "FINALIZING";
+  const canRetryPreparation = stage === "FAILED" && pending === null && assetDetailsComplete;
+  const assetFieldsDisabled = pending !== null || stageBusy || signatureReady;
 
   return (
     <Modal open={open} title="Create asset" onClose={onClose} footer={<>
       <ActionButton variant="secondary" icon={X} onClick={onClose}>Close</ActionButton>
       {pendingSubmitted && <ActionButton variant="secondary" icon={RefreshCw} loading={stage === "FINALIZING"} disabled={stage === "FINALIZING"} onClick={() => void resumePending(pending!)}>Resume finalization</ActionButton>}
-      {!pending && <ActionButton variant="primary" icon={stage === "PREPARING" || stage === "SUBMITTING" || stage === "FINALIZING" ? RefreshCw : CirclePlus} loading={stage === "PREPARING" || stage === "SUBMITTING" || stage === "FINALIZING"} disabled={!locus || (!signatureReady && !canRetryPreparation) || stageBusy} onClick={signatureReady ? signAndCreate : () => setPrepareRetry((value) => value + 1)}>{stage === "EDITING" ? !locus ? "Waiting for network…" : !session ? "Connect an Ownership" : "Complete asset details" : stage === "PREPARING" ? "Preparing…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : "Retry preparation"}</ActionButton>}
+      {signatureReady && <ActionButton variant="tertiary" icon={X} onClick={editAssetDetails}>Edit details</ActionButton>}
+      {!pending && <ActionButton variant="primary" icon={stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING" ? RefreshCw : CirclePlus} loading={stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING"} disabled={signatureReady ? false : !locus || !session || !pendingScope || (!assetDetailsComplete && !signatureReady) || stageBusy} onClick={signatureReady ? signAndCreate : requestPreparation}>{stage === "EDITING" ? !locus || !pendingScope ? "Waiting for network…" : !session ? "Connect an Ownership" : assetDetailsComplete ? "Prepare action" : "Complete asset details" : stage === "PREPARING" ? "Preparing…" : signatureInProgress ? "Waiting for wallet…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : canRetryPreparation ? "Retry preparation" : "Complete asset details"}</ActionButton>}
     </>}>
       <p className="modal-lead">The connected Ownership becomes the issuer.</p>
       {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><small>Owner / Issuer</small><strong>{session.label}</strong><code>{formatLocusId(session.owner)}</code>{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; subject is the master Ownership</small>}</span></div>}
       <div className="form-grid">
-        <label>Name<input disabled={pending !== null || stageBusy} value={name} placeholder="Dot Token" onChange={(event) => setName(event.target.value)} /></label>
-        <label>Symbol<input disabled={pending !== null || stageBusy} value={symbol} placeholder="DOT" onChange={(event) => setSymbol(event.target.value.toUpperCase())} /></label>
-        <label>Decimals<input disabled={pending !== null || stageBusy} type="number" min="0" max="38" value={decimals} onChange={(event) => setDecimals(event.target.value)} /></label>
-        <label>Initial supply<input disabled={pending !== null || stageBusy} inputMode="decimal" value={supply} placeholder="1000" onChange={(event) => setSupply(event.target.value)} /></label>
+        <label>Name<input disabled={assetFieldsDisabled} value={name} placeholder="Dot Token" onChange={(event) => onAssetDetailChange(() => setName(event.target.value))} /></label>
+        <label>Symbol<input disabled={assetFieldsDisabled} value={symbol} placeholder="DOT" onChange={(event) => onAssetDetailChange(() => setSymbol(event.target.value.toUpperCase()))} /></label>
+        <label>Decimals<input disabled={assetFieldsDisabled} type="number" min="0" max="38" value={decimals} onChange={(event) => onAssetDetailChange(() => setDecimals(event.target.value))} /></label>
+        <label>Initial supply<input disabled={assetFieldsDisabled} inputMode="decimal" value={supply} placeholder="1000" onChange={(event) => onAssetDetailChange(() => setSupply(event.target.value))} /></label>
       </div>
       <section className={`create-asset-stage create-asset-stage--${stage.toLowerCase()}`} aria-live="polite" role="status">
         <strong>{stageLabel(stage)}</strong>
