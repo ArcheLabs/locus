@@ -1,12 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Modal } from "../components/Modal.js";
+import { IdentityIcon } from "../components/IdentityIcon.js";
 import type { LocusWebSession } from "../session/types.js";
-import { connectMatrixSession, type MatrixConnected, type MatrixConnectionState } from "./MatrixConnector.js";
-import { discoverHomeserver } from "./MatrixConnector.js";
+import { connectMatrixPasswordSession, type MatrixConnected, type MatrixConnectionState } from "./MatrixConnector.js";
 import { beginMatrixOAuth, beginMatrixSso, discoverMatrixAuthCapabilities, type MatrixAuthCapabilities } from "./MatrixOAuth.js";
+import { DEFAULT_MATRIX_PROVIDER, resolveMatrixServer } from "./MatrixProvider.js";
 import type { LocusClient } from "@archelabs/locus";
-import { Check, ChevronDown, ClipboardCopy, LogIn, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, ClipboardCopy, LogIn, RefreshCw, ShieldCheck, X } from "lucide-react";
 import { ActionButton } from "../components/ActionButton.js";
+
+type MatrixLoginStage = "provider" | "custom-server" | "discovering" | "legacy-options" | "password" | "verification";
 
 function verificationTitle(state: MatrixConnectionState): string {
   switch (state) {
@@ -34,11 +37,12 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   locus: LocusClient | null;
   initialConnection?: MatrixConnected | null;
 }) {
-  const [userId, setUserId] = useState("");
+  const [stage, setStage] = useState<MatrixLoginStage>(initialConnection ? "verification" : "provider");
+  const [returnStage, setReturnStage] = useState<"provider" | "custom-server">("provider");
+  const [selectedServer, setSelectedServer] = useState("");
+  const [customServer, setCustomServer] = useState("");
+  const [passwordUser, setPasswordUser] = useState("");
   const [password, setPassword] = useState("");
-  const [homeserver, setHomeserver] = useState("");
-  const [advanced, setAdvanced] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
   const [authCapabilities, setAuthCapabilities] = useState<MatrixAuthCapabilities | null>(null);
   const [deviceIdCopied, setDeviceIdCopied] = useState(false);
   const [working, setWorking] = useState(false);
@@ -53,8 +57,8 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     if (!initialConnection) return;
     setPendingConnection(initialConnection);
     setConnectionState(initialConnection.state);
-    setUserId(initialConnection.stored.userId);
-    setHomeserver(initialConnection.stored.homeserver);
+    setSelectedServer(initialConnection.stored.homeserver);
+    setStage("verification");
     setError(initialConnection.error);
   }, [initialConnection]);
 
@@ -76,33 +80,42 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     return unsubscribe;
   }, [onClose, onConnected, pendingConnection]);
 
-  async function continueWithMatrix() {
+  async function startMatrixAuthentication(serverInput: string, origin: "provider" | "custom-server") {
+    const attempt = ++authAttempt.current;
     setWorking(true);
     setError("");
+    setStage("discovering");
     try {
-      if (!userId.trim()) throw new Error("Enter a Matrix ID first so Locus can discover its homeserver.");
-      const discovered = await discoverHomeserver(userId.trim(), advanced ? homeserver.trim() || undefined : undefined);
+      const discovered = await resolveMatrixServer(serverInput);
+      if (attempt !== authAttempt.current) return;
+      setSelectedServer(discovered);
+      setReturnStage(origin);
       const capabilities = await discoverMatrixAuthCapabilities(discovered);
+      if (attempt !== authAttempt.current) return;
       setAuthCapabilities(capabilities);
-      setShowPassword(false);
       if (capabilities.mode === "oauth") {
-        await beginMatrixOAuth(discovered, userId.trim(), capabilities);
-      } else if (!capabilities.sso && !capabilities.password) {
-        setError("This homeserver does not advertise a supported Matrix login method (OAuth, SSO, or password).");
+        await beginMatrixOAuth(discovered, capabilities);
+      } else if (capabilities.sso) {
+        setStage("legacy-options");
+      } else if (capabilities.password) {
+        setStage("password");
+      } else {
+        setStage("legacy-options");
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Matrix OAuth sign-in could not start.");
-    } finally { setWorking(false); }
+      if (attempt === authAttempt.current) {
+        setStage(origin);
+        setError(cause instanceof Error ? cause.message : "Matrix sign-in could not start.");
+      }
+    } finally { if (attempt === authAttempt.current) setWorking(false); }
   }
 
   async function startSso() {
     setWorking(true);
     setError("");
     try {
-      if (!userId.trim()) throw new Error("Enter a Matrix ID first so Locus can discover its homeserver.");
-      const discovered = await discoverHomeserver(userId.trim(), advanced ? homeserver.trim() || undefined : undefined);
-      if (!authCapabilities) throw new Error("Discover this homeserver’s supported login methods first.");
-      await beginMatrixSso(discovered, userId.trim(), authCapabilities);
+      if (!selectedServer || !authCapabilities) throw new Error("Choose a Matrix server and discover its supported login methods first.");
+      await beginMatrixSso(selectedServer, authCapabilities);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Matrix SSO sign-in could not start."); }
     finally { setWorking(false); }
   }
@@ -118,10 +131,10 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     setWorking(true);
     setError("");
     try {
-      const connected = await connectMatrixSession(
-        userId.trim(),
+      const connected = await connectMatrixPasswordSession(
+        selectedServer,
+        passwordUser.trim(),
         password,
-        advanced ? homeserver.trim() || undefined : undefined,
         { locus, onState: setConnectionState, signal: abortController.signal },
       );
       if (attempt !== authAttempt.current) {
@@ -134,6 +147,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
         return;
       }
       setPendingConnection(connected);
+      setStage("verification");
       setConnectionState(connected.state);
       setError(connected.error);
       setPassword("");
@@ -163,7 +177,11 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     setPassword("");
     setWorking(false);
     setError("");
-    setShowPassword(false);
+    setStage("provider");
+    setReturnStage("provider");
+    setSelectedServer("");
+    setCustomServer("");
+    setPasswordUser("");
     setAuthCapabilities(null);
     setDeviceIdCopied(false);
     onClose();
@@ -196,7 +214,9 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
         <ActionButton variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>They match</ActionButton>
       </>}
     </>}>
-      <p className="modal-lead">Sign in to Matrix with this homeserver’s supported login method. Then verify Locus as a trusted second Matrix device in Element. A verified device signs through its device key; your cross-signing master key remains the Locus Ownership.</p>
+      <p className="modal-lead">{showingVerification
+        ? "Verify Locus as a trusted second Matrix device in Element. A verified device signs through its device key; your cross-signing master key remains the Locus Ownership."
+        : "Use your Matrix account to control Locus through a verified Matrix device."}</p>
       {showingVerification ? <div className="matrix-verification-flow" aria-live="polite">
         <section className="verification-card">
           <strong>{verificationTitle(connectionState)}</strong>
@@ -237,25 +257,43 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           {verification && verification.phase !== "done" && <ActionButton size="small" variant="tertiary" icon={X} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>Cancel verification</ActionButton>}
         </section>
       </div> : <>
-        <label className="matrix-id-field">Matrix ID<input autoComplete="username" disabled={working} value={userId} placeholder="@alice:example.org" onChange={(event) => { setUserId(event.target.value); setAuthCapabilities(null); setError(""); setShowPassword(false); }} /></label>
-        <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working || !userId.trim()} onClick={() => void continueWithMatrix()}>{authCapabilities?.mode === "legacy" ? "Refresh sign-in options" : "Continue with Matrix"}</ActionButton>
-        <p className="auth-caption">Locus checks Matrix authentication metadata first. OAuth uses authorization code with PKCE S256; legacy methods appear only when the homeserver advertises them.</p>
-        {authCapabilities?.mode === "oauth" && <p className="auth-capability-note">This homeserver advertises OAuth. SSO and password fallback are not enabled for this login.</p>}
-        {legacyCapabilities && (legacyCapabilities.sso || legacyCapabilities.password) && <div className="legacy-auth-options">
-          <strong>Supported sign-in options</strong>
-          <p>Matrix OAuth metadata is unavailable. Choose a legacy method advertised by this homeserver.</p>
-          {legacyCapabilities.sso && <ActionButton variant="secondary" icon={LogIn} fullWidth disabled={working || !userId.trim()} onClick={() => void startSso()}>Continue with Matrix SSO</ActionButton>}
-          {legacyCapabilities.password && <>
-            <ActionButton size="small" variant="tertiary" icon={ChevronDown} className="legacy-password-toggle" onClick={() => setShowPassword((value) => !value)}>{showPassword ? "Hide password sign-in" : "Use password instead"}</ActionButton>
-            {showPassword && <div className="password-fallback">
-            <label>Password<input autoComplete="current-password" type="password" value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-            <ActionButton variant="secondary" icon={LogIn} fullWidth loading={working} disabled={working || !password} onClick={passwordLogin}>Sign in with password</ActionButton>
-            </div>}
-          </>}
+        {stage === "provider" && <div className="matrix-login-options">
+          <div className="matrix-provider-choice">
+            <span className="identity-icon-slot"><IdentityIcon kind="matrix" size={24} /></span>
+            <span className="matrix-provider-copy"><strong>{DEFAULT_MATRIX_PROVIDER.label}</strong><small>Sign in with your Matrix account</small></span>
+            <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void startMatrixAuthentication(DEFAULT_MATRIX_PROVIDER.server, "provider")}>Continue with Matrix.org</ActionButton>
+          </div>
+          <ActionButton variant="secondary" icon={ArrowRight} fullWidth disabled={working} onClick={() => { setError(""); setStage("custom-server"); }}>Use another Matrix server</ActionButton>
         </div>}
-        {legacyCapabilities && !legacyCapabilities.sso && !legacyCapabilities.password && <div className="matrix-unsupported-note" role="status">This homeserver does not advertise Matrix SSO or password login. Ask its administrator which sign-in methods are supported.</div>}
-        <ActionButton size="small" variant="tertiary" icon={ChevronDown} className="advanced-toggle" onClick={() => { setAdvanced((value) => !value); setAuthCapabilities(null); }}>{advanced ? "Hide homeserver settings" : "Use a custom homeserver"}</ActionButton>
-        {advanced && <label className="matrix-id-field">Homeserver URL<input disabled={working} value={homeserver} placeholder="https://matrix.example.org" onChange={(event) => { setHomeserver(event.target.value); setAuthCapabilities(null); setError(""); setShowPassword(false); }} /></label>}
+
+        {stage === "custom-server" && <div className="matrix-login-step">
+          <label className="matrix-id-field">Matrix server<input autoComplete="url" disabled={working} value={customServer} placeholder="example.org or https://matrix.example.org" onChange={(event) => { setCustomServer(event.target.value); setError(""); }} /></label>
+          <p className="auth-caption">Choose the Matrix server that hosts your account. You will sign in with that server next.</p>
+          <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working || !customServer.trim()} onClick={() => void startMatrixAuthentication(customServer, "custom-server")}>Continue</ActionButton>
+          <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage("provider"); setError(""); }}>Back</ActionButton>
+        </div>}
+
+        {stage === "discovering" && <div className="matrix-discovery-status" role="status" aria-live="polite">
+          <RefreshCw size={20} aria-hidden="true" />
+          <span>Checking sign-in options for {returnStage === "provider" ? DEFAULT_MATRIX_PROVIDER.label : customServer.trim()}…</span>
+        </div>}
+
+        {stage === "legacy-options" && legacyCapabilities && <div className="legacy-auth-options">
+          <strong>Sign in to {new URL(selectedServer).host}</strong>
+          <p>This server does not advertise Matrix OAuth. Choose one of its supported sign-in methods.</p>
+          {legacyCapabilities.sso && <ActionButton variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void startSso()}>Continue with Matrix SSO</ActionButton>}
+          {legacyCapabilities.password && <ActionButton variant={legacyCapabilities.sso ? "secondary" : "primary"} icon={LogIn} fullWidth disabled={working} onClick={() => setStage("password")}>Use password instead</ActionButton>}
+          {!legacyCapabilities.sso && !legacyCapabilities.password && <div className="matrix-unsupported-note" role="status">This Matrix server does not advertise a supported sign-in method. Ask its administrator which methods are available.</div>}
+          <ActionButton size="small" variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(returnStage); setAuthCapabilities(null); setError(""); }}>Back</ActionButton>
+        </div>}
+
+        {stage === "password" && legacyCapabilities?.password && <div className="password-fallback">
+          <p>This server supports password sign-in. Your password is sent to the selected Matrix server and is never saved by Locus.</p>
+          <label className="matrix-id-field">Matrix ID or username<input autoComplete="username" disabled={working} value={passwordUser} onChange={(event) => setPasswordUser(event.target.value)} /></label>
+          <label>Password<input autoComplete="current-password" type="password" disabled={working} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          <ActionButton variant="primary" icon={LogIn} fullWidth loading={working} disabled={working || !passwordUser.trim() || !password} onClick={() => void passwordLogin()}>Sign in</ActionButton>
+          <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(legacyCapabilities.sso ? "legacy-options" : returnStage); setPassword(""); setError(""); }}>Back</ActionButton>
+        </div>}
       </>}
       {error && <div className="transaction-error" role="alert">{error}</div>}
       <p className="modal-note">Locus never stores your Matrix password. Device verification is required before Matrix can authorize an identity.</p>

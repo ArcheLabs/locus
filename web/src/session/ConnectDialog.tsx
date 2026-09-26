@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAppKit } from "@reown/appkit/react";
 import { Modal } from "../components/Modal.js";
 import { IdentityOption } from "../components/IdentityOption.js";
@@ -34,6 +34,8 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
   const [selectedAccount, setSelectedAccount] = useState("");
   const [matrixOpen, setMatrixOpen] = useState(false);
   const [waitingForEvm, setWaitingForEvm] = useState(false);
+  const evmRequestInFlight = useRef(false);
+  const evmRequestGeneration = useRef(0);
   const { open: openAppKit, close: closeAppKit } = useAppKit();
   const options = useMemo(() => connectorInfo.map((entry) => ({ ...entry, available: available(entry.kind) })), []);
 
@@ -44,6 +46,8 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
       setSelectedAccount("");
       setError("");
       setWaitingForEvm(false);
+      evmRequestInFlight.current = false;
+      evmRequestGeneration.current += 1;
     }
   }, [open]);
 
@@ -51,20 +55,38 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
     if (initialMatrixConnection) setMatrixOpen(true);
   }, [initialMatrixConnection]);
 
-  useEffect(() => { if (evmError) setError(evmError); }, [evmError]);
+  useEffect(() => {
+    if (!evmError) return;
+    setError(evmError);
+    if (evmRequestInFlight.current) {
+      evmRequestInFlight.current = false;
+      evmRequestGeneration.current += 1;
+      setWaitingForEvm(false);
+      onEvmConnectCancelled();
+    }
+  }, [evmError, onEvmConnectCancelled]);
 
   async function chooseConnector(kind: SessionKind) {
+    if (connecting !== null || evmRequestInFlight.current) return;
     if (kind === "matrix") {
       onClose();
       setMatrixOpen(true);
       return;
     }
     if (kind === "evm") {
+      evmRequestInFlight.current = true;
+      const requestGeneration = ++evmRequestGeneration.current;
       setError("");
       setWaitingForEvm(true);
       onEvmConnectRequested();
       try { await openAppKit({ view: "Connect", namespace: "eip155" }); }
-      catch (cause) { setWaitingForEvm(false); onEvmConnectCancelled(); setError(cause instanceof Error ? cause.message : "Unable to open the EVM wallet selector."); }
+      catch (cause) {
+        if (requestGeneration !== evmRequestGeneration.current) return;
+        evmRequestInFlight.current = false;
+        setWaitingForEvm(false);
+        onEvmConnectCancelled();
+        setError(cause instanceof Error ? cause.message : "Unable to open the EVM wallet selector.");
+      }
       return;
     }
     setConnecting(kind);
@@ -90,6 +112,19 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
   const matrixEntry = { kind: "matrix" as const, label: "Matrix", description: "Use a verified Matrix device controller", available: true };
   const displayOptions = [matrixEntry, ...options];
 
+  function cancelEvmRequest() {
+    evmRequestInFlight.current = false;
+    evmRequestGeneration.current += 1;
+    setWaitingForEvm(false);
+    onEvmConnectCancelled();
+    void closeAppKit();
+  }
+
+  function closeConnectDialog() {
+    if (evmRequestInFlight.current) cancelEvmRequest();
+    onClose();
+  }
+
   async function connect(kind: SessionKind, accountId: string) {
     setConnecting(kind);
     setError("");
@@ -105,7 +140,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
 
   return (
     <>
-    <Modal open={open} title="Connect" onClose={onClose}>
+    <Modal open={open} title="Connect" onClose={closeConnectDialog}>
       <p className="modal-lead">Choose an Ownership signer. This does not select an execution network.</p>
       <div className="connect-options">
         {displayOptions.map((entry) => (
@@ -113,16 +148,16 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
             key={entry.kind}
             type="button"
             className="identity-option-row identity-option-row--comfortable"
-            disabled={connecting !== null || !entry.available}
-            data-disabled={connecting !== null || !entry.available ? "true" : undefined}
+            disabled={connecting !== null || waitingForEvm || !entry.available}
+            data-disabled={connecting !== null || waitingForEvm || !entry.available ? "true" : undefined}
             onClick={() => chooseConnector(entry.kind)}
           >
             <IdentityOption
               kind={entry.kind}
               title={entry.label}
-              description={connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}
+              description={waitingForEvm && entry.kind === "evm" ? "Approve or cancel the pending wallet request" : connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}
               variant="comfortable"
-              disabled={connecting !== null || !entry.available}
+              disabled={connecting !== null || waitingForEvm || !entry.available}
               trailing="arrow"
             />
           </button>
@@ -135,7 +170,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onConnected, onEv
         </select>
         <ActionButton variant="primary" icon={Wallet} fullWidth disabled={!selectedAccount || connecting !== null} onClick={() => connect(selectedKind, selectedAccount)}>Connect selected account</ActionButton>
       </div>}
-      {waitingForEvm && <ActionButton className="cancel-wallet-connect" variant="tertiary" size="small" icon={X} onClick={() => { setWaitingForEvm(false); onEvmConnectCancelled(); void closeAppKit(); }}>Cancel wallet connection</ActionButton>}
+      {waitingForEvm && <ActionButton className="cancel-wallet-connect" variant="tertiary" size="small" icon={X} onClick={cancelEvmRequest}>Cancel wallet connection</ActionButton>}
       {error && <div className="transaction-error">{error}</div>}
       <p className="modal-note">Locus keeps assets attached to Ownership. Wallets only authorize actions.</p>
     </Modal>

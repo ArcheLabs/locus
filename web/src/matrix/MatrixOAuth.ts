@@ -74,7 +74,7 @@ function base64Url(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
-export function matrixDeviceId(_homeserver: string, _userId: string): string {
+export function matrixDeviceId(): string {
   // This helper is for a new authentication flow only. A durable device ID is
   // reused exclusively by restoreMatrixSession after server/local key parity.
   // New sign-ins always receive a fresh ID so a deleted Matrix device cannot
@@ -208,13 +208,13 @@ function matrixWebClientUris(): { clientUri: string; redirectUri: string } {
   return { clientUri: new URL("/", callback.origin).toString(), redirectUri: callback.toString() };
 }
 
-export async function beginMatrixOAuth(homeserver: string, userId: string, discovered?: MatrixAuthCapabilities): Promise<void> {
+export async function beginMatrixOAuth(homeserver: string, discovered?: MatrixAuthCapabilities): Promise<void> {
   const capabilities = discovered ?? await discoverMatrixAuthCapabilities(homeserver);
   if (capabilities.mode !== "oauth" || capabilities.homeserver !== normalizedHomeserver(homeserver)) {
     throw matrixError("Matrix OAuth is not advertised by this homeserver.");
   }
   const metadata = capabilities.metadata;
-  const deviceId = matrixDeviceId(homeserver, userId);
+  const deviceId = matrixDeviceId();
   const { clientUri, redirectUri: uri } = matrixWebClientUris();
   let registration: Response;
   try {
@@ -262,11 +262,11 @@ export async function beginMatrixOAuth(homeserver: string, userId: string, disco
   window.location.assign(authorization.toString());
 }
 
-export async function beginMatrixSso(homeserver: string, userId: string, capabilities: MatrixAuthCapabilities): Promise<void> {
+export async function beginMatrixSso(homeserver: string, capabilities: MatrixAuthCapabilities): Promise<void> {
   if (capabilities.mode !== "legacy" || !capabilities.sso || capabilities.homeserver !== normalizedHomeserver(homeserver)) {
     throw matrixError("This homeserver has not advertised Matrix SSO login.");
   }
-  const deviceId = matrixDeviceId(homeserver, userId);
+  const deviceId = matrixDeviceId();
   const state = randomUrlSafe();
   const uri = new URL(redirectUri());
   uri.searchParams.set("matrix_sso_state", state);

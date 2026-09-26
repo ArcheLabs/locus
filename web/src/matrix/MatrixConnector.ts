@@ -5,7 +5,8 @@ import type { LocusWebSession } from "../session/types.js";
 import { describeMatrixCause, matrixControllerReceiptFailure, MatrixConnectorError } from "./MatrixErrors.js";
 import { destroyMatrixCryptoStore, MatrixCryptoDevice, type MatrixVerificationSnapshot } from "./MatrixCryptoDevice.js";
 import { queryMatrixDeviceKeyParity, queryMatrixKeys, type MatrixDiscoveredKeys } from "./MatrixKeysQuery.js";
-import { clearMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, committedMatrixDeviceId, matrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
+import { clearMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, committedMatrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
+import { authenticateMatrixPassword } from "./MatrixPasswordLogin.js";
 
 export type MatrixStoredSession = MatrixOAuthSession;
 
@@ -158,19 +159,6 @@ async function refreshMatrixAccessToken(stored: MatrixStoredSession, persist = t
 
 async function ensureFreshMatrixToken(stored: MatrixStoredSession, persist = true): Promise<void> {
   if (stored.expiresAtMs !== undefined && stored.expiresAtMs <= Date.now() + 5_000) await refreshMatrixAccessToken(stored, persist);
-}
-
-function classifyLoginFailure(cause: unknown): MatrixConnectorError {
-  if (cause instanceof MatrixConnectorError) return cause;
-  const candidate = cause as { errcode?: unknown; httpStatus?: unknown; statusCode?: unknown } | null;
-  const status = typeof candidate?.httpStatus === "number"
-    ? candidate.httpStatus
-    : typeof candidate?.statusCode === "number" ? candidate.statusCode : undefined;
-  const errcode = typeof candidate?.errcode === "string" ? candidate.errcode : "";
-  if (status === 401 || status === 403 || errcode === "M_FORBIDDEN" || errcode === "M_UNKNOWN_TOKEN") {
-    return new MatrixConnectorError("INVALID_LOGIN", "Matrix login was rejected", { cause });
-  }
-  return new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Unable to reach or initialize the Matrix homeserver", { cause });
 }
 
 async function authenticatedFetch(stored: MatrixStoredSession, input: RequestInfo | URL, init: RequestInit = {}, persistRefresh = true): Promise<Response> {
@@ -674,44 +662,13 @@ async function makeConnected(
   return connected;
 }
 
-export async function connectMatrixSession(
+export async function connectMatrixPasswordSession(
+  homeserver: string,
   userId: string,
   password: string,
-  configuredHomeserver?: string,
   options: MatrixConnectionOptions = { locus: null },
 ): Promise<MatrixConnected> {
-  const homeserver = await discoverHomeserver(userId, configuredHomeserver);
-  let loginClient: MatrixClient;
-  try {
-    loginClient = createClient({ baseUrl: homeserver });
-  } catch (cause) {
-    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Unable to initialize Matrix homeserver client", { cause });
-  }
-  let login: Awaited<ReturnType<MatrixClient["loginRequest"]>>;
-  try {
-    const deviceId = matrixDeviceId(homeserver, userId);
-    login = await loginClient.loginRequest({
-      type: "m.login.password",
-      identifier: { type: "m.id.user", user: userId },
-      password,
-      device_id: deviceId,
-      initial_device_display_name: "Locus",
-      refresh_token: true,
-    });
-  } catch (cause) {
-    throw classifyLoginFailure(cause);
-  } finally {
-    loginClient.stopClient();
-  }
-  const stored: MatrixStoredSession = {
-    accessToken: login.access_token,
-    refreshToken: login.refresh_token,
-    expiresAtMs: typeof login.expires_in_ms === "number" ? Date.now() + login.expires_in_ms : undefined,
-    userId: login.user_id,
-    deviceId: login.device_id,
-    homeserver,
-    authType: "legacy",
-  };
+  const stored = await authenticateMatrixPassword(homeserver, userId, password);
   return connectStoredMatrixSession(stored, options, false, true);
 }
 

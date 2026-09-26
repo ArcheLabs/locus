@@ -6,6 +6,8 @@ import { encodeAddress } from "@polkadot/util-crypto";
 import { selectNetwork } from "../web/src/network/selection.ts";
 import { queryMatrixKeys } from "../web/src/matrix/MatrixKeysQuery.ts";
 import { beginMatrixOAuth, beginMatrixSso, commitMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, completeMatrixAuthCallback, discoverMatrixAuthCapabilities, discoverMatrixAuthMetadata, matrixDeviceId, persistMatrixSession, refreshMatrixOAuthToken, revokeMatrixOAuthSession } from "../web/src/matrix/MatrixOAuth.ts";
+import { DEFAULT_MATRIX_PROVIDER, resolveMatrixServer } from "../web/src/matrix/MatrixProvider.ts";
+import { authenticateMatrixPassword } from "../web/src/matrix/MatrixPasswordLogin.ts";
 import { describeMatrixCause, matrixControllerReceiptFailure, matrixCryptoStageFailure } from "../web/src/matrix/MatrixErrors.ts";
 import { createHash } from "node:crypto";
 import { resolveLocusMode, buildLocusMode } from "../web/src/network/mode.ts";
@@ -71,6 +73,22 @@ test("network deployment does not silently configure Testnet as Local", async ()
   assert.equal(config.networks.testnet.backendUrl, null);
   assert.equal(config.networks.testnet.deploymentUrl, null);
   assert.equal(config.networks.testnet.label, "TestNet");
+});
+
+test("Matrix provider selection resolves a server name without asking for a user ID", async () => {
+  assert.deepEqual(DEFAULT_MATRIX_PROVIDER, { id: "matrix.org", label: "Matrix.org", server: "matrix.org" });
+  const requests = [];
+  const discovered = await resolveMatrixServer("example.org/", async (url) => {
+    requests.push(String(url));
+    return new Response(JSON.stringify({ "m.homeserver": { base_url: "https://matrix-backend.example.org/" } }), { status: 200 });
+  });
+  assert.equal(discovered, "https://matrix-backend.example.org");
+  assert.deepEqual(requests, ["https://example.org/.well-known/matrix/client"]);
+  assert.equal(await resolveMatrixServer("fallback.example", async () => new Response("", { status: 404 })), "https://fallback.example");
+  let explicitLookup = false;
+  assert.equal(await resolveMatrixServer("https://matrix.example.org/", async () => { explicitLookup = true; throw new Error("should not discover explicit URLs"); }), "https://matrix.example.org");
+  assert.equal(explicitLookup, false, "an explicit homeserver URL is used directly");
+  await assert.rejects(resolveMatrixServer(""), /Enter a Matrix server/);
 });
 
 function fakeEvmProvider(initialAccounts = []) {
@@ -358,7 +376,7 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
   try {
     const metadata = await discoverMatrixAuthMetadata("https://example.org");
     assert.equal(metadata.authorization_endpoint, "https://auth.example.org/oauth2/auth");
-    await beginMatrixOAuth("https://example.org", "@alice:example.org");
+    await beginMatrixOAuth("https://example.org");
     assert.equal(assigned.length, 1);
     const authorization = new URL(assigned[0]);
     const flow = JSON.parse(window.sessionStorage.getItem("locus.matrix.oauth-flow.v1"));
@@ -366,6 +384,7 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
     assert.equal(authorization.searchParams.get("client_id"), "locus-test-client");
     assert.equal(authorization.searchParams.get("response_mode"), "fragment");
     assert.equal(authorization.searchParams.get("code_challenge_method"), "S256");
+    assert.equal(authorization.searchParams.has("login_hint"), false);
     assert.equal(authorization.searchParams.get("state"), flow.state);
     assert.equal(authorization.searchParams.get("scope"), `urn:matrix:client:api:* urn:matrix:client:device:${flow.deviceId}`);
     assert.equal(authorization.searchParams.get("code_challenge"), createHash("sha256").update(flow.verifier).digest("base64url"));
@@ -376,7 +395,7 @@ test("Matrix OAuth discovery starts authorization code flow with PKCE S256 and s
     assert.equal(window.sessionStorage.getItem(deviceKey), null, "a fresh auth flow does not reuse a committed or provisional device ID");
     assert.equal(window.localStorage.getItem(deviceKey), null, "a device ID is committed only after crypto setup succeeds");
     window.location.href = "http://127.0.0.1:5173/";
-    await assert.rejects(beginMatrixOAuth("https://example.org", "@alice:example.org"), /requires Locus to be opened over HTTPS/);
+    await assert.rejects(beginMatrixOAuth("https://example.org"), /requires Locus to be opened over HTTPS/);
     assert.equal(registrations.length, 1, "insecure previews must not register an invalid web client");
   } finally {
     globalThis.window = originalWindow;
@@ -413,7 +432,7 @@ test("OAuth metadata selects OAuth only and never probes or redirects to legacy 
     assert.equal(capabilities.mode, "oauth");
     assert.equal(capabilities.sso, false);
     assert.equal(capabilities.password, false);
-    await beginMatrixOAuth("https://example.org", "@alice:example.org", capabilities);
+    await beginMatrixOAuth("https://example.org", capabilities);
     assert.equal(requests.some(({ url }) => url?.endsWith("/_matrix/client/v3/login")), false);
     assert.equal(requests.some(({ redirect }) => redirect?.includes("/login/sso/redirect")), false);
     assert.equal(requests.some(({ redirect }) => redirect?.startsWith("https://auth.example.org/auth?")), true);
@@ -440,20 +459,20 @@ test("legacy SSO is shown and usable only when /login advertises m.login.sso", a
     requests.push({ target, method: init.method ?? "GET" });
     if (target.endsWith("/_matrix/client/v1/auth_metadata")) return new Response(JSON.stringify({ errcode: "M_UNRECOGNIZED" }), { status: 404 });
     if (target.endsWith("/_matrix/client/v3/login") && !init.method) return new Response(JSON.stringify({ flows: [{ type: "m.login.sso" }] }), { status: 200 });
-    if (target.endsWith("/_matrix/client/v3/login") && init.method === "POST") return new Response(JSON.stringify({ access_token: "sso-access", user_id: "@alice:example.org", device_id: "ELEMENT-LOGIN" }), { status: 200 });
+    if (target.endsWith("/_matrix/client/v3/login") && init.method === "POST") return new Response(JSON.stringify({ access_token: "sso-access", user_id: "@authenticated:example.org", device_id: "ELEMENT-LOGIN" }), { status: 200 });
     throw new Error(`Unexpected request ${target}`);
   };
   try {
     const capabilities = await discoverMatrixAuthCapabilities("https://example.org");
     assert.deepEqual(capabilities, { mode: "legacy", homeserver: "https://example.org", sso: true, password: false });
-    await beginMatrixSso("https://example.org", "@alice:example.org", capabilities);
+    await beginMatrixSso("https://example.org", capabilities);
     assert.equal(new URL(assigned[0]).pathname, "/_matrix/client/v3/login/sso/redirect");
     assert.equal(requests.some(({ target }) => target.endsWith("/login/sso/redirect")), false, "the redirect is a browser navigation, never an unguarded fetch");
     const flow = JSON.parse(sessionStorage.getItem("locus.matrix.sso-flow.v1"));
     globalThis.window.location.href = `https://locus.example/app?matrix_sso_state=${flow.state}&loginToken=temporary-token`;
     const completed = await completeMatrixAuthCallback();
     assert.equal(completed.authType, "legacy");
-    assert.equal(completed.userId, "@alice:example.org");
+    assert.equal(completed.userId, "@authenticated:example.org", "the SSO login response supplies the authenticated identity");
     assert.equal(completed.deviceId, "ELEMENT-LOGIN");
     assert.equal(requests.some(({ target, method }) => target.endsWith("/login") && method === "POST"), true);
   } finally { globalThis.window = originalWindow; globalThis.fetch = originalFetch; }
@@ -480,9 +499,38 @@ test("legacy password and unsupported homeservers follow advertised login flows 
     assert.deepEqual(await discoverMatrixAuthCapabilities("https://no-login.example"), { mode: "legacy", homeserver: "https://no-login.example", sso: false, password: false });
   } finally { globalThis.fetch = originalFetch; }
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
-  assert.match(dialog, /legacyCapabilities\.password &&/);
+  assert.match(dialog, /stage === "password" && legacyCapabilities\?\.password/);
   assert.match(dialog, /legacyCapabilities\.sso &&/);
-  assert.match(dialog, /does not advertise Matrix SSO or password login/);
+  assert.match(dialog, /does not advertise a supported sign-in method/);
+});
+
+test("password authentication uses the selected server and trusts the login response user ID", async () => {
+  let clientOptions;
+  let loginInput;
+  let stopped = false;
+  const authenticated = await authenticateMatrixPassword(
+    "https://selected.example/",
+    "typed-account",
+    "temporary-password",
+    (options) => {
+      clientOptions = options;
+      return {
+        async loginRequest(input) {
+          loginInput = input;
+          return { access_token: "password-access", refresh_token: "password-refresh", user_id: "@server-authenticated:example.org", device_id: input.device_id };
+        },
+        stopClient() { stopped = true; },
+      };
+    },
+  );
+  assert.deepEqual(clientOptions, { baseUrl: "https://selected.example" });
+  assert.equal(loginInput.identifier.user, "typed-account");
+  assert.equal(loginInput.password, "temporary-password");
+  assert.match(loginInput.device_id, /^LOCUS-[A-Z0-9]+$/);
+  assert.equal(authenticated.userId, "@server-authenticated:example.org");
+  assert.equal(authenticated.homeserver, "https://selected.example");
+  assert.equal(Object.hasOwn(authenticated, "password"), false);
+  assert.equal(stopped, true);
 });
 
 test("OAuth runtime errors stay actionable and do not unlock legacy fallbacks", async () => {
@@ -507,7 +555,7 @@ test("OAuth runtime errors stay actionable and do not unlock legacy fallbacks", 
   };
   try {
     const capabilities = await discoverMatrixAuthCapabilities("https://example.org");
-    await assert.rejects(beginMatrixOAuth("https://example.org", "@alice:example.org", capabilities), /registration is disabled by the homeserver/);
+    await assert.rejects(beginMatrixOAuth("https://example.org", capabilities), /registration is disabled by the homeserver/);
     assert.equal(capabilities.mode, "oauth");
     assert.equal(requests.some((url) => url.endsWith("/v3/login")), false);
     assert.equal(requests.some((url) => url.endsWith("/login/sso/redirect")), false);
@@ -515,6 +563,41 @@ test("OAuth runtime errors stay actionable and do not unlock legacy fallbacks", 
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(dialog, /setShowLegacy/);
   assert.match(dialog, /setError\(cause instanceof Error \? cause\.message/);
+});
+
+test("Matrix login separates server selection from authenticated identity and preserves verification", async () => {
+  const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  const oauth = await fs.readFile(new URL("../web/src/matrix/MatrixOAuth.ts", import.meta.url), "utf8");
+  const connector = await fs.readFile(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
+  const passwordLogin = await fs.readFile(new URL("../web/src/matrix/MatrixPasswordLogin.ts", import.meta.url), "utf8");
+  const responsive = await fs.readFile(new URL("../web/src/styles/responsive.css", import.meta.url), "utf8");
+  const styles = await fs.readFile(new URL("../web/src/styles.css", import.meta.url), "utf8");
+  const provider = await fs.readFile(new URL("../web/src/matrix/MatrixProvider.ts", import.meta.url), "utf8");
+  const msc4108 = await fs.readFile(new URL("../docs/matrix-msc4108-feasibility.md", import.meta.url), "utf8");
+  assert.match(dialog, /Continue with Matrix\.org/);
+  assert.match(dialog, /Use another Matrix server/);
+  assert.match(dialog, /Matrix server<input/);
+  assert.doesNotMatch(dialog, /Enter a Matrix ID first/);
+  assert.doesNotMatch(dialog, /const \[userId, setUserId\]/);
+  assert.match(dialog, /beginMatrixOAuth\(discovered, capabilities\)/);
+  assert.match(dialog, /beginMatrixSso\(selectedServer, authCapabilities\)/);
+  assert.match(dialog, /stage === "password" && legacyCapabilities\?\.password/);
+  assert.match(dialog, /connectMatrixPasswordSession\(\s*selectedServer/);
+  assert.match(passwordLogin, /userId: login\.user_id/);
+  assert.match(oauth, /async function whoAmI[\s\S]*?return payload\.user_id/);
+  assert.match(oauth, /export async function beginMatrixOAuth\(homeserver: string, discovered\?/);
+  assert.match(oauth, /export async function beginMatrixSso\(homeserver: string, capabilities:/);
+  assert.match(oauth, /export function matrixDeviceId\(\): string/);
+  assert.match(connector, /const MATRIX_SESSION_KEY = "locus\.matrix\.session\.v1"/);
+  assert.match(connector, /connected\.requestOwnUserVerification\(\)/);
+  assert.match(dialog, /confirmVerification\(true\)/);
+  assert.match(dialog, /Copy device ID/);
+  assert.doesNotMatch(dialog, /mobile\.element\.io/);
+  assert.match(responsive, /@media \(max-width: 640px\)/);
+  assert.match(styles, /\.matrix-provider-choice/);
+  assert.match(responsive, /\.matrix-auth-button,[\s\S]*?min-height: 48px/);
+  assert.match(provider, /\.well-known\/matrix\/client/);
+  assert.match(msc4108, /Do not implement MSC4108/);
 });
 
 test("Matrix OAuth callback returns a provisional session; committed sessions support refresh and revocation", async () => {
@@ -576,11 +659,12 @@ test("new Matrix auth gets a fresh device ID; only a successfully initialized de
   const originalWindow = globalThis.window;
   globalThis.window = { localStorage: storage(), sessionStorage: storage() };
   try {
-    const deviceId = matrixDeviceId("https://example.org", "@alice:example.org");
+    const deviceId = matrixDeviceId();
     const key = "locus.matrix.device.v1.https://example.org|@alice:example.org";
     assert.equal(window.localStorage.getItem(key), null);
     assert.equal(window.sessionStorage.getItem(key), null);
-    assert.notEqual(matrixDeviceId("https://example.org", "@alice:example.org"), deviceId);
+    assert.equal(matrixDeviceId.length, 0, "device IDs do not take a pre-login server name or user ID");
+    assert.notEqual(matrixDeviceId(), deviceId);
     commitMatrixDeviceId("https://example.org", "@alice:example.org", deviceId);
     assert.equal(window.localStorage.getItem(key), deviceId);
     assert.equal(window.sessionStorage.getItem(key), null);
