@@ -1,0 +1,14 @@
+[global]
+server_name = "matrix.minijam.xyz"
+database_path = "/var/lib/tuwunel"
+address = ["0.0.0.0"]
+port = 8008
+allow_registration = false
+allow_federation = true
+allow_room_creation = false
+allow_public_room_directory_over_federation = false
+allow_public_room_directory_without_auth = false
+appservice_dir = "/etc/tuwunel/appservices"
+
+[global.well_known]
+server = "matrix.minijam.xyz:443"

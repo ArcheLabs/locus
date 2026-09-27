@@ -1,42 +1,38 @@
 import { parseLocusId, type Ownership } from "@archelabs/locus";
-import { discoverHomeserver } from "./MatrixConnector.js";
-import { resolveMatrixMasterOwnership } from "./MatrixKeysQuery.js";
-import { MatrixConnectorError } from "./MatrixErrors.js";
+import { MatrixRecipientRequestError, requestMatrixRecipientOwnership } from "./MatrixRecipientRequest.mjs";
+import { MatrixConnectorError, type MatrixErrorCode } from "./MatrixErrors.js";
 
-/** Resolve a Matrix ID through the authenticated resolver service, never anonymously. */
-export async function resolveMatrixRecipient(userId: string, options: { resolverUrl?: string; accessToken?: string } = {}): Promise<Ownership> {
-  if (!options.resolverUrl) throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Matrix recipient resolver is not configured for this network");
-  let response: Response;
-  try {
-    response = await fetch(`${options.resolverUrl.replace(/\/$/, "")}/v1/resolve`, {
-      method: "POST",
-      headers: { "content-type": "application/json", ...(options.accessToken ? { authorization: `Bearer ${options.accessToken}` } : {}) },
-      body: JSON.stringify({ userId }),
-    });
-  } catch (cause) {
-    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Unable to reach the Matrix recipient resolver", { cause });
-  }
-  const text = await response.text();
-  let payload: unknown;
-  try { payload = text ? JSON.parse(text) : {}; } catch (cause) {
-    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Matrix recipient resolver returned invalid JSON", { cause });
-  }
-  if (!response.ok) {
-    const error = payload && typeof payload === "object" && "error" in payload ? String((payload as { error?: unknown }).error) : `HTTP ${response.status}`;
-    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", `Matrix recipient resolver failed: ${error}`);
-  }
-  if (!payload || typeof payload !== "object" || typeof (payload as { ownership?: unknown }).ownership !== "string") {
-    throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", "Matrix recipient resolver did not return a canonical Ownership");
-  }
-  try {
-    return parseLocusId((payload as { ownership: string }).ownership);
-  } catch (cause) {
-    throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", "Matrix recipient resolver returned an invalid Ownership", { cause });
-  }
-}
+const requestErrorCodes: Record<MatrixRecipientRequestError["code"], MatrixErrorCode> = {
+  RESOLVER_UNCONFIGURED: "MATRIX_RESOLVER_UNCONFIGURED",
+  MATRIX_MASTER_KEY_CHANGED: "MATRIX_MASTER_KEY_CHANGED",
+  MATRIX_CROSS_SIGNING_UNAVAILABLE: "CROSS_SIGNING_UNAVAILABLE",
+  MATRIX_FEDERATION_FAILURE: "MATRIX_FEDERATION_FAILURE",
+  MATRIX_HOMESERVER_UNAVAILABLE: "HOMESERVER_UNAVAILABLE",
+  MATRIX_RESOLVER_CONFIGURATION_ERROR: "MATRIX_RESOLVER_CONFIGURATION_ERROR",
+  MATRIX_QUERY_TIMEOUT: "MATRIX_QUERY_TIMEOUT",
+  MATRIX_INVALID_REMOTE_KEY: "CROSS_SIGNING_UNAVAILABLE",
+  INVALID_MATRIX_USER_ID: "CROSS_SIGNING_UNAVAILABLE",
+  INVALID_REQUEST: "HOMESERVER_UNAVAILABLE",
+};
 
-/** Authenticated direct lookup for the logged-in Matrix account only. */
-export async function resolveAuthenticatedMatrixRecipient(userId: string, homeserver?: string, accessToken?: string): Promise<Ownership> {
-  const resolvedHomeserver = await discoverHomeserver(userId, homeserver);
-  return resolveMatrixMasterOwnership(userId, resolvedHomeserver, accessToken);
+export async function resolveMatrixRecipient(
+  userId: string,
+  options: { resolverUrl?: string; signal?: AbortSignal } = {},
+): Promise<Ownership> {
+  try {
+    const locusId = await requestMatrixRecipientOwnership(userId, options.resolverUrl, options.signal);
+    try {
+      return parseLocusId(locusId);
+    } catch (cause) {
+      throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", "Matrix recipient resolver returned an invalid Locus Ownership.", { cause });
+    }
+  } catch (cause) {
+    if (cause instanceof MatrixConnectorError) throw cause;
+    if (cause instanceof MatrixRecipientRequestError) {
+      const code = requestErrorCodes[cause.code];
+      throw new MatrixConnectorError(code, cause.message, { cause });
+    }
+    if (options.signal?.aborted) throw cause;
+    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Unable to reach the Matrix recipient resolver.", { cause });
+  }
 }

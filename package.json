@@ -12,7 +12,9 @@
     "test": "bash scripts/test-local.sh",
     "build:web": "npm --prefix web run build",
     "dev": "npm --prefix web run dev",
-    "test:matrix-resolver": "node --test apps/matrix-resolver/test.mjs"
+    "matrix-resolver": "npm --prefix apps/matrix-resolver start",
+    "test:matrix-resolver": "node --test apps/matrix-resolver/test.mjs",
+    "check:matrix-resolver": "node scripts/check-matrix-resolver.mjs"
   },
   "dependencies": {
     "@jamscript/client": "0.1.0-rc.4",

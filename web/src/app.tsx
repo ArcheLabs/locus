@@ -34,6 +34,22 @@ type Page = "send" | "assets" | "swap" | "activity";
 type DemoAsset = { symbol: string; name: string; balance: bigint; decimals: number; value: string; color: string };
 type ActivityItem = { kind?: "transfer"; direction: "sent" | "received"; asset: string; recipient: string; amount: string; date: string; transactionId?: string }
   | { kind: "swap"; assetIn: string; assetOut: string; amountIn: string; amountOut: string; date: string; transactionId?: string };
+type MatrixRecipientState =
+  | { status: "idle" }
+  | { status: "resolving"; userId: string; scope: string }
+  | { status: "resolved"; userId: string; scope: string; ownership: import("@archelabs/locus").Ownership }
+  | { status: "unavailable" | "key-changed" | "error"; userId: string; scope: string; message: string };
+const MATRIX_RECIPIENT_DEBOUNCE_MS = 400;
+
+function isCompleteMatrixUserId(value: string): boolean {
+  const match = /^@[^:\s/]+:(?:\[[0-9A-Fa-f:.]+\]|[A-Za-z0-9.-]+)(?::([0-9]{1,5}))?$/.exec(value);
+  if (!match) return false;
+  if (match[1] !== undefined) {
+    const port = Number(match[1]);
+    if (port < 1 || port > 65535) return false;
+  }
+  return true;
+}
 
 const demoAssets: DemoAsset[] = [
   { symbol: "DOT", name: "Dot Token", balance: 12450n, decimals: 0, value: "≈ $623.40", color: "#247eaa" },
@@ -86,8 +102,7 @@ export function App() {
   const [assetSearch, setAssetSearch] = useState("");
   const [recipientType, setRecipientType] = useState<RecipientType>("matrix");
   const [recipient, setRecipient] = useState("");
-  const [matrixRecipientOwnership, setMatrixRecipientOwnership] = useState<import("@archelabs/locus").Ownership | null>(null);
-  const [matrixRecipientError, setMatrixRecipientError] = useState("");
+  const [matrixRecipientState, setMatrixRecipientState] = useState<MatrixRecipientState>({ status: "idle" });
   const [amount, setAmount] = useState("");
   const [typeOpen, setTypeOpen] = useState(false);
   const [assetPickerOpen, setAssetPickerOpen] = useState(false);
@@ -442,24 +457,66 @@ export function App() {
   );
   const currentResolution = useMemo(() => resolveRecipient(recipientType, recipient), [recipient, recipientType]);
   const resolvedRecipient = useMemo(() => {
-    if (recipientType !== "matrix" || !matrixRecipientOwnership) return matrixRecipientError ? { ...currentResolution, message: matrixRecipientError } : currentResolution;
-    return { ...currentResolution, ownership: matrixRecipientOwnership, valid: true, configured: true, detectedType: "matrix" as const, message: "Matrix master Ownership resolved" };
-  }, [currentResolution, matrixRecipientError, matrixRecipientOwnership, recipientType]);
+    if (recipientType !== "matrix") return currentResolution;
+    const userId = recipient.trim();
+    const resolverUrl = network.network?.matrixResolverUrl;
+    const scope = `${network.networkId}:${resolverUrl ?? ""}`;
+    const state = "userId" in matrixRecipientState && matrixRecipientState.userId === userId && matrixRecipientState.scope === scope
+      ? matrixRecipientState
+      : { status: "idle" as const };
+    if (state.status === "resolved") {
+      return { ...currentResolution, ownership: state.ownership, valid: true, configured: true, detectedType: "matrix" as const, message: "Matrix Ownership verified." };
+    }
+    if (state.status === "resolving") return { ...currentResolution, valid: false, configured: true, message: "Resolving Matrix Ownership…" };
+    if (state.status === "key-changed" || state.status === "unavailable" || state.status === "error") {
+      return { ...currentResolution, valid: false, configured: true, message: state.message };
+    }
+    if (resolverUrl && isCompleteMatrixUserId(userId)) {
+      return { ...currentResolution, valid: false, configured: true, message: "Waiting to resolve Matrix Ownership…" };
+    }
+    return currentResolution;
+  }, [currentResolution, matrixRecipientState, network.network?.matrixResolverUrl, network.networkId, recipient, recipientType]);
 
   useEffect(() => {
-    if (!networkMode || recipientType !== "matrix" || !/^@[A-Za-z0-9._=-]+:[^\s:]+$/.test(recipient.trim())) {
-      setMatrixRecipientOwnership(null);
-      setMatrixRecipientError("");
+    const userId = recipient.trim();
+    if (!networkMode || recipientType !== "matrix" || !isCompleteMatrixUserId(userId)) {
+      setMatrixRecipientState({ status: "idle" });
       return;
     }
-    let cancelled = false;
-    setMatrixRecipientOwnership(null);
-    setMatrixRecipientError("Resolving Matrix master Ownership…");
-    resolveMatrixRecipient(recipient.trim(), { resolverUrl: network.network?.matrixResolverUrl }).then((ownership) => {
-      if (!cancelled) { setMatrixRecipientOwnership(ownership); setMatrixRecipientError(""); }
-    }).catch((error) => { if (!cancelled) { setMatrixRecipientOwnership(null); setMatrixRecipientError(error instanceof Error ? error.message : "Matrix master Ownership could not be resolved."); } });
-    return () => { cancelled = true; };
-  }, [networkMode, recipient, recipientType]);
+    const resolverUrl = network.network?.matrixResolverUrl;
+    const scope = `${network.networkId}:${resolverUrl ?? ""}`;
+    if (!resolverUrl) {
+      setMatrixRecipientState({ status: "unavailable", userId, scope, message: "Matrix recipient resolver is not configured for this network." });
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    setMatrixRecipientState({ status: "idle" });
+    const timer = window.setTimeout(() => {
+      if (!active) return;
+      setMatrixRecipientState({ status: "resolving", userId, scope });
+      resolveMatrixRecipient(userId, { resolverUrl, signal: controller.signal }).then((ownership) => {
+        if (active) setMatrixRecipientState({ status: "resolved", userId, scope, ownership });
+      }).catch((error: unknown) => {
+        if (!active || controller.signal.aborted) return;
+        const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "";
+        const message = error instanceof Error ? error.message : "Matrix master Ownership could not be resolved.";
+        setMatrixRecipientState({
+          status: code === "MATRIX_MASTER_KEY_CHANGED" ? "key-changed"
+            : code === "CROSS_SIGNING_UNAVAILABLE" || code === "MATRIX_RESOLVER_UNCONFIGURED" ? "unavailable"
+              : "error",
+          userId,
+          scope,
+          message,
+        });
+      });
+    }, MATRIX_RECIPIENT_DEBOUNCE_MS);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [networkMode, network.network?.matrixResolverUrl, network.networkId, recipient, recipientType]);
   const activity = networkMode ? sessionActivity : demoActivity;
   const filteredActivity = activity.filter((entry) => filter === "all" || entry.kind === "swap" || entry.direction === filter);
 
