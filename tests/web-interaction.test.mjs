@@ -7,6 +7,7 @@ import {
   SolanaOwnershipSigner,
 } from "@jamscript/client";
 import { SolanaSignMessage } from "@solana/wallet-standard-features";
+import { networkConfigPath } from "../web/src/network/paths.ts";
 import {
   CREATE_ASSET_PENDING_STORAGE_KEY,
   DuplicateCreateAssetSubmissionError,
@@ -97,6 +98,12 @@ test("Matrix restore UI follows current controller authorization states", () => 
     assert.ok(appSource.includes(state), `app.tsx must handle ${state}`);
   }
   assert.match(appSource, /previously revoked\. Sign in as a new Matrix device/);
+});
+
+test("network configuration stays under the Vite base path for subpath deployments", () => {
+  assert.equal(networkConfigPath("/"), "/locus-networks.json");
+  assert.equal(networkConfigPath("/candidate/"), "/candidate/locus-networks.json");
+  assert.equal(networkConfigPath("./"), "./locus-networks.json");
 });
 
 test("mobile Matrix verification clearly separates sign-in from Element SAS and exposes the Locus device ID", async () => {
