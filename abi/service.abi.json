@@ -7,8 +7,8 @@
   },
   "actions": [
     {
-      "name": "bootstrapMatrixController",
-      "selector": "0x38c5f96bcde5449e",
+      "name": "authorizeMatrixController",
+      "selector": "0x4664247a6ac3c987",
       "auth": {
         "kind": "ownership",
         "version": 1
@@ -694,21 +694,6 @@
       }
     },
     {
-      "name": "getMatrixBootstrapUsed",
-      "kind": "state_get",
-      "state": "matrixBootstrapUsed",
-      "keyType": {
-        "kind": "fixedBytes",
-        "len": 32
-      },
-      "output": {
-        "type": {
-          "kind": "u8"
-        },
-        "nullable": true
-      }
-    },
-    {
       "name": "getPool",
       "kind": "state_get",
       "state": "pools",
@@ -1223,18 +1208,6 @@
             }
           }
         ]
-      },
-      "valueType": {
-        "kind": "u8"
-      }
-    },
-    {
-      "name": "matrixBootstrapUsed",
-      "schema": "locus.matrix-bootstrap.v1",
-      "kind": "map",
-      "keyType": {
-        "kind": "fixedBytes",
-        "len": 32
       },
       "valueType": {
         "kind": "u8"

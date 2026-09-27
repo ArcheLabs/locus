@@ -24,10 +24,18 @@ Matrix uses the cross-signing master key as the subject
 Ownership(ED25519_KEY, M) and a verified device key as controller D. The
 JamScript Ownership Matrix adapter checks M→S→D evidence using provider-neutral
 deterministic JamScript cryptographic primitives during
-bootstrapMatrixController. JamScript Core does not implement Matrix-specific
+authorizeMatrixController. Each verified device controller is authorized
+independently for its exact (subject, controller) pair, so a Matrix Ownership
+can have any number of active device controllers without approval from an
+earlier device. JamScript Core does not implement Matrix-specific
 verification, and Locus delegates proof verification to the adapter. The outer
 SignedActionV2 proves possession of D, so the proof payload does not duplicate
 a controller signature.
+
+Matrix device deletion or logout does not automatically revoke the matching
+Locus controller grant. Locus grants persist until an active controller calls
+`revokeController`; Matrix revocation synchronization is a separate future
+protocol feature.
 
 EVM addresses use Ownership(SECP256K1_KECCAK20, H160), Polkadot SS58 values
 decode to Ownership(MULTICRYPTO_ACCOUNT32, AccountId32), and Solana public

@@ -30,6 +30,19 @@ service key and therefore could not register in the production Backend. It is
 not active or catalogued. Keep its receipt for audit; do not use it for the
 cutover.
 
+Service `102670611` is another unused finalized deployment. It reused the
+registered Service key for `3083943385`, so Backend registration correctly
+failed the one-Service-per-key invariant. No assets were bootstrapped into it;
+keep its deployment receipt as an unregistered orphan.
+
+Service `153994977` is the current multi-controller candidate. It has a unique
+Service key, is registered and materialized in the Local Backend, and contains
+the six curated assets with their full initial supplies held by the configured
+Treasury. Its pool count is zero. Its candidate descriptor and catalog are kept
+under `.jamscript/candidates/local-153994977/`; they are not active or published.
+Do not switch the web descriptor or deploy the candidate frontend until the
+physical Matrix D1/D2 authorization check passes.
+
 Finalized deployments `2262072784` and `2671640402` are unused historical
 deployments. They are not registered as active services, are not present in the
 deployment catalog, and are not referenced by the web app. Keep them as chain

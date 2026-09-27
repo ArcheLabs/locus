@@ -92,12 +92,6 @@ const controllerGrants = stateMap({
   value: u8,
 });
 
-const matrixBootstrapUsed = stateMap({
-  schema: "locus.matrix-bootstrap.v1",
-  key: OwnerKey,
-  value: u8,
-});
-
 const pools = stateMap({
   schema: "locus.pool.v1",
   key: PoolKey,
@@ -235,20 +229,21 @@ function requireActiveController(
   }
 }
 
-export const bootstrapMatrixController = action({
+export const authorizeMatrixController = action({
   auth: ownership(),
   input: {
     subject: ownership,
     proof: bytes(4096),
   },
   execute(ctx, input) {
-    const subjectKey = ownerKey(input.subject);
-    if ((matrixBootstrapUsed.get(subjectKey) ?? 0) === 1) abort(5004);
+    const key = controllerKey(input.subject, ctx.controller);
+    const existingGrant = controllerGrants.get(key) ?? 0;
+    if (existingGrant === 1) return;
+    if (controllerGrants.has(key)) abort(5003);
     if (input.subject.kind !== 0 || ctx.controller.kind !== 0) abort(5005);
     if (!verifyMatrixOwnershipAuthorizationScriptc(input.subject, ctx.controller, input.proof)) abort(5005);
 
-    matrixBootstrapUsed.set(subjectKey, 1);
-    controllerGrants.set(controllerKey(input.subject, ctx.controller), 1);
+    controllerGrants.set(key, 1);
   },
 });
 
@@ -610,7 +605,6 @@ export const getAssetByIndex = query(assetByIndex);
 export const getBalance = query(balances);
 export const getAllowance = query(allowances);
 export const getControllerGrant = query(controllerGrants);
-export const getMatrixBootstrapUsed = query(matrixBootstrapUsed);
 export const getPool = query(pools);
 export const getPoolCount = query(poolCount);
 export const getPoolByIndex = query(poolByIndex);

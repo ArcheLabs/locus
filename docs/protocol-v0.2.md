@@ -14,7 +14,7 @@ pair cannot be re-added in v1.
 
 The action surface is:
 
-    bootstrapMatrixController(subject, proof)
+    authorizeMatrixController(subject, proof)
     addController(subject, controller)
     revokeController(subject, controller)
     createAsset(subject, assetId, name, symbol, decimals, initialSupply)
@@ -27,11 +27,12 @@ The action surface is:
 The SDK supplies subject from an OwnershipSession; application callers do not
 repeat it manually. Locus does not use the SignedActionV2 act_as field.
 
-Matrix bootstrap accepts only an Ed25519 subject and controller, verifies the
-M→S→D proof, sets matrixBootstrapUsed[subject] permanently, and creates the
-first controller grant. Once the tombstone is set, Matrix bootstrap cannot be
-replayed even after revocation. A new Matrix master key is a new Ownership and
-may bootstrap independently; old assets are not migrated automatically.
+Matrix authorization accepts only an Ed25519 subject and controller and verifies
+the M→S→D proof for each new controller. Authorization is idempotent for an
+active pair. A revoked (subject, controller) pair is terminal and cannot be
+restored with an old proof, while other devices for the same subject remain
+independent. A new Matrix master key is a new Ownership; old assets are not
+migrated automatically.
 
 There is no IdentityId, OwnerV1, rotateOwner, or wallet-authenticated
 compatibility action in v0.2.
@@ -41,8 +42,7 @@ compatibility action in v0.2.
 The public API uses Ownership values. Managed-state maps use JamScript's
 canonical ownershipKey(owner) primitive. Balance keys are
 (assetId, ownerKey), allowance keys are (assetId, ownerKey, spenderKey),
-controller grant keys are (subjectKey, controllerKey), and Matrix bootstrap
-keys are subjectKey.
+controller grant keys are (subjectKey, controllerKey).
 
 An Ownership recipient may be entirely new to Locus. Sending does not require
 recipient registration.

@@ -47,7 +47,7 @@ test("authorized controller can issue to a different initial holder", () => {
   const model = new LocusModel();
   const master = owner(103);
   const device = owner(104);
-  model.bootstrapMatrixController(master, device);
+  model.authorizeMatrixController(master, device);
   model.createAssetAs(device, master, assetA, new Uint8Array([65]), new Uint8Array([65]), 0, 500n, treasury);
   assert.deepEqual(model.asset(assetA).issuer, master);
   assert.equal(model.balance(assetA, master), 0n);

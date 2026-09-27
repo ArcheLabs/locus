@@ -83,7 +83,6 @@ export class LocusModel {
     this.balances = new Map();
     this.allowances = new Map();
     this.controllerGrants = new Map();
-    this.matrixBootstrapUsed = new Map();
     this.assetIndex = [];
     this.pools = new Map();
     this.poolIndex = [];
@@ -96,20 +95,18 @@ export class LocusModel {
     return this.controllerGrants.get(key(subject) + ":" + key(controller)) ?? null;
   }
 
-  matrixBootstrapCompleted(subject) {
-    return this.matrixBootstrapUsed.get(key(subject)) === 1;
-  }
-
   requireController(subject, controller) {
     if (equal(subject, controller)) return;
     if (this.controllerGrant(subject, controller) !== 1) abort(5001);
   }
 
-  bootstrapMatrixController(subject, controller, proofValid = true) {
-    if (this.matrixBootstrapCompleted(subject)) abort(5004);
+  authorizeMatrixController(subject, controller, proofValid = true) {
+    const grantKey = key(subject) + ":" + key(controller);
+    const status = this.controllerGrants.get(grantKey);
+    if (status === 1) return;
+    if (this.controllerGrants.has(grantKey)) abort(5003);
     if (subject.kind !== 0 || controller.kind !== 0 || !proofValid) abort(5005);
-    this.matrixBootstrapUsed.set(key(subject), 1);
-    this.controllerGrants.set(key(subject) + ":" + key(controller), 1);
+    this.controllerGrants.set(grantKey, 1);
   }
 
   addController(caller, subject, controller) {
@@ -354,7 +351,6 @@ export class LocusModel {
     if (name === "getBalance") return this.balances.get(`${key(queryKey.assetId)}:${key(queryKey.ownerKey)}`) ?? 0n;
     if (name === "getAllowance") return this.allowances.get(`${key(queryKey.assetId)}:${key(queryKey.ownerKey)}:${key(queryKey.spenderKey)}`) ?? 0n;
     if (name === "getControllerGrant") return this.controllerGrants.get(key(queryKey.subjectKey) + ":" + key(queryKey.controllerKey)) ?? null;
-    if (name === "getMatrixBootstrapUsed") return this.matrixBootstrapUsed.get(key(queryKey)) ?? null;
     if (name === "getPool") return this.pool(queryKey.asset0, queryKey.asset1);
     if (name === "getPoolCount") return BigInt(this.poolIndex.length);
     if (name === "getPoolByIndex") return this.poolIndex[Number(queryKey)] ?? null;

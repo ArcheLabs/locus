@@ -22,26 +22,52 @@ function setup() {
   return model;
 }
 
-test("local controller grants are non-transitive and replay-safe", () => {
+test("Matrix controllers authorize independently; revoked pairs cannot be restored", () => {
   const model = new LocusModel();
   const master = owner(60);
   const device1 = owner(61);
   const device2 = owner(62);
+  const device3 = owner(63);
 
   expectCode(5001, () => model.requireController(master, device1));
-  model.bootstrapMatrixController(master, device1);
-  assert.equal(model.matrixBootstrapCompleted(master), true);
+  model.authorizeMatrixController(master, device1);
   assert.equal(model.controllerGrant(master, device1), 1);
 
-  model.addController(device1, master, device2);
+  model.authorizeMatrixController(master, device2);
+  model.authorizeMatrixController(master, device3);
   assert.equal(model.controllerGrant(master, device2), 1);
-  expectCode(5001, () => model.requireController(master, owner(63)));
+  assert.equal(model.controllerGrant(master, device3), 1);
+  model.requireController(master, device1);
+  model.requireController(master, device2);
+  model.requireController(master, device3);
 
-  model.revokeController(device1, master, device1);
+  const beforeDuplicate = new Map(model.controllerGrants);
+  model.authorizeMatrixController(master, device2);
+  assert.deepEqual(model.controllerGrants, beforeDuplicate);
+
+  const asset = id(80);
+  const recipient = owner(81);
+  model.createAsset(master, asset, encodeAssetName("Shared Matrix asset"), encodeAssetSymbol("SHR"), 6, 1_000n);
+  model.transferAs(device1, master, asset, recipient, 10n);
+  model.transferAs(device2, master, asset, recipient, 20n);
+  model.transferAs(device3, master, asset, recipient, 30n);
+  assert.equal(model.balance(asset, recipient), 60n);
+
+  model.revokeController(device2, master, device1);
   assert.equal(model.controllerGrant(master, device1), 0);
+  const balanceBeforeDeniedAction = model.balance(asset, recipient);
   expectCode(5001, () => model.requireController(master, device1));
-  expectCode(5004, () => model.bootstrapMatrixController(master, device1));
-  expectCode(5001, () => model.addController(device1, master, device1));
+  expectCode(5001, () => model.transferAs(device1, master, asset, recipient, 1n));
+  assert.equal(model.balance(asset, recipient), balanceBeforeDeniedAction);
+  expectCode(5003, () => model.authorizeMatrixController(master, device1));
+  model.requireController(master, device2);
+  model.requireController(master, device3);
+  model.transferAs(device2, master, asset, recipient, 1n);
+  assert.equal(model.balance(asset, recipient), balanceBeforeDeniedAction + 1n);
+
+  const device4 = owner(64);
+  model.authorizeMatrixController(master, device4);
+  model.requireController(master, device4);
 });
 
 test("direct owner needs no registration to manage identity", () => {
@@ -58,7 +84,7 @@ test("controller grants are non-transitive", () => {
   const master = owner(66);
   const device1 = owner(67);
   const device2 = owner(68);
-  model.bootstrapMatrixController(master, device1);
+  model.authorizeMatrixController(master, device1);
   model.addController(device1, device1, device2);
   expectCode(5001, () => model.requireController(master, device2));
 });
@@ -70,7 +96,7 @@ test("Matrix controller operates on the master subject without moving asset owne
   const recipient = owner(71);
   const matrixAsset = id(11);
 
-  model.bootstrapMatrixController(master, device);
+  model.authorizeMatrixController(master, device);
   model.createAssetAs(device, master, matrixAsset, encodeAssetName("Matrix Token"), encodeAssetSymbol("MTRX"), 0, 100n);
   assert.deepEqual(model.asset(matrixAsset).issuer, master);
   assert.equal(model.balance(matrixAsset, master), 100n);
@@ -84,12 +110,11 @@ test("Matrix controller operates on the master subject without moving asset owne
   expectCode(5001, () => model.transferAs(device, master, matrixAsset, recipient, 1n));
 });
 
-test("invalid Matrix proof never consumes the bootstrap tombstone", () => {
+test("invalid Matrix proof does not create a controller grant", () => {
   const model = new LocusModel();
   const master = owner(72);
   const device = owner(73);
-  expectCode(5005, () => model.bootstrapMatrixController(master, device, false));
-  assert.equal(model.matrixBootstrapCompleted(master), false);
+  expectCode(5005, () => model.authorizeMatrixController(master, device, false));
   assert.equal(model.controllerGrant(master, device), null);
 });
 
@@ -241,8 +266,41 @@ test("SDK treats missing controller state as inactive", async () => {
     async waitForAction() { return { status: "applied" }; },
   };
   const client = new LocusClient(adapter, { signer, subject });
+  assert.equal(await client.getControllerStatus(subject, controller), "absent");
   assert.equal(await client.isControllerActive(subject, controller), false);
-  assert.equal(await client.hasMatrixBootstrapCompleted(subject), false);
+});
+
+test("SDK reports absent, active and revoked controller grant states", async () => {
+  const subject = owner(76);
+  const controller = owner(77);
+  const results = [null, 1n, 0n];
+  const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
+  const client = new LocusClient({
+    async submitOwnershipAction() { return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
+    async queryLatest() { return { value: results.shift() ?? null }; },
+    async waitForAction() { return { status: "applied" }; },
+  }, { signer, subject });
+  assert.equal(await client.getControllerStatus(subject, controller), "absent");
+  assert.equal(await client.getControllerStatus(subject, controller), "active");
+  assert.equal(await client.getControllerStatus(subject, controller), "revoked");
+});
+
+test("SDK submits the Matrix proof through the per-controller authorization action", async () => {
+  const calls = [];
+  const controller = owner(78);
+  const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
+  const client = new LocusClient({
+    async submitOwnershipAction(actionName, input) {
+      calls.push({ actionName, input });
+      return { transactionId: "0xauth", status: "queued", actionHash: "0xproof" };
+    },
+    async queryLatest() { return { value: null }; },
+    async waitForAction() { return { status: "applied" }; },
+  }, { signer, subject: owner(79) });
+  const proof = new Uint8Array([1, 2, 3]);
+  await client.authorizeMatrixController(proof);
+  assert.equal(calls[0].actionName, "authorizeMatrixController");
+  assert.deepEqual(calls[0].input.proof, proof);
 });
 
 test("SDK surfaces mapped application errors", async () => {

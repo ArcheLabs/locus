@@ -21,6 +21,8 @@ export const MAX_POOL_RESERVE = (1n << 64n) - 1n;
 export const SWAP_FEE_BPS = 30 as const;
 const BPS = 10000n;
 
+export type ControllerStatus = "absent" | "active" | "revoked";
+
 function asBigInt(value: LocusValue | null, label: string): bigint {
   if (typeof value !== "bigint") throw new Error(`${label} query did not return bigint`);
   return value;
@@ -162,13 +164,6 @@ function controllerGrantQueryKey(subject: Ownership, controller: Ownership): Loc
     subjectKey: ownershipKey(subject),
     controllerKey: ownershipKey(controller),
   };
-}
-
-function asFlag(value: LocusValue | null, label: string): boolean {
-  if (value === null) return false;
-  if (typeof value === "bigint") return value === 1n;
-  if (typeof value === "number") return value === 1;
-  throw new Error(`${label} query did not return u8`);
 }
 
 export class LocusClient {
@@ -357,11 +352,11 @@ export class LocusClient {
     return this.submit("burn", { assetId, amount });
   }
 
-  async bootstrapMatrixController(proof: Uint8Array): Promise<SubmitActionResult> {
+  async authorizeMatrixController(proof: Uint8Array): Promise<SubmitActionResult> {
     if (!(proof instanceof Uint8Array) || proof.length === 0 || proof.length > 4096) {
-      throw new Error("Matrix bootstrap proof must be between 1 and 4096 bytes");
+      throw new Error("Matrix controller authorization proof must be between 1 and 4096 bytes");
     }
-    return this.submit("bootstrapMatrixController", { proof });
+    return this.submit("authorizeMatrixController", { proof });
   }
 
   async addController(controller: Ownership): Promise<SubmitActionResult> {
@@ -374,17 +369,18 @@ export class LocusClient {
     return this.submit("revokeController", { controller });
   }
 
-  async isControllerActive(subject: Ownership, controller: Ownership): Promise<boolean> {
+  async getControllerStatus(subject: Ownership, controller: Ownership): Promise<ControllerStatus> {
     assertOwnership(subject, "subject");
     assertOwnership(controller, "controller");
     const value = await this.queryValue("getControllerGrant", controllerGrantQueryKey(subject, controller));
-    return asFlag(value, "controller grant");
+    if (value === null) return "absent";
+    if (value === 1n || value === 1) return "active";
+    if (value === 0n || value === 0) return "revoked";
+    throw new Error("controller grant query returned an unknown status");
   }
 
-  async hasMatrixBootstrapCompleted(subject: Ownership = this.requireSession().subject): Promise<boolean> {
-    assertOwnership(subject, "subject");
-    const value = await this.queryValue("getMatrixBootstrapUsed", ownershipKey(subject));
-    return asFlag(value, "Matrix bootstrap");
+  async isControllerActive(subject: Ownership, controller: Ownership): Promise<boolean> {
+    return (await this.getControllerStatus(subject, controller)) === "active";
   }
 
   async getAsset(assetId: AssetId): Promise<Asset | null> {

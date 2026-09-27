@@ -23,6 +23,7 @@ import {
 
 const matrixConnectorSource = readFileSync(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
 const matrixDialogSource = readFileSync(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+const accountMenuSource = readFileSync(new URL("../web/src/components/AccountMenu.tsx", import.meta.url), "utf8");
 
 const actionRequest = {
   version: 2,
@@ -62,14 +63,19 @@ test("mock Wallet Standard Solana signer returns ED25519 Ownership", async () =>
   assert.equal((await signer.signJamScriptAction(actionRequest)).length, 64);
 });
 
-test("Matrix bootstrap restoration checks the saved transaction before permitting a replacement", () => {
-  const restorePending = matrixConnectorSource.indexOf("const pendingRecord = pendingMatrixBootstrapFor(");
-  const freshSubmission = matrixConnectorSource.indexOf("const submitted = await scoped.bootstrapMatrixController(proof);");
+test("Matrix controller authorization restoration checks the saved transaction before permitting a replacement", () => {
+  const restorePending = matrixConnectorSource.indexOf("const pendingRecord = pendingMatrixControllerAuthorizationFor(");
+  const freshSubmission = matrixConnectorSource.indexOf("const submitted = await scoped.authorizeMatrixController(proof);");
   assert.ok(restorePending >= 0 && freshSubmission > restorePending);
   assert.match(matrixConnectorSource, /if \(pendingRecord\) \{[\s\S]*?await settlePending\(pendingRecord\)/);
-  assert.match(matrixConnectorSource, /if \(cause instanceof MatrixBootstrapWaitTimeout\) return false;/);
+  assert.match(matrixConnectorSource, /if \(cause instanceof MatrixControllerAuthorizationWaitTimeout\) return false;/);
   assert.match(matrixConnectorSource, /validUntil: submittedWithValidity\.validUntil \?\? submittedSlot \+ 64/);
-  assert.doesNotMatch(matrixConnectorSource, /catch \(cause\) \{\s*if \(cause instanceof TransactionWaitTimeoutError\) \{\s*removePendingMatrixBootstrap/);
+  assert.doesNotMatch(matrixConnectorSource, /matrixBootstrapUsed|hasMatrixBootstrapCompleted|bootstrapMatrixController/);
+  assert.doesNotMatch(matrixDialogSource, /Existing device approval required|Authorize Matrix device|Copy controller ID|Ask that device to authorize/);
+  assert.doesNotMatch(accountMenuSource, /Authorize Matrix device|AuthorizeMatrixControllerDialog/);
+  assert.match(matrixConnectorSource, /getControllerStatus\(subject, controllerOwnership\)/);
+  assert.match(matrixConnectorSource, /status === "revoked"[\s\S]*?CONTROLLER_REVOKED/);
+  assert.match(matrixConnectorSource, /status === "active"[\s\S]*?removePendingMatrixControllerAuthorization[\s\S]*?return true/);
   assert.match(matrixDialogSource, /Check authorization status/);
   assert.match(matrixDialogSource, /do not repeat Matrix verification/);
 });

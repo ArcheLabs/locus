@@ -95,9 +95,11 @@ current device Ed25519 key as the controller. The web adapter uses the public
 does not call `initRustCrypto()`, access private SDK fields, persist passwords,
 or hash Matrix IDs into Ownership. `/keys/query` evidence is encoded through
 the JamScript Matrix proof codec and a recipient resolves to the master key,
-never to a device key. After Element verification, the Locus client submits
-`bootstrapMatrixController(proof)` once; later devices must be added by an
-active controller through `addController`.
+never to a device key. After Element verification, each Locus Matrix device
+submits `authorizeMatrixController(proof)` for its own `(master subject,
+device controller)` pair. Any number of cross-signing-verified devices can
+authorize independently; an active controller does not approve new Matrix
+devices. A revoked pair cannot be re-enrolled with its old proof.
 
 The browser stores ordinary wallet session identifiers in local storage and
 Matrix access/refresh credentials in session storage only. EVM account changes
@@ -122,7 +124,7 @@ docker rm -f locus-v02-web-preview
 
 ## Protocol surface
 
-The service exposes `bootstrapMatrixController`, `addController`,
+The service exposes `authorizeMatrixController`, `addController`,
 `revokeController`, `createAsset`, pool-management actions, `swapExactIn`,
 `transfer`, `approve`, `transferFrom`, `mint`, and `burn`. `createAsset` keeps
 the issuer (`subject`) separate from its optional `initialHolder`; the SDK

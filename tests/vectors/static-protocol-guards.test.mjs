@@ -11,8 +11,8 @@ test("service is Ownership-native and keeps protocol boundaries explicit", () =>
   assert.match(source, /key: BalanceKey/);
   assert.match(source, /key: AllowanceKey/);
   assert.match(source, /locus\.controller-grant\.v1/);
-  assert.match(source, /locus\.matrix-bootstrap\.v1/);
-  assert.match(source, /bootstrapMatrixController/);
+  assert.doesNotMatch(source, /matrixBootstrapUsed|locus\.matrix-bootstrap\.v1|getMatrixBootstrapUsed/);
+  assert.match(source, /authorizeMatrixController/);
   assert.match(source, /@jamscript\/client\/ownership\/matrix\/service/);
   assert.match(source, /verifyMatrixOwnershipAuthorization/);
   assert.doesNotMatch(source, /MatrixControlClaimProofV1|canonical.*Matrix/i);

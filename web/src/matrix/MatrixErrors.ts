@@ -18,7 +18,7 @@ export type MatrixErrorCode =
   | "TOKEN_REFRESH_FAILED"
   | "OAUTH_FAILED"
   | "CONTROLLER_NOT_AUTHORIZED"
-  | "CONTROLLER_BOOTSTRAP_FAILED"
+  | "CONTROLLER_REVOKED"
   | "UNSUPPORTED_MATRIX_CRYPTO_REQUEST";
 
 export class MatrixConnectorError extends Error {
@@ -65,6 +65,12 @@ export function matrixControllerReceiptFailure(errorCode: number | null | undefi
     return new MatrixConnectorError(
       "CONTROLLER_NOT_AUTHORIZED",
       `Internal JamScript runtime error during Matrix controller authorization (${runtimeClass}, ${hex}).`,
+    );
+  }
+  if (code === 5003) {
+    return new MatrixConnectorError(
+      "CONTROLLER_REVOKED",
+      "This Locus Matrix controller was previously revoked. Sign in as a new Matrix device or use another active controller.",
     );
   }
   return new MatrixConnectorError(
