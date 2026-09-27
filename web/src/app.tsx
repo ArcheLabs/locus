@@ -2,11 +2,15 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
-import { formatLocusId, formatUnits, minimumAmountOut, parseUnits, quoteExactIn, toHex, type LocusClient, type Pool } from "@archelabs/locus";
+import { formatLocusId, formatUnits, minimumAmountOut, ownershipKey, parseUnits, quoteExactIn, toHex, type LocusClient, type Ownership, type Pool } from "@archelabs/locus";
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CirclePlus, Coins, History, RefreshCw, Send, X } from "lucide-react";
 import { useNetwork } from "./network/NetworkProvider.js";
 import { NetworkSwitcher } from "./network/NetworkSwitcher.js";
-import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, type AssetMetadata, type AssetView } from "./locus/assets.js";
+import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
+import { ManagedLiquidityPanel, type ManagedLiquidityScope } from "./locus/liquidity/ManagedLiquidityPanel.js";
+import { loadManagedLiquidityConfig } from "./locus/liquidity/liquidityConfig.js";
+import { formatBasisPoints } from "./locus/liquidity/liquidityMath.js";
+import { SWAP_FEE_BPS } from "@archelabs/locus";
 import { assetBalanceQueryKey, assetIdsQueryKey, assetMetadataQueryKey, assetQueryRetry, assetQueryRetryDelay } from "./locus/assetQueries.js";
 import { attachAssetBalances, keepAssetRowsForScope } from "./locus/assetCache.js";
 import { resolveRecipient, detectRecipientType, type RecipientType } from "./locus/recipients.js";
@@ -166,6 +170,25 @@ export function App() {
     lastReadyServiceIdByNetwork.current.set(network.networkId, network.deployment.serviceId);
   }
   const serviceId = network.deployment?.serviceId ?? lastReadyServiceIdByNetwork.current.get(network.networkId) ?? null;
+  const liquidityScopeRef = useRef<ManagedLiquidityScope>({
+    networkId: network.networkId,
+    serviceId,
+    connectionId: session?.connectionId ?? null,
+    ownerKey: sessionOwner ? toHex(ownershipKey(sessionOwner)).toLowerCase() : null,
+  });
+  liquidityScopeRef.current = {
+    networkId: network.networkId,
+    serviceId,
+    connectionId: session?.connectionId ?? null,
+    ownerKey: sessionOwner ? toHex(ownershipKey(sessionOwner)).toLowerCase() : null,
+  };
+  const isLiquidityScopeCurrent = (expected: ManagedLiquidityScope) => {
+    const current = liquidityScopeRef.current;
+    return current.networkId === expected.networkId
+      && current.serviceId === expected.serviceId
+      && current.connectionId === expected.connectionId
+      && current.ownerKey === expected.ownerKey;
+  };
   const assetQueriesEnabled = networkMode && network.status === "ready" && !!network.locus && serviceId !== null;
   const catalogQuery = useQuery({
     queryKey: ["locus", "asset-catalog", network.networkId],
@@ -659,7 +682,7 @@ export function App() {
 
         {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} amount={amount} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={updateRecipient} onAmount={updateAmount} onMax={() => updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : "")} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
         {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} onRetry={() => void refreshAssets()} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} />}
-        {page === "swap" && <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} locus={locus} assets={assets} session={session !== null} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} />}
+        {page === "swap" && <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} deploymentGenesisHash={network.deployment?.genesisHash ?? null} catalog={catalogQuery.data ?? null} locus={locus} assets={assets} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isLiquidityScopeCurrent={isLiquidityScopeCurrent} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onRefreshAssets={refreshAssets} />}
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>
       <nav className="mobile-bottom-nav" aria-label="Primary">
@@ -698,16 +721,22 @@ function Receipt({ state }: { state: Extract<SendState, { status: "submitted" | 
 
 type SwapSubmissionState = "idle" | "awaiting-signature" | "submitted" | "applied" | "failed";
 
-function SwapPage({ networkMode, networkId, status, locus, assets, session, onConnect, onApplied, onNotify }: {
+function SwapPage({ networkMode, networkId, status, serviceId, deploymentGenesisHash, catalog, locus, assets, sessionOwner, connectionId, isLiquidityScopeCurrent, onConnect, onApplied, onNotify, onRefreshAssets }: {
   networkMode: boolean;
   networkId: string;
   status: string;
+  serviceId: number | null;
+  deploymentGenesisHash: string | null;
+  catalog: CuratedCatalog | null;
   locus: LocusClient | null;
   assets: AssetView[];
-  session: boolean;
+  sessionOwner: Ownership | null;
+  connectionId: string | null;
+  isLiquidityScopeCurrent: (scope: ManagedLiquidityScope) => boolean;
   onConnect: () => void;
   onApplied: (item: { assetIn: string; assetOut: string; amountIn: string; amountOut: string; transactionId: string; networkId: string }) => void;
   onNotify: (message: string) => void;
+  onRefreshAssets: () => Promise<unknown>;
 }) {
   const [pools, setPools] = useState<Pool[]>([]);
   const [poolLoading, setPoolLoading] = useState(false);
@@ -722,6 +751,27 @@ function SwapPage({ networkMode, networkId, status, locus, assets, session, onCo
   const [submission, setSubmission] = useState<SwapSubmissionState>("idle");
   const [transactionId, setTransactionId] = useState("");
   const [error, setError] = useState("");
+  const [activeView, setActiveView] = useState<"swap" | "liquidity">("swap");
+
+  const catalogMatchesDeployment = !!catalog
+    && catalog.network === networkId
+    && catalog.serviceId === serviceId
+    && deploymentGenesisHash !== null
+    && catalog.genesisHash.toLowerCase() === deploymentGenesisHash.toLowerCase();
+  const managedLiquidityQuery = useQuery({
+    queryKey: ["locus", "managed-liquidity", networkId, serviceId, import.meta.env.BASE_URL],
+    queryFn: () => loadManagedLiquidityConfig(networkId as "local" | "testnet", catalog?.assets.map((asset) => asset.key) ?? [], import.meta.env.BASE_URL),
+    enabled: networkMode && catalogMatchesDeployment,
+    staleTime: 60_000,
+    retry: false,
+  });
+  const managedLiquidityConfig = managedLiquidityQuery.data ?? null;
+  const currentOwnerKey = sessionOwner ? toHex(ownershipKey(sessionOwner)).toLowerCase() : null;
+  const isLiquidityManager = !!managedLiquidityConfig && currentOwnerKey === managedLiquidityConfig.managerKey;
+
+  useEffect(() => {
+    if (!isLiquidityManager) setActiveView("swap");
+  }, [isLiquidityManager]);
 
   useEffect(() => {
     if (!networkMode || status !== "ready" || !locus) {
@@ -792,7 +842,7 @@ function SwapPage({ networkMode, networkId, status, locus, assets, session, onCo
   function openReview() {
     if (!networkMode) { onNotify("Swap is available in Network Mode."); return; }
     if (status !== "ready" || !locus) { onNotify("The selected network is not ready."); return; }
-    if (!session) { onConnect(); return; }
+    if (!sessionOwner) { onConnect(); return; }
     if (!selected || !assetIn || !assetOut || !quote) { onNotify("Enter an amount with available pool liquidity."); return; }
     if (assetIn.balance === null || quote.amountIn > assetIn.balance) { onNotify("The input amount exceeds your available balance."); return; }
     setError("");
@@ -837,10 +887,36 @@ function SwapPage({ networkMode, networkId, status, locus, assets, session, onCo
   const busy = submission === "awaiting-signature" || submission === "submitted";
   const equityPool = selected?.asset0.presentation.class === "equity-demo" || selected?.asset1.presentation.class === "equity-demo";
   const minReceived = quote && assetOut ? formatUnits(quote.minimumAmountOut, assetOut.decimals) : "—";
+  const feeLabel = formatBasisPoints(SWAP_FEE_BPS);
+  function acceptRefreshedPools(next: Pool[]) {
+    setPools(next);
+    const nextKeys = new Set(next.map((pool) => `${toHex(pool.asset0)}:${toHex(pool.asset1)}`));
+    setPoolKey((current) => current && nextKeys.has(current) ? current : next.map((pool) => `${toHex(pool.asset0)}:${toHex(pool.asset1)}`)[0] ?? "");
+  }
 
   return <section className="page swap-page">
     <h1>Swap</h1>
-    <div className="card swap-card">
+    {isLiquidityManager && <div className="swap-product-tabs" role="tablist" aria-label="Swap tools">
+      <button type="button" role="tab" aria-selected={activeView === "swap"} className={activeView === "swap" ? "active" : ""} onClick={() => setActiveView("swap")}>Swap</button>
+      <button type="button" role="tab" aria-selected={activeView === "liquidity"} className={activeView === "liquidity" ? "active" : ""} onClick={() => setActiveView("liquidity")}>Manage liquidity</button>
+    </div>}
+    {isLiquidityManager && activeView === "liquidity" && managedLiquidityConfig && catalog
+      ? <ManagedLiquidityPanel
+        config={managedLiquidityConfig}
+        curatedAssets={catalog.assets}
+        assets={assets}
+        pools={pools}
+        locus={locus}
+        networkId={networkId}
+        serviceId={serviceId}
+        sessionOwner={sessionOwner!}
+        connectionId={connectionId}
+        networkReady={networkMode && status === "ready"}
+        isScopeCurrent={isLiquidityScopeCurrent}
+        onPoolsRefreshed={acceptRefreshedPools}
+        onRefreshAssets={onRefreshAssets}
+      />
+      : <div className="card swap-card">
       <label className="swap-label" htmlFor="swap-pool">Pool</label>
       <select id="swap-pool" className="swap-pool-select" value={selected?.key ?? ""} disabled={availablePools.length === 0} onChange={(event) => { setPoolKey(event.target.value); setReverse(false); setSubmission("idle"); }}>
         {availablePools.length === 0 ? <option value="">No pool available</option> : availablePools.map((entry) => <option key={entry.key} value={entry.key}>{entry.asset0.symbol} / {entry.asset1.symbol}{entry.asset0.presentation.class === "equity-demo" || entry.asset1.presentation.class === "equity-demo" ? " · Demo pool" : ""}</option>)}
@@ -868,7 +944,7 @@ function SwapPage({ networkMode, networkId, status, locus, assets, session, onCo
         </div>
         <dl className="swap-quote-details">
           <div><dt>Pool price</dt><dd>{poolPrice === null ? "Unavailable" : `1 ${assetIn.symbol} ≈ ${poolPrice.toLocaleString(undefined, { maximumFractionDigits: 8 })} ${assetOut.symbol}`}</dd></div>
-          <div><dt>Fee</dt><dd>0.30%</dd></div>
+          <div><dt>Fee</dt><dd>{feeLabel}</dd></div>
           <div><dt>Minimum received</dt><dd>{minReceived} {assetOut.symbol}</dd></div>
           <div><dt>Price impact</dt><dd>{priceImpact === null ? "—" : `≈ ${priceImpact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%`}</dd></div>
           <div><dt>Pricing</dt><dd>Pool price · Demo liquidity · No market oracle</dd></div>
@@ -876,16 +952,16 @@ function SwapPage({ networkMode, networkId, status, locus, assets, session, onCo
         </dl>
       </>}
       <ActionButton className="swap-review-action" variant="primary" icon={ArrowLeftRight} fullWidth disabled={busy || status !== "ready" || !selected || !quote || submission === "applied"} onClick={openReview}>
-        {submission === "awaiting-signature" ? "Approve in wallet…" : submission === "submitted" ? "Waiting for confirmation…" : submission === "applied" ? "Swap completed" : session ? "Review swap" : "Connect to swap"}
+        {submission === "awaiting-signature" ? "Approve in wallet…" : submission === "submitted" ? "Waiting for confirmation…" : submission === "applied" ? "Swap completed" : sessionOwner ? "Review swap" : "Connect to swap"}
       </ActionButton>
       {submission === "submitted" && transactionId && <div className="receipt"><strong>Swap submitted · waiting for confirmation</strong><code>{transactionId}</code></div>}
       {submission === "applied" && transactionId && <div className="receipt"><strong>Swap applied</strong><code>{transactionId}</code></div>}
       {(error || submission === "failed") && <div className="transaction-error" role="alert">{error || "Swap failed."}</div>}
-      <p className="notice">Pool prices come from on-chain reserves, not market data. Demo liquidity · No market oracle. Quotes appear only when chain state contains a seeded pool. Swaps use a single pool and a fixed 0.30% fee.</p>
-    </div>
+      <p className="notice">Pool prices come from on-chain reserves, not market data. Demo liquidity · No market oracle. Quotes appear only when chain state contains a seeded pool. Swaps use a single pool and a fixed {feeLabel} fee.</p>
+    </div>}
     {reviewOpen && quote && assetIn && assetOut && <Modal open title="Review swap" onClose={() => setReviewOpen(false)} footer={<><ActionButton variant="secondary" icon={X} onClick={() => setReviewOpen(false)}>Cancel</ActionButton><ActionButton variant="primary" icon={ArrowLeftRight} onClick={() => void confirmSwap()}>Confirm swap</ActionButton></>}>
       <p className="modal-lead">Review the exact-input swap before signing.</p>
-      <dl className="review-list"><div><dt>You pay</dt><dd>{formatUnits(quote.amountIn, assetIn.decimals)} {assetIn.symbol}</dd></div><div><dt>Expected output</dt><dd>{formatUnits(quote.amountOut, assetOut.decimals)} {assetOut.symbol}</dd></div><div><dt>Minimum received</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div><div><dt>Pool</dt><dd>{selected?.asset0.symbol} / {selected?.asset1.symbol}</dd></div><div><dt>Fee</dt><dd>0.30%</dd></div><div><dt>Slippage tolerance</dt><dd>{(slippageBps / 100).toFixed(slippageBps % 100 === 0 ? 0 : 2)}%</dd></div></dl>
+      <dl className="review-list"><div><dt>You pay</dt><dd>{formatUnits(quote.amountIn, assetIn.decimals)} {assetIn.symbol}</dd></div><div><dt>Expected output</dt><dd>{formatUnits(quote.amountOut, assetOut.decimals)} {assetOut.symbol}</dd></div><div><dt>Minimum received</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div><div><dt>Pool</dt><dd>{selected?.asset0.symbol} / {selected?.asset1.symbol}</dd></div><div><dt>Fee</dt><dd>{feeLabel}</dd></div><div><dt>Slippage tolerance</dt><dd>{(slippageBps / 100).toFixed(slippageBps % 100 === 0 ? 0 : 2)}%</dd></div></dl>
     </Modal>}
   </section>;
 }
