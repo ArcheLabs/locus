@@ -7,7 +7,7 @@ import {
   SolanaOwnershipSigner,
 } from "@jamscript/client";
 import { SolanaSignMessage } from "@solana/wallet-standard-features";
-import { networkConfigPath } from "../web/src/network/paths.ts";
+import { assetCatalogPath, networkConfigPath } from "../web/src/network/paths.ts";
 import {
   CREATE_ASSET_PENDING_STORAGE_KEY,
   DuplicateCreateAssetSubmissionError,
@@ -104,6 +104,8 @@ test("network configuration stays under the Vite base path for subpath deploymen
   assert.equal(networkConfigPath("/"), "/locus-networks.json");
   assert.equal(networkConfigPath("/candidate/"), "/candidate/locus-networks.json");
   assert.equal(networkConfigPath("./"), "./locus-networks.json");
+  assert.equal(assetCatalogPath("local", "/"), "/catalogs/local.json");
+  assert.equal(assetCatalogPath("local", "/candidate/"), "/candidate/catalogs/local.json");
 });
 
 test("mobile Matrix verification clearly separates sign-in from Element SAS and exposes the Locus device ID", async () => {

@@ -1,5 +1,6 @@
 import { decodeAssetName, decodeAssetSymbol, formatUnits, ownershipKey, toHex, type AssetId, type LocusClient, type Ownership } from "@archelabs/locus";
 import type { DeploymentDescriptor } from "@jamscript/client";
+import { assetCatalogPath } from "../network/paths.js";
 
 export type AssetClass = "crypto" | "equity-demo" | "custom";
 export type CuratedIconKey = "dot" | "mini" | "usdt" | "ticker";
@@ -70,7 +71,7 @@ export async function loadCuratedCatalog(
 ): Promise<CuratedCatalog | null> {
   let response: Response;
   try {
-    response = await fetchImpl(`/catalogs/${networkId}.json`, { cache: "no-store" });
+    response = await fetchImpl(assetCatalogPath(networkId, import.meta.env.BASE_URL), { cache: "no-store" });
   } catch {
     return null;
   }
