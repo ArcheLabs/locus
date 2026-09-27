@@ -24,6 +24,7 @@ import {
 const matrixConnectorSource = readFileSync(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
 const matrixDialogSource = readFileSync(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
 const accountMenuSource = readFileSync(new URL("../web/src/components/AccountMenu.tsx", import.meta.url), "utf8");
+const appSource = readFileSync(new URL("../web/src/app.tsx", import.meta.url), "utf8");
 
 const actionRequest = {
   version: 2,
@@ -78,6 +79,24 @@ test("Matrix controller authorization restoration checks the saved transaction b
   assert.match(matrixConnectorSource, /status === "active"[\s\S]*?removePendingMatrixControllerAuthorization[\s\S]*?return true/);
   assert.match(matrixDialogSource, /Check authorization status/);
   assert.match(matrixDialogSource, /do not repeat Matrix verification/);
+});
+
+test("Matrix restore UI follows current controller authorization states", () => {
+  const obsoleteStatePrefix = new RegExp(["CONTROLLER", "BOOTSTRAP_"].join("_"));
+  for (const source of [appSource, matrixConnectorSource, matrixDialogSource]) {
+    assert.doesNotMatch(source, obsoleteStatePrefix);
+  }
+  for (const state of [
+    "CONTROLLER_AUTHORIZING",
+    "CONTROLLER_AUTHORIZATION_QUEUED",
+    "CONTROLLER_AUTHORIZATION_FINALIZING",
+    "CONTROLLER_AUTHORIZATION_UNKNOWN",
+    "CONTROLLER_AUTHORIZATION_FAILED",
+    "CONTROLLER_REVOKED",
+  ]) {
+    assert.ok(appSource.includes(state), `app.tsx must handle ${state}`);
+  }
+  assert.match(appSource, /previously revoked\. Sign in as a new Matrix device/);
 });
 
 test("mobile Matrix verification clearly separates sign-in from Element SAS and exposes the Locus device ID", async () => {

@@ -70,17 +70,20 @@ function sessionActivityKey(networkId: string, owner: string): string {
 }
 
 function matrixRestoreMessage(connected: MatrixConnected): string {
-  if (connected.state === "CONTROLLER_BOOTSTRAP_QUEUED") {
+  if (connected.state === "CONTROLLER_AUTHORIZATION_QUEUED") {
     return "Matrix verification is complete. The controller authorization is queued in MiniJAM; Locus will keep checking it. Do not repeat verification.";
   }
-  if (connected.state === "CONTROLLER_BOOTSTRAP_UNKNOWN") {
+  if (connected.state === "CONTROLLER_AUTHORIZATION_UNKNOWN") {
     return "Matrix verification is complete. The controller authorization status is temporarily unavailable; use Check authorization status in the Matrix dialog. Do not repeat verification.";
   }
-  if (connected.state === "CONTROLLER_BOOTSTRAPPING" || connected.state === "CONTROLLER_BOOTSTRAP_FINALIZING") {
+  if (connected.state === "CONTROLLER_AUTHORIZING" || connected.state === "CONTROLLER_AUTHORIZATION_FINALIZING") {
     return "Matrix verification is complete. Locus is waiting for the controller authorization transaction to finalize on MiniJAM. Keep the Matrix dialog open.";
   }
   if (connected.state === "CONTROLLER_AUTHORIZATION_FAILED") {
     return `Matrix verification is complete, but controller authorization failed. ${connected.error}`;
+  }
+  if (connected.state === "CONTROLLER_REVOKED") {
+    return "This Locus Matrix controller was previously revoked. Sign in as a new Matrix device or use another active controller.";
   }
   return "Matrix device keys are ready. Locus is requesting SAS verification from your other Matrix devices. Switch to Element, accept the request, then return here to compare emoji. No Locus session is connected yet.";
 }
