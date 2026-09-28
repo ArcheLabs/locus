@@ -10,6 +10,7 @@ import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCata
 import { type ManagedLiquidityScope } from "./locus/liquidity/ManagedLiquidityPanel.js";
 import { loadManagedLiquidityConfig } from "./locus/liquidity/liquidityConfig.js";
 import { isConfiguredLiquidityManager } from "./locus/liquidity/liquidityAccess.js";
+import { canResolveLiquidityRouteAccess } from "./locus/liquidity/liquidityRouteAccess.js";
 import { LiquidityPage } from "./locus/liquidity/LiquidityPage.js";
 import { SwapPage } from "./locus/swap/SwapPage.js";
 import { poolListError, poolListQueryKey } from "./locus/pools/poolQueries.js";
@@ -128,6 +129,7 @@ export function App() {
   const [sendFormError, setSendFormError] = useState("");
   const [sessionActivity, setSessionActivity] = useState<ActivityItem[]>([]);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [liquidityAccessNotice, setLiquidityAccessNotice] = useState(false);
   const [walletConnectPending, setWalletConnectPending] = useState<SessionKind | null>(null);
   const [evmConnectError, setEvmConnectError] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -176,6 +178,7 @@ export function App() {
   networkIdRef.current = network.networkId;
 
   function navigateToPage(next: Page) {
+    setLiquidityAccessNotice(false);
     const nextPath = pathForRoute(next, import.meta.env.BASE_URL);
     if (window.location.pathname !== nextPath) {
       const url = new URL(window.location.href);
@@ -243,15 +246,25 @@ export function App() {
   const isLiquidityManager = isConfiguredLiquidityManager(currentOwnerKey, managedLiquidityConfig);
   useEffect(() => {
     if (page !== "liquidity") return;
-    const resolutionComplete = !networkMode
-      || network.status !== "ready"
-      || catalogQuery.isError
-      || (catalogQuery.isSuccess && (!catalogMatchesDeployment || !managedLiquidityQuery.isPending));
-    if (!resolutionComplete || isLiquidityManager) return;
+    const accessResolved = canResolveLiquidityRouteAccess({
+      networkMode,
+      networkStatus: network.status,
+      sessionLifecycle: lifecycle,
+      catalogPending: catalogQuery.isPending,
+      catalogError: catalogQuery.isError,
+      catalogMatchesDeployment,
+      managedConfigPending: managedLiquidityQuery.isPending,
+    });
+    if (!accessResolved) return;
+    if (isLiquidityManager) {
+      setLiquidityAccessNotice(false);
+      return;
+    }
+    setLiquidityAccessNotice(true);
     const swapPath = pathForRoute("swap", import.meta.env.BASE_URL);
     window.history.replaceState({ locusRoute: "swap" }, "", swapPath);
     setPage("swap");
-  }, [catalogMatchesDeployment, catalogQuery.isError, isLiquidityManager, managedLiquidityQuery.isPending, network.status, networkMode, page]);
+  }, [catalogMatchesDeployment, catalogQuery.isError, catalogQuery.isPending, isLiquidityManager, lifecycle, managedLiquidityQuery.isPending, network.status, networkMode, page]);
   const poolsQuery = useQuery({
     queryKey: poolListQueryKey(network.networkId, serviceId),
     queryFn: () => network.locus!.listPools(),
@@ -815,7 +828,13 @@ export function App() {
 
         {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} recipientError={recipientFieldError} recipientMessage={recipient.trim() && (resolvedRecipient.valid || matrixResolutionPending) ? resolvedRecipient.message : ""} amount={amount} amountError={amountFieldError} formError={sendFormError} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={(value) => { updateRecipient(value); setRecipientTouched(false); }} onRecipientBlur={() => setRecipientTouched(true)} onAmount={updateAmount} onAmountBlur={() => setAmountTouched(true)} onMax={() => { updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : ""); setAmountTouched(true); }} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
         {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} getBalanceState={getAssetBalanceState} onRetry={() => void refreshAssets()} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} />}
-        {page === "swap" && <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} />}
+        {page === "swap" && <>
+          {liquidityAccessNotice && !isLiquidityManager && <div className="inline-alert liquidity-access-notice" role="status">
+            <div><strong>Liquidity management is restricted to the configured pool manager.</strong><p>Connect the Treasury Ownership to access pool creation and reserve management.</p></div>
+            <ActionButton size="small" variant="secondary" onClick={openConnect}>Connect manager account</ActionButton>
+          </div>}
+          <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} />
+        </>}
         {page === "liquidity" && isLiquidityManager && managedLiquidityConfig && catalogQuery.data && sessionOwner && <LiquidityPage config={managedLiquidityConfig} catalog={catalogQuery.data} assets={assets} pools={pools} poolsError={poolsError} poolsLoading={poolsQuery.isLoading} locus={locus} networkId={network.networkId} serviceId={serviceId} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} networkReady={networkMode && network.status === "ready"} isScopeCurrent={isLiquidityScopeCurrent} onPoolsRefreshed={(next) => queryClient.setQueryData(poolListQueryKey(network.networkId, serviceId), next)} onRefreshAssets={refreshAssets} />}
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>

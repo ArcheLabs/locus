@@ -338,6 +338,12 @@ button:disabled { cursor: not-allowed; }
 .liquidity-disclosure { margin: -10px 0 18px; color: var(--text-muted); font-size: 14px; }
 .inline-alert, .form-message, .action-status, .field-message { border-radius: 9px; font-size: 13px; line-height: 1.45; }
 .inline-alert { margin: 12px 0; padding: 11px 13px; border: 1px solid var(--border-strong); background: var(--surface-subtle); color: var(--text-muted); }
+.liquidity-access-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.liquidity-access-notice strong { color: var(--text); }
+.liquidity-access-notice p { margin: 4px 0 0; }
+@media (max-width: 640px) {
+  .liquidity-access-notice { align-items: stretch; flex-direction: column; }
+}
 .form-message { margin: 8px 0 0; color: var(--text-muted); }
 .field-message { margin: 6px 2px 0; }
 .field-message--error, .action-status--error { color: var(--danger, #ef6262); }

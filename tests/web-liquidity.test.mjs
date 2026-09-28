@@ -19,6 +19,7 @@ import {
   parseManagedLiquidityConfig,
 } from "../web/src/locus/liquidity/liquidityConfig.ts";
 import { isConfiguredLiquidityManager } from "../web/src/locus/liquidity/liquidityAccess.ts";
+import { canResolveLiquidityRouteAccess } from "../web/src/locus/liquidity/liquidityRouteAccess.ts";
 import { directPoolForPair, poolListQueryKey } from "../web/src/locus/pools/poolQueries.ts";
 const swapSource = await readFile(new URL("../web/src/locus/swap/SwapPage.tsx", import.meta.url), "utf8");
 
@@ -138,6 +139,26 @@ test("manager access is based on the configured Ownership key", () => {
   assert.equal(isConfiguredLiquidityManager(managerKey, null), false);
 });
 
+test("direct Liquidity route waits for network and session restoration before redirecting", () => {
+  const settled = {
+    networkMode: true,
+    networkStatus: "ready",
+    sessionLifecycle: "connected",
+    catalogPending: false,
+    catalogError: false,
+    catalogMatchesDeployment: true,
+    managedConfigPending: false,
+  };
+  assert.equal(canResolveLiquidityRouteAccess({ ...settled, networkStatus: "connecting" }), false);
+  assert.equal(canResolveLiquidityRouteAccess({ ...settled, sessionLifecycle: "restoring" }), false);
+  assert.equal(canResolveLiquidityRouteAccess({ ...settled, catalogPending: true }), false);
+  assert.equal(canResolveLiquidityRouteAccess({ ...settled, managedConfigPending: true }), false);
+  assert.equal(canResolveLiquidityRouteAccess(settled), true);
+  assert.equal(canResolveLiquidityRouteAccess({ ...settled, networkStatus: "error" }), true);
+  assert.equal(canResolveLiquidityRouteAccess({ ...settled, networkStatus: "unconfigured" }), true);
+  assert.equal(canResolveLiquidityRouteAccess({ ...settled, catalogError: true }), true);
+});
+
 test("managed liquidity is gated and chain pool state remains authoritative", () => {
   assert.deepEqual(poolListQueryKey("local", 153994977), ["locus", "pools", "local", 153994977]);
   assert.match(appSource, /isConfiguredLiquidityManager\(currentOwnerKey, managedLiquidityConfig\)/);
@@ -146,6 +167,8 @@ test("managed liquidity is gated and chain pool state remains authoritative", ()
   assert.match(managedPanelSource, /This pair already exists, but its on-chain manager does not match/);
   assert.match(managedPanelSource, /canManage && !pair\.pool/);
   assert.match(managedPanelSource, /canManage && pair\.pool/);
+  assert.match(appSource, /Liquidity management is restricted to the configured pool manager/);
+  assert.match(appSource, /canResolveLiquidityRouteAccess\(/);
 });
 
 test("managed liquidity review protects ratio, drain, transaction, and fee semantics", () => {
