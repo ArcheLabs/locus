@@ -11,11 +11,15 @@ import type {
   LocusValue,
   ExactInQuote,
   OwnershipSession,
+  LiquidityPosition,
+  AddLiquidityQuote,
+  RemoveLiquidityQuote,
   PreparedOwnershipAction,
   OwnershipPreparationPhase,
   SignedOwnershipAction,
   Pool,
 } from "./types.js";
+import { quoteAddLiquidity as calculateAddLiquidity, quoteInitialLiquidity, quoteRemoveLiquidity as calculateRemoveLiquidity } from "./liquidity.js";
 
 export const MAX_POOL_RESERVE = (1n << 64n) - 1n;
 export const SWAP_FEE_BPS = 30 as const;
@@ -67,14 +71,14 @@ function asPool(value: LocusValue | null, key: { asset0: AssetId; asset1: AssetI
     throw new Error("pool query did not return a record");
   }
   const pool = value as Record<string, LocusValue>;
-  if (typeof pool.version !== "number" || pool.version !== 1) throw new Error("unsupported pool version");
+  if (typeof pool.version !== "number" || pool.version !== 2) throw new Error("unsupported pool version");
   return {
-    version: 1,
-    manager: asOwnership(pool.manager),
+    version: 2,
     asset0: key.asset0,
     asset1: key.asset1,
     reserve0: asBigInt(pool.reserve0, "pool reserve0"),
     reserve1: asBigInt(pool.reserve1, "pool reserve1"),
+    totalShares: asBigInt(pool.totalShares, "pool total shares"),
   };
 }
 
@@ -417,10 +421,15 @@ export class LocusClient {
     return asPool(await this.queryValue("getPool", key), key);
   }
 
-  async listPools(): Promise<Pool[]> {
+  async listPools(options: { offset?: bigint; limit?: number } = {}): Promise<Pool[]> {
     const count = asBigIntOrZero(await this.queryValue("getPoolCount"), "pool count");
+    const offset = options.offset ?? 0n;
+    const limit = options.limit ?? 50;
+    if (offset < 0n || offset > count) throw new RangeError("pool offset is outside the indexed range");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new RangeError("pool limit must be an integer from 1 to 100");
+    const end = offset + BigInt(limit) < count ? offset + BigInt(limit) : count;
     const result: Pool[] = [];
-    for (let index = 0n; index < count; index += 1n) {
+    for (let index = offset; index < end; index += 1n) {
       const value = await this.queryValue("getPoolByIndex", index);
       if (!value || typeof value !== "object" || value instanceof Uint8Array || Array.isArray(value)) {
         throw new Error("pool index query did not return a PoolKey");
@@ -442,23 +451,85 @@ export class LocusClient {
     canonicalPoolKey(assetA, assetB);
     assertPoolReserve(amountA, "amountA");
     assertPoolReserve(amountB, "amountB");
-    if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+    if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
     return this.submit("createPool", { assetA, assetB, amountA, amountB });
   }
 
-  async addPoolLiquidity(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+  async addPoolLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount, minShares: Amount): Promise<SubmitActionResult> {
     canonicalPoolKey(assetA, assetB);
-    assertPoolReserve(amountA, "amountA");
-    assertPoolReserve(amountB, "amountB");
-    if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
-    return this.submit("addPoolLiquidity", { assetA, assetB, amountA, amountB });
+    assertPoolReserve(maxAmountA, "maxAmountA");
+    assertPoolReserve(maxAmountB, "maxAmountB");
+    assertAmount(minShares, "minShares");
+    if (maxAmountA === 0n || maxAmountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
+    return this.submit("addPoolLiquidity", { assetA, assetB, maxAmountA, maxAmountB, minShares });
   }
 
-  async removePoolLiquidity(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+  async removePoolLiquidity(assetA: AssetId, assetB: AssetId, shares: Amount, minAmountA: Amount, minAmountB: Amount): Promise<SubmitActionResult> {
     canonicalPoolKey(assetA, assetB);
-    assertPoolReserve(amountA, "amountA");
-    assertPoolReserve(amountB, "amountB");
-    return this.submit("removePoolLiquidity", { assetA, assetB, amountA, amountB });
+    assertAmount(shares, "shares");
+    assertAmount(minAmountA, "minAmountA");
+    assertAmount(minAmountB, "minAmountB");
+    if (shares === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
+    return this.submit("removePoolLiquidity", { assetA, assetB, shares, minAmountA, minAmountB });
+  }
+
+  async liquiditySharesOf(assetA: AssetId, assetB: AssetId, owner: Ownership): Promise<Amount> {
+    const key = canonicalPoolKey(assetA, assetB);
+    assertOwnership(owner, "owner");
+    const value = await this.queryValue("getLiquidityShares", { ...key, ownerKey: ownershipKey(owner) });
+    return asBigIntOrZero(value, "liquidity shares");
+  }
+
+  async liquidityPositionCount(owner: Ownership): Promise<Amount> {
+    assertOwnership(owner, "owner");
+    return asBigIntOrZero(await this.queryValue("getLiquidityPositionCount", ownershipKey(owner)), "liquidity position count");
+  }
+
+  async quoteAddLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount): Promise<AddLiquidityQuote> {
+    const key = canonicalPoolKey(assetA, assetB);
+    const isA0 = compareAssetIds(assetA, key.asset0) === 0;
+    const maxAmount0 = isA0 ? maxAmountA : maxAmountB;
+    const maxAmount1 = isA0 ? maxAmountB : maxAmountA;
+    const pool = await this.getPool(key.asset0, key.asset1);
+    if (!pool) return quoteInitialLiquidity(maxAmount0, maxAmount1);
+    return calculateAddLiquidity(pool.reserve0, pool.reserve1, pool.totalShares, maxAmount0, maxAmount1);
+  }
+
+  async quoteRemoveLiquidity(assetA: AssetId, assetB: AssetId, owner: Ownership, shares: Amount): Promise<RemoveLiquidityQuote> {
+    const pool = await this.getPool(assetA, assetB);
+    if (!pool) throw locusError(LOCUS_ERROR_CODES.POOL_NOT_FOUND);
+    const ownerShares = await this.liquiditySharesOf(assetA, assetB, owner);
+    return calculateRemoveLiquidity(pool.reserve0, pool.reserve1, pool.totalShares, ownerShares, shares);
+  }
+
+  async listLiquidityPositions(owner: Ownership, options: { offset?: bigint; limit?: number } = {}): Promise<LiquidityPosition[]> {
+    assertOwnership(owner, "owner");
+    const ownerId = ownershipKey(owner);
+    const count = await this.liquidityPositionCount(owner);
+    const offset = options.offset ?? 0n;
+    const limit = options.limit ?? 50;
+    if (offset < 0n || offset > count) throw new RangeError("position offset is outside the indexed range");
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) throw new RangeError("position limit must be an integer from 1 to 100");
+    const end = offset + BigInt(limit) < count ? offset + BigInt(limit) : count;
+    const positions: LiquidityPosition[] = [];
+    for (let index = offset; index < end; index += 1n) {
+      const value = await this.queryValue("getLiquidityPositionByIndex", { ownerKey: ownerId, index });
+      if (!value || typeof value !== "object" || value instanceof Uint8Array || Array.isArray(value)) throw new Error("liquidity position index did not return a PoolKey");
+      const poolKey = value as Record<string, LocusValue>;
+      const asset0 = asBytes(poolKey.asset0, "position asset0");
+      const asset1 = asBytes(poolKey.asset1, "position asset1");
+      const shares = await this.liquiditySharesOf(asset0, asset1, owner);
+      if (shares === 0n) continue;
+      const pool = await this.getPool(asset0, asset1);
+      if (!pool) throw new Error("liquidity position points to a missing pool");
+      positions.push({
+        pool,
+        shares,
+        amount0: shares === pool.totalShares ? pool.reserve0 : pool.reserve0 * shares / pool.totalShares,
+        amount1: shares === pool.totalShares ? pool.reserve1 : pool.reserve1 * shares / pool.totalShares,
+      });
+    }
+    return positions;
   }
 
   async swapExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult> {
@@ -474,6 +545,16 @@ export class LocusClient {
     if (!pool) throw locusError(LOCUS_ERROR_CODES.POOL_NOT_FOUND);
     const assetInIs0 = compareAssetIds(assetIn, pool.asset0) === 0;
     return quoteExactIn(assetInIs0 ? pool.reserve0 : pool.reserve1, assetInIs0 ? pool.reserve1 : pool.reserve0, amountIn);
+  }
+
+  async quoteAddLiquidityForPool(asset0: AssetId, asset1: AssetId, maxAmount0: Amount, maxAmount1: Amount): Promise<AddLiquidityQuote> {
+    const pool = await this.getPool(asset0, asset1);
+    if (!pool) return quoteInitialLiquidity(maxAmount0, maxAmount1);
+    return calculateAddLiquidity(pool.reserve0, pool.reserve1, pool.totalShares, maxAmount0, maxAmount1);
+  }
+
+  async quoteRemoveLiquidityForPool(asset0: AssetId, asset1: AssetId, owner: Ownership, shares: Amount): Promise<RemoveLiquidityQuote> {
+    return this.quoteRemoveLiquidity(asset0, asset1, owner, shares);
   }
 
   asset(assetId: AssetId): BoundAsset {
@@ -492,11 +573,20 @@ export class BoundPool {
   swapExactIn(assetIn: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult> {
     return this.client.swapExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn, minAmountOut);
   }
-  addLiquidity(amount0: Amount, amount1: Amount): Promise<SubmitActionResult> {
-    return this.client.addPoolLiquidity(this.asset0, this.asset1, amount0, amount1);
+  addLiquidity(maxAmount0: Amount, maxAmount1: Amount, minShares: Amount): Promise<SubmitActionResult> {
+    return this.client.addPoolLiquidity(this.asset0, this.asset1, maxAmount0, maxAmount1, minShares);
   }
-  removeLiquidity(amount0: Amount, amount1: Amount): Promise<SubmitActionResult> {
-    return this.client.removePoolLiquidity(this.asset0, this.asset1, amount0, amount1);
+  removeLiquidity(shares: Amount, minAmount0: Amount, minAmount1: Amount): Promise<SubmitActionResult> {
+    return this.client.removePoolLiquidity(this.asset0, this.asset1, shares, minAmount0, minAmount1);
+  }
+  sharesOf(owner: Ownership): Promise<Amount> {
+    return this.client.liquiditySharesOf(this.asset0, this.asset1, owner);
+  }
+  quoteAddLiquidity(maxAmount0: Amount, maxAmount1: Amount): Promise<AddLiquidityQuote> {
+    return this.client.quoteAddLiquidityForPool(this.asset0, this.asset1, maxAmount0, maxAmount1);
+  }
+  quoteRemoveLiquidity(owner: Ownership, shares: Amount): Promise<RemoveLiquidityQuote> {
+    return this.client.quoteRemoveLiquidityForPool(this.asset0, this.asset1, owner, shares);
   }
 }
 

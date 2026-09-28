@@ -1,7 +1,7 @@
 import { SelectField, type SelectFieldOption } from "./SelectField.js";
 import { SegmentedControl } from "./SegmentedControl.js";
 
-export type ResponsiveSelectOption = Pick<SelectFieldOption, "value" | "label">;
+export type ResponsiveSelectOption = Pick<SelectFieldOption, "value" | "label" | "textValue">;
 
 export function ResponsiveSelect({
   id,
