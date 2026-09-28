@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { ChevronDown, ShieldCheck, Unplug, UserRound, X } from "lucide-react";
+import { ChevronDown, Unplug, UserRound, X } from "lucide-react";
 import { formatLocusId } from "@archelabs/locus";
 import { useEffect, useState } from "react";
 import type { LocusWebSession, SessionKind } from "../session/types.js";
@@ -91,7 +91,6 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
               ? <img src={matrixAvatar} alt="" aria-hidden="true" onError={() => setAvatarFailed(true)} />
               : <IdentityIcon kind={session.kind} size={26} />}</span>
             <span><strong>{displayLabel}</strong><small>Connected</small></span>
-            <ShieldCheck size={18} className="account-verified-mark" aria-label="Verified controller" />
           </section>
 
           <section className="account-center-section">

@@ -318,7 +318,6 @@ button:disabled { cursor: not-allowed; }
 .account-identity-card > span:nth-child(2) { display: grid; min-width: 0; gap: 4px; }
 .account-identity-card > span:nth-child(2) strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-identity-card > span:nth-child(2) small { color: var(--success); font-size: 12px; }
-.account-verified-mark { margin-left: auto; color: var(--success); }
 .account-center-section { display: grid; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .account-center-section h3 { margin: 0; color: var(--text-secondary); font-size: 13px; font-weight: 600; }
 .account-center-detail { display: grid; gap: 4px; }

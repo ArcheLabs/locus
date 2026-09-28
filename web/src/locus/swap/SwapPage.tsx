@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowLeftRight, Settings2, X } from "lucide-react";
-import { formatUnits, minimumAmountOut, ownershipKey, parseUnits, quoteExactIn, toHex, type LocusClient, type Ownership, type Pool } from "@archelabs/locus";
+import { formatUnits, minimumAmountOut, ownershipKey, parseUnits, quoteExactIn, SWAP_FEE_BPS, toHex, type LocusClient, type Ownership, type Pool } from "@archelabs/locus";
 import type { AssetView } from "../assets.js";
 import { AssetIcon } from "../../components/AssetIcon.js";
 import { ActionButton } from "../../components/ActionButton.js";
@@ -13,6 +13,7 @@ import { validatePositiveAmount } from "../../forms/validation.js";
 import { parseSlippageBps } from "./swapValidation.js";
 import type { ManagedLiquidityScope } from "../liquidity/ManagedLiquidityPanel.js";
 import { directPoolForPair } from "../pools/poolQueries.js";
+import { formatBasisPoints } from "../liquidity/liquidityMath.js";
 
 type Submission = "idle" | "awaiting-signature" | "submitted" | "applied" | "failed";
 type Quote = { amountIn: bigint; amountOut: bigint; minimumAmountOut: bigint; feeAmount: bigint };
@@ -122,7 +123,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   const visibleValidation = amountTouched ? validation : null;
   const slippageInvalid = slippageBps === null;
   const busy = submission === "awaiting-signature" || submission === "submitted";
-  const feeLabel = "0.30%";
+  const feeLabel = formatBasisPoints(SWAP_FEE_BPS);
 
   function updatePair(input: string, output: string) {
     setAssetInId(input);
