@@ -321,7 +321,6 @@ textarea {
     background: var(--surface-glass);
     backdrop-filter: blur(18px);
   }
-  .mobile-bottom-nav--manager { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding-right: 6px; padding-left: 6px; }
   .mobile-nav-item {
     display: flex;
     min-height: 48px;
@@ -337,7 +336,6 @@ textarea {
     font-weight: 650;
   }
   .mobile-nav-item.active { background: var(--accent-soft); color: var(--accent); }
-  .mobile-bottom-nav--manager .mobile-nav-item { gap: 2px; padding-inline: 2px; font-size: 10px; }
   .copyable-value__button { opacity: .65; }
   .modal-backdrop { display: flex; align-items: flex-end; padding: 0; }
   .modal {

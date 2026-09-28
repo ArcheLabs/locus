@@ -1,15 +1,9 @@
-export type ManagedLiquidityPair = {
-  assetA: string;
-  assetB: string;
-  enabled: boolean;
-};
-
-export type ManagedLiquidityConfig = {
-  version: 1;
+export type FeaturedLiquidityPair = { assetA: string; assetB: string };
+export type PermissionlessLiquidityConfig = {
+  version: 2;
   network: "local" | "testnet";
-  mode: "managed";
-  managerKey: string;
-  pairs: ManagedLiquidityPair[];
+  mode: "permissionless";
+  featuredPairs: FeaturedLiquidityPair[];
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -21,50 +15,40 @@ export function liquidityConfigPath(networkId: string, baseUrl: string): string 
   return `${base}liquidity/${networkId}.json`;
 }
 
-export function parseManagedLiquidityConfig(
+export function parsePermissionlessLiquidityConfig(
   value: unknown,
   networkId: "local" | "testnet",
-  curatedAssetKeys: readonly string[],
-): ManagedLiquidityConfig {
-  if (!isRecord(value) || value.version !== 1 || value.network !== networkId || value.mode !== "managed"
-    || typeof value.managerKey !== "string" || !/^0x[0-9a-fA-F]{64}$/.test(value.managerKey)
-    || !Array.isArray(value.pairs)) {
-    throw new Error("Invalid managed liquidity configuration.");
+  knownAssetKeys: readonly string[],
+): PermissionlessLiquidityConfig {
+  if (!isRecord(value) || value.version !== 2 || value.network !== networkId || value.mode !== "permissionless" || !Array.isArray(value.featuredPairs)) {
+    throw new Error("Invalid permissionless liquidity configuration.");
   }
-  const keys = new Set(curatedAssetKeys);
-  if (keys.size !== curatedAssetKeys.length) throw new Error("Curated catalog has duplicate asset keys.");
-  const seenPairs = new Set<string>();
-  const pairs: ManagedLiquidityPair[] = [];
-  for (const raw of value.pairs) {
-    if (!isRecord(raw) || typeof raw.assetA !== "string" || typeof raw.assetB !== "string" || typeof raw.enabled !== "boolean") {
-      throw new Error("Invalid managed liquidity pair.");
-    }
-    if (raw.assetA === raw.assetB) throw new Error("A managed liquidity pair must use two different assets.");
-    if (!keys.has(raw.assetA) || !keys.has(raw.assetB)) throw new Error("Managed liquidity pair references an unknown curated asset.");
+  const known = new Set(knownAssetKeys);
+  if (known.size !== knownAssetKeys.length) throw new Error("Asset catalog has duplicate keys.");
+  const seen = new Set<string>();
+  const featuredPairs: FeaturedLiquidityPair[] = [];
+  for (const raw of value.featuredPairs) {
+    if (!isRecord(raw) || typeof raw.assetA !== "string" || typeof raw.assetB !== "string") throw new Error("Invalid featured liquidity pair.");
+    if (raw.assetA === raw.assetB) throw new Error("Featured pair must use two different assets.");
+    if (!known.has(raw.assetA) || !known.has(raw.assetB)) throw new Error("Featured pair references an unknown asset key.");
     const pairKey = [raw.assetA, raw.assetB].sort().join("\u0000");
-    if (seenPairs.has(pairKey)) throw new Error("Managed liquidity configuration contains a duplicate pair.");
-    seenPairs.add(pairKey);
-    pairs.push({ assetA: raw.assetA, assetB: raw.assetB, enabled: raw.enabled });
+    if (seen.has(pairKey)) throw new Error("Duplicate featured pair.");
+    seen.add(pairKey);
+    featuredPairs.push({ assetA: raw.assetA, assetB: raw.assetB });
   }
-  return {
-    version: 1,
-    network: networkId,
-    mode: "managed",
-    managerKey: value.managerKey.toLowerCase(),
-    pairs,
-  };
+  return { version: 2, network: networkId, mode: "permissionless", featuredPairs };
 }
 
-export async function loadManagedLiquidityConfig(
+export async function loadPermissionlessLiquidityConfig(
   networkId: "local" | "testnet",
-  curatedAssetKeys: readonly string[],
+  knownAssetKeys: readonly string[],
   baseUrl = import.meta.env.BASE_URL,
   fetchImpl: typeof fetch = fetch,
-): Promise<ManagedLiquidityConfig | null> {
+): Promise<PermissionlessLiquidityConfig | null> {
   try {
     const response = await fetchImpl(liquidityConfigPath(networkId, baseUrl), { cache: "no-store" });
     if (!response.ok) return null;
-    return parseManagedLiquidityConfig(await response.json(), networkId, curatedAssetKeys);
+    return parsePermissionlessLiquidityConfig(await response.json(), networkId, knownAssetKeys);
   } catch {
     return null;
   }

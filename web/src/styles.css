@@ -303,7 +303,6 @@ button:disabled { cursor: not-allowed; }
 .send-amount-field { margin-top: 26px; }
 .send-amount-field .amount-foot { margin-top: 8px; }
 .swap-amount-field > .swap-side-label { justify-content: flex-end; margin: 0 0 7px; color: var(--text-muted); font-weight: 400; }
-.managed-liquidity-manager .copyable-value { display: inline-flex; vertical-align: middle; }
 .copyable-value__button { display: inline-grid; flex: 0 0 32px; width: 32px; height: 32px; place-items: center; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-secondary); }
 .copyable-value__button:hover, .copyable-value__button:focus-visible { border-color: var(--border); background: var(--surface-hover); color: var(--accent); }
 .account-center-backdrop { position: fixed; z-index: 130; inset: 0; background: var(--overlay); }

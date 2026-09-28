@@ -11,7 +11,7 @@ import { FormField } from "../../forms/FormField.js";
 import { normalizeActionError } from "../../errors/normalizeError.js";
 import { validatePositiveAmount } from "../../forms/validation.js";
 import { parseSlippageBps } from "./swapValidation.js";
-import type { ManagedLiquidityScope } from "../liquidity/ManagedLiquidityPanel.js";
+import type { LiquidityScope } from "../liquidity/liquidityTypes.js";
 import { directPoolForPair } from "../pools/poolQueries.js";
 import { formatBasisPoints } from "../liquidity/liquidityMath.js";
 
@@ -27,7 +27,7 @@ function friendlySwapError(cause: unknown): string {
   return normalized;
 }
 
-function sameScope(current: ((scope: ManagedLiquidityScope) => boolean) | undefined, scope: ManagedLiquidityScope): boolean {
+function sameScope(current: ((scope: LiquidityScope) => boolean) | undefined, scope: LiquidityScope): boolean {
   return current ? current(scope) : true;
 }
 
@@ -43,7 +43,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   poolError: string;
   sessionOwner: Ownership | null;
   connectionId: string | null;
-  isScopeCurrent?: (scope: ManagedLiquidityScope) => boolean;
+  isScopeCurrent?: (scope: LiquidityScope) => boolean;
   onConnect: () => void;
   onApplied: (item: { assetIn: string; assetOut: string; amountIn: string; amountOut: string; transactionId: string; networkId: string }) => void;
   onNotify: (message: string) => void;
@@ -157,7 +157,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
 
   async function confirmSwap() {
     if (!locus || !assetIn || !assetOut || !quote || !sessionOwner || serviceId === null) return;
-    const expectedScope: ManagedLiquidityScope = {
+    const expectedScope: LiquidityScope = {
       networkId,
       serviceId,
       connectionId,
