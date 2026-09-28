@@ -19,7 +19,7 @@ export function IdentityOption({
   trailing: "arrow" | "check" | null;
 }) {
   return <>
-    <span className="identity-icon-slot"><IdentityIcon kind={kind} size={24} /></span>
+    <span className="identity-icon-slot"><IdentityIcon kind={kind} size={28} /></span>
     <span className={`identity-option-copy identity-option-copy--${variant}`} data-disabled={disabled ? "true" : undefined}>
       <strong>{title}</strong>
       <small>{description}</small>

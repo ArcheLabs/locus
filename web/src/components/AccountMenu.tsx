@@ -73,7 +73,7 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
       <button type="button" className="profile-pill profile-button identity-trigger" aria-label={`Account center, ${session.kind}`}>
         <span className="identity-icon-slot">{matrixAvatar
           ? <img className="matrix-profile-avatar" src={matrixAvatar} alt="" aria-hidden="true" onError={() => setAvatarFailed(true)} />
-          : <IdentityIcon kind={session.kind} size={22} />}</span>
+          : <IdentityIcon kind={session.kind} size={26} />}</span>
         <span className="profile-label">{displayLabel}</span>
         <ChevronDown size={15} aria-hidden="true" />
       </button>
