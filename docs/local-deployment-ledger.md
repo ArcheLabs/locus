@@ -35,13 +35,31 @@ registered Service key for `3083943385`, so Backend registration correctly
 failed the one-Service-per-key invariant. No assets were bootstrapped into it;
 keep its deployment receipt as an unregistered orphan.
 
-Service `153994977` is the current multi-controller candidate. It has a unique
-Service key, is registered and materialized in the Local Backend, and contains
-the six curated assets with their full initial supplies held by the configured
-Treasury. Its pool count is zero. Its candidate descriptor and catalog are kept
-under `.jamscript/candidates/local-153994977/`; they are not active or published.
-Do not switch the web descriptor or deploy the candidate frontend until the
-physical Matrix D1/D2 authorization check passes.
+Service `153994977` is the preserved v1 multi-controller candidate. It remains
+registered in the Local Backend with its existing state, including one
+permissionless-liquidity-v1 pool (`MINI/DOT`, manager Treasury,
+`reserve0=110000000`, `reserve1=90933892`). Its descriptor and static build are
+preserved for rollback; its state was not migrated or modified during the v2
+deployment.
+
+Permissionless Liquidity v2 is deployed at the existing HTTPS `/candidate/`
+path and targets a separate immutable Service, `2915918722`, with code hash
+`0xcf5e57f9a764fee594ea4f434bc2313f7ec2cdca77fccc88ca31409b55868387`.
+The deployment finalized at block `77345` and is registered in the Local
+Backend. Its candidate descriptor and catalog are under
+`.jamscript/candidates/local-2915918722/`. The candidate has all six curated
+assets, with each full initial supply held by Treasury, and `poolCount=0`.
+No liquidity was created or seeded. The v2 candidate does not inherit v1 pool
+positions or arbitrary user balances.
+
+The candidate frontend is available at
+`https://locus.minijam.xyz/candidate/`. Live HTTPS checks confirmed its app,
+asset paths, descriptor, catalog, and permissionless liquidity configuration.
+The production `/` frontend and `/deployments/local.json` remain on Service
+`797069104`; no production cutover was performed. The prior candidate static
+build is preserved at
+`/var/www/locus-candidate-v1-153994977-before-v2-20260928T130431Z` and
+`/var/www/locus-candidate-v1-live-rollback-20260928T130431Z`.
 
 Finalized deployments `2262072784` and `2671640402` are unused historical
 deployments. They are not registered as active services, are not present in the

@@ -52,11 +52,12 @@ resubmitting the action automatically.
 
 Permissionless Liquidity v2 changes the Service state layout and action/query
 ABI. A v1 Service cannot be upgraded in place and its state is not inherited by
-a new immutable Service. Deployment must use a separate v2 candidate and must
-not change the production descriptor until candidate validation is complete.
-Existing production and v1 candidate Services remain preserved. Any Local
-asset restoration is an explicit candidate bootstrap; arbitrary user balances
-cannot be migrated because the v1 query surface does not enumerate all balance
-owners. Existing v1 pools must be recorded and reseeded by their actual
+a new immutable Service. The v2 frontend is served at the existing
+`https://locus.minijam.xyz/candidate/` path and targets its own immutable Service;
+the production descriptor remains unchanged until candidate validation is
+complete. Existing production and v1 candidate Services remain preserved. Any
+Local asset restoration is an explicit candidate bootstrap; arbitrary user
+balances cannot be migrated because the v1 query surface does not enumerate all
+balance owners. Existing v1 pools must be recorded and reseeded by their actual
 liquidity providers; their manager reserves must not be converted into shares
 without new capital.
