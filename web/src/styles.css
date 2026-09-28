@@ -99,6 +99,7 @@ button:disabled { cursor: not-allowed; }
 .action-button--primary { background: var(--accent); color: var(--text-inverse); }
 .action-button--secondary { border-color: var(--border-strong); background: var(--surface-subtle); color: var(--accent); }
 .action-button--tertiary { min-width: 0; border-color: transparent; background: transparent; color: var(--accent); }
+.action-button--danger { border-color: color-mix(in srgb, var(--danger-strong) 42%, var(--border)); background: color-mix(in srgb, var(--danger-strong) 12%, var(--surface)); color: var(--danger-strong); }
 .modal-footer .action-button { flex: 1 1 128px; min-width: 0; min-height: 52px; max-width: 180px; }
 .action-button:disabled { opacity: .58; }
 @keyframes action-button-spin { to { transform: rotate(360deg); } }
@@ -282,3 +283,79 @@ button:disabled { cursor: not-allowed; }
 .swap-quote-details dd { margin: 0; max-width: 65%; font-weight: 650; text-align: right; overflow-wrap: anywhere; }
 .swap-empty { border: 1px dashed var(--border-strong); border-radius: 12px; }
 .swap-card > .primary { margin-top: 18px; }
+
+.topbar { gap: 10px; }
+.profile-pill { padding: 8px 12px; border-radius: 10px; font-weight: 500; }
+.profile-button { min-height: 36px; font-size: 14px; font-weight: 500; }
+.identity-icon-slot { display: grid; flex: 0 0 auto; place-items: center; width: 22px; height: 22px; overflow: hidden; border-radius: 50%; }
+.copyable-value { display: grid; min-width: 0; gap: 4px; }
+.copyable-value > small { color: var(--text-secondary); font-size: 12px; }
+.copyable-value__row { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.copyable-value__row code { min-width: 0; overflow: hidden; color: var(--text); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.copyable-value__button { opacity: 0; transition: opacity .15s ease; }
+.copyable-value:hover .copyable-value__button, .copyable-value__button:focus-visible { opacity: 1; }
+.app-error-page { display: grid; min-height: 100dvh; place-items: center; padding: 24px; }
+.app-error-page > .card { width: min(460px, 100%); padding: 26px; }
+.app-error-page h1 { margin: 0 0 12px; font-size: 24px; }
+.form-field { display: grid; gap: 8px; }
+.form-field > label { margin: 0; color: var(--text-secondary); font-size: 13px; font-weight: 600; }
+.form-field input[aria-invalid="true"], .recipient-control:has(input[aria-invalid="true"]) { border-color: var(--danger, #ef6262); }
+.send-amount-field { margin-top: 26px; }
+.send-amount-field .amount-foot { margin-top: 8px; }
+.swap-amount-field > .swap-side-label { justify-content: flex-end; margin: 0 0 7px; color: var(--text-muted); font-weight: 400; }
+.managed-liquidity-manager .copyable-value { display: inline-flex; vertical-align: middle; }
+.copyable-value__button { display: inline-grid; flex: 0 0 32px; width: 32px; height: 32px; place-items: center; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-secondary); }
+.copyable-value__button:hover, .copyable-value__button:focus-visible { border-color: var(--border); background: var(--surface-hover); color: var(--accent); }
+.account-center-backdrop { position: fixed; z-index: 130; inset: 0; background: var(--overlay); }
+.account-center-panel { position: fixed; z-index: 131; inset: 0 0 0 auto; display: flex; width: min(460px, 100vw); height: 100dvh; flex-direction: column; overflow: hidden; border-left: 1px solid var(--border); background: var(--surface); box-shadow: -20px 0 60px var(--shadow); outline: none; }
+.account-center-header { display: flex; min-height: 64px; flex: 0 0 auto; align-items: center; justify-content: space-between; padding: 0 22px; border-bottom: 1px solid var(--border); }
+.account-center-header h2 { margin: 0; font-size: 21px; font-weight: 600; }
+.account-center-header .icon-button { display: grid; width: 40px; height: 40px; place-items: center; padding: 0; }
+.account-center-body { display: grid; flex: 1; align-content: start; gap: 18px; overflow-y: auto; padding: 20px 22px calc(24px + env(safe-area-inset-bottom)); }
+.account-identity-card { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface-subtle); }
+.account-avatar { display: grid; flex: 0 0 44px; width: 44px; height: 44px; place-items: center; overflow: hidden; border-radius: 50%; background: var(--surface-hover); }
+.account-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.account-identity-card > span:nth-child(2) { display: grid; min-width: 0; gap: 4px; }
+.account-identity-card > span:nth-child(2) strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-identity-card > span:nth-child(2) small { color: var(--success); font-size: 12px; }
+.account-verified-mark { margin-left: auto; color: var(--success); }
+.account-center-section { display: grid; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
+.account-center-section h3 { margin: 0; color: var(--text-secondary); font-size: 13px; font-weight: 600; }
+.account-center-detail { display: grid; gap: 4px; }
+.account-center-detail small { color: var(--text-secondary); font-size: 12px; }
+.account-center-detail > span { overflow-wrap: anywhere; font-size: 13px; }
+.account-verified-text { color: var(--success); }
+.account-security-section > p, .remove-device-confirm p { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.remove-device-confirm { display: grid; gap: 12px; padding: 14px; border: 1px solid var(--danger-border); border-radius: 12px; background: var(--danger-soft); }
+.remove-device-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.account-center-footer { display: grid; gap: 8px; padding-top: 2px; }
+.account-center-footer > .action-button { width: 100%; }
+.account-center-footer > small { color: var(--text-secondary); font-size: 12px; text-align: center; }
+.asset-row-info > strong { font-weight: 500; }
+.asset-row-info > small, .asset-row-balance > small { color: var(--text-muted); font-size: 12px; }
+.asset-row-balance { display: grid; justify-items: end; gap: 3px; font-weight: 400; }
+.asset-row-balance > strong { font-weight: 500; }
+.asset-balance-unavailable { color: var(--text-muted); font-size: 13px; }
+.liquidity-disclosure { margin: -10px 0 18px; color: var(--text-muted); font-size: 14px; }
+.inline-alert, .form-message, .action-status, .field-message { border-radius: 9px; font-size: 13px; line-height: 1.45; }
+.inline-alert { margin: 12px 0; padding: 11px 13px; border: 1px solid var(--border-strong); background: var(--surface-subtle); color: var(--text-muted); }
+.form-message { margin: 8px 0 0; color: var(--text-muted); }
+.field-message { margin: 6px 2px 0; }
+.field-message--error, .action-status--error { color: var(--danger, #ef6262); }
+.action-status { margin: 12px 0 0; }
+.swap-settings-button { color: var(--text-muted); }
+.swap-token-input > .select-field__trigger, .swap-token-output > .select-field__trigger { min-width: 112px; max-width: 185px; flex: 0 1 auto; border: 0; background: transparent; padding: 8px 5px; font-size: 14px; font-weight: 600; }
+.swap-token-card > input { flex: 1; width: auto; min-width: 48px; }
+.swap-token-input .swap-max-button { border: 0; border-radius: 7px; background: var(--accent-soft); color: var(--accent); padding: 6px 8px; font-size: 12px; font-weight: 600; }
+.swap-max-button:disabled { opacity: .5; }
+.swap-token-output > strong { flex: 1; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.swap-rate { margin: 14px 0 0; text-align: center; color: var(--text-muted); font-size: 13px; }
+.swap-impact-warning { margin: 12px 0 0; color: var(--warning, #f0aa35); font-size: 13px; }
+.swap-advanced-details { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
+.swap-advanced-details > summary { color: var(--text-muted); cursor: pointer; font-size: 13px; }
+.swap-settings-field { margin: 14px 0; display: grid; gap: 8px; }
+.swap-settings-field > label { font-size: 13px; }
+.swap-slippage-input { display: flex; align-items: center; gap: 8px; width: 130px; border: 1px solid var(--border-strong); border-radius: 9px; padding: 0 10px; background: var(--surface-subtle); }
+.swap-slippage-input input { width: 100%; border: 0; outline: 0; padding: 9px 0; background: transparent; color: var(--text); }
+.swap-review-action { margin-top: 18px; }
+.copyable-value__row code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

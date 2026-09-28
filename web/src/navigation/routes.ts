@@ -1,6 +1,6 @@
-export type AppRoute = "assets" | "send" | "swap" | "activity";
+export type AppRoute = "assets" | "send" | "swap" | "liquidity" | "activity";
 
-const routes = new Set<AppRoute>(["assets", "send", "swap", "activity"]);
+const routes = new Set<AppRoute>(["assets", "send", "swap", "liquidity", "activity"]);
 
 function normalizedBasePath(baseUrl: string): string {
   const value = baseUrl.startsWith("/") ? baseUrl : `/${baseUrl}`;

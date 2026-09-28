@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { formatLocusId, parseUnits, randomAssetId, type LocusClient, type OwnershipPreparationPhase } from "@archelabs/locus";
 import { Modal } from "../components/Modal.js";
 import { ActionButton } from "../components/ActionButton.js";
+import { CopyableValue } from "../components/CopyableValue.js";
 import { Check, CirclePlus, ClipboardCopy, RefreshCw, SearchCheck, X } from "lucide-react";
 import type { LocusWebSession } from "../session/types.js";
 import type { AssetView } from "./assets.js";
@@ -506,7 +507,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
       {!pending && <ActionButton variant="primary" icon={stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING" ? RefreshCw : CirclePlus} loading={stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING"} disabled={signatureReady ? false : !locus || !session || !pendingScope || (!assetDetailsComplete && !signatureReady) || stageBusy} onClick={signatureReady ? signAndCreate : requestPreparation}>{stage === "EDITING" ? !locus || !pendingScope ? "Waiting for network…" : !session ? "Connect an Ownership" : assetDetailsComplete ? "Prepare action" : "Complete asset details" : stage === "PREPARING" ? "Preparing…" : signatureInProgress ? "Waiting for wallet…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : canRetryPreparation ? "Retry preparation" : "Complete asset details"}</ActionButton>}
     </>}>
       <p className="modal-lead">The connected Ownership becomes the issuer.</p>
-      {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><small>Owner / Issuer</small><strong>{session.label}</strong><code>{formatLocusId(session.owner)}</code>{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; subject is the master Ownership</small>}</span></div>}
+      {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><small>Owner / Issuer</small><strong>{session.label}</strong><CopyableValue value={formatLocusId(session.owner)} />{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; subject is the master Ownership</small>}</span></div>}
       <div className="form-grid">
         <label>Name<input disabled={assetFieldsDisabled} value={name} placeholder="Dot Token" onChange={(event) => onAssetDetailChange(() => setName(event.target.value))} /></label>
         <label>Symbol<input disabled={assetFieldsDisabled} value={symbol} placeholder="DOT" onChange={(event) => onAssetDetailChange(() => setSymbol(event.target.value.toUpperCase()))} /></label>
@@ -516,7 +517,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
       <section className={`create-asset-stage create-asset-stage--${stage.toLowerCase()}`} aria-live="polite" role="status">
         <strong>{stageLabel(stage)}</strong>
         <p>{stageMessage}</p>
-        {pending?.transactionId && <code>Transaction ID: {pending.transactionId}</code>}
+        {pending?.transactionId && <CopyableValue label="Transaction ID" value={pending.transactionId} />}
       </section>
       {pending?.state === "submission-unknown" && <div className="create-asset-recovery">
         <p>This signed action has no known transaction ID. Locus will not create another signature or automatically submit this payload again.</p>

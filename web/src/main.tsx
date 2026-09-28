@@ -8,17 +8,20 @@ import { NetworkProvider } from "./network/NetworkProvider.js";
 import { SessionProvider } from "./session/SessionProvider.js";
 import { WalletProvider } from "./session/WalletProvider.js";
 import { ThemeProvider } from "./theme/ThemeProvider.js";
+import { AppErrorBoundary } from "./components/AppErrorBoundary.js";
 
 createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ThemeProvider>
-      <WalletProvider>
-        <NetworkProvider>
-          <SessionProvider>
-            <App />
-          </SessionProvider>
-        </NetworkProvider>
-      </WalletProvider>
-    </ThemeProvider>
-  </StrictMode>,
+  <AppErrorBoundary>
+    <StrictMode>
+      <ThemeProvider>
+        <WalletProvider>
+          <NetworkProvider>
+            <SessionProvider>
+              <App />
+            </SessionProvider>
+          </NetworkProvider>
+        </WalletProvider>
+      </ThemeProvider>
+    </StrictMode>
+  </AppErrorBoundary>,
 );

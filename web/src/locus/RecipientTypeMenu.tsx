@@ -4,7 +4,7 @@ import { RecipientIcon } from "./RecipientIcon.js";
 import { IdentityOption } from "../components/IdentityOption.js";
 import { recipientHints, recipientLabels, type RecipientType } from "./recipients.js";
 
-export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkMode, value, onChange, onClear }: {
+export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkMode, value, onChange, onClear, error, onBlur }: {
   type: RecipientType;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -13,6 +13,8 @@ export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkM
   value: string;
   onChange: (value: string) => void;
   onClear: () => void;
+  error?: string | null;
+  onBlur?: () => void;
 }) {
   const types: RecipientType[] = ["matrix", "telegram", "email", "github", "evm", "polkadot", "solana", "locus"];
   const configured = (entry: RecipientType) => !networkMode || entry === "evm" || entry === "polkadot" || entry === "solana" || entry === "locus" || entry === "matrix";
@@ -52,7 +54,7 @@ export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkM
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-      <input value={value} placeholder={recipientHints[type]} onChange={(event) => onChange(event.target.value)} />
+      <input value={value} placeholder={recipientHints[type]} onChange={(event) => onChange(event.target.value)} onBlur={onBlur} aria-invalid={Boolean(error)} aria-describedby={error ? "send-recipient-error" : undefined} />
       {value && <button type="button" className="clear" aria-label="Clear recipient" onClick={onClear}><X size={16} aria-hidden="true" /></button>}
     </div>
   </div>;

@@ -321,6 +321,7 @@ textarea {
     background: var(--surface-glass);
     backdrop-filter: blur(18px);
   }
+  .mobile-bottom-nav--manager { grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; padding-right: 6px; padding-left: 6px; }
   .mobile-nav-item {
     display: flex;
     min-height: 48px;
@@ -336,6 +337,8 @@ textarea {
     font-weight: 650;
   }
   .mobile-nav-item.active { background: var(--accent-soft); color: var(--accent); }
+  .mobile-bottom-nav--manager .mobile-nav-item { gap: 2px; padding-inline: 2px; font-size: 10px; }
+  .copyable-value__button { opacity: .65; }
   .modal-backdrop { display: flex; align-items: flex-end; padding: 0; }
   .modal {
     position: fixed;
@@ -406,4 +409,20 @@ textarea {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+.theme-trigger { width: 36px; height: 36px; border-radius: 10px; }
+.network-trigger.network-trigger-compact { width: 36px; min-width: 36px; min-height: 36px; height: 36px; border-radius: 10px; }
+.network-trigger.network-trigger-compact .network-compact-status { top: 3px; right: 3px; }
+
+@media (max-width: 640px) {
+  .theme-trigger,
+  .network-trigger.network-trigger-compact,
+  .mobile-header .profile-button { min-height: 40px; height: 40px; }
+  .theme-trigger,
+  .network-trigger.network-trigger-compact { width: 40px; min-width: 40px; }
+  .mobile-header .profile-button { max-width: min(48vw, 200px); }
+  .account-center-panel { width: 100vw; border: 0; }
+  .account-center-header { min-height: 60px; padding-inline: 18px; }
+  .account-center-body { padding-inline: 18px; }
 }

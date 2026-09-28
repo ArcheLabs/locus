@@ -4,7 +4,7 @@ import { LoaderCircle, type LucideIcon } from "lucide-react";
 type ActionButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, "children"> & {
   icon?: LucideIcon;
   iconPosition?: "start" | "end";
-  variant?: "primary" | "secondary" | "tertiary";
+  variant?: "primary" | "secondary" | "tertiary" | "danger";
   size?: "small" | "medium" | "large";
   loading?: boolean;
   fullWidth?: boolean;

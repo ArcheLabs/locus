@@ -14,6 +14,8 @@ import type { AssetView, CuratedCatalogEntry } from "../assets.js";
 import type { ManagedLiquidityConfig, ManagedLiquidityPair } from "./liquidityConfig.js";
 import { ActionButton } from "../../components/ActionButton.js";
 import { Modal } from "../../components/Modal.js";
+import { CopyableValue } from "../../components/CopyableValue.js";
+import { normalizeActionError } from "../../errors/normalizeError.js";
 import "./liquidity.css";
 
 type PairRow = {
@@ -41,11 +43,6 @@ function ownerKey(owner: Ownership): string {
   return toHex(ownershipKey(owner)).toLowerCase();
 }
 
-function shortOwnership(owner: Ownership): string {
-  const formatted = formatLocusId(owner);
-  return `${formatted.slice(0, 18)}…${formatted.slice(-8)}`;
-}
-
 function reservePair(pool: Pool | null, assetA: AssetView, assetB: AssetView): [bigint, bigint] {
   if (!pool) return [0n, 0n];
   if (sameBytes(pool.asset0, assetA.assetId)) return [pool.reserve0, pool.reserve1];
@@ -63,15 +60,7 @@ function friendlyLiquidityError(error: unknown): string {
   const locusError = normalizeLocusError(error);
   const code = locusError?.code;
   if (code === 3002) return "The manager Ownership does not have enough balance for these amounts.";
-  if (code === 3003) return "The requested amount exceeds the supported integer range.";
-  if (code === 6001) return "This pool no longer exists. Refresh the managed pool list.";
-  if (code === 6002) return "This pair already has a pool. Refresh the list before continuing.";
-  if (code === 6003) return "A pool requires two different assets.";
-  if (code === 6004) return "Enter valid non-zero liquidity amounts.";
-  if (code === 6005) return "The requested withdrawal exceeds the pool reserves.";
-  if (code === 6007) return "This Ownership is not the manager of this pool.";
-  if (code === 6008) return "The pool reserve limit would be exceeded.";
-  return error instanceof Error ? error.message : "The liquidity action failed.";
+  return normalizeActionError(error, "The liquidity action failed.");
 }
 
 export function ManagedLiquidityPanel({
@@ -436,7 +425,7 @@ export function ManagedLiquidityPanel({
   return <section className="managed-liquidity">
     <div className="managed-liquidity-heading">
       <div><h2>Managed liquidity</h2><p>Locus v1 has one manager Ownership per pool. It does not issue LP tokens or track individual liquidity shares.</p></div>
-      <span className="managed-liquidity-manager">Manager · {shortOwnership(sessionOwner)}</span>
+      <span className="managed-liquidity-manager">Manager · <CopyableValue value={formatLocusId(sessionOwner)} /></span>
     </div>
     <div className="managed-pool-list">
       {pairRows.length === 0 && <div className="empty-state">No managed pairs are configured for this network.</div>}
@@ -516,7 +505,7 @@ export function ManagedLiquidityPanel({
             <div><dt>Action</dt><dd>{editKind === "create" ? "Create managed pool" : editKind === "add" ? (needsReseed ? "Reseed pool" : "Add proportional liquidity") : `Remove ${formatBasisPoints(percentageBps)}`}</dd></div>
             {editKind !== "remove" && <><div><dt>Deposit</dt><dd>{formatUnits(reviewAmounts.amountA, editingPair.assetA.decimals)} {editingPair.assetA.symbol}<br />{formatUnits(reviewAmounts.amountB, editingPair.assetB.decimals)} {editingPair.assetB.symbol}</dd></div><div><dt>Available</dt><dd>{formatUnits(editingPair.assetA.balance ?? 0n, editingPair.assetA.decimals)} {editingPair.assetA.symbol}<br />{formatUnits(editingPair.assetB.balance ?? 0n, editingPair.assetB.decimals)} {editingPair.assetB.symbol}</dd></div></>}
             {editKind === "remove" && removal && <><div><dt>You receive</dt><dd>{formatUnits(removal.amountA, editingPair.assetA.decimals)} {editingPair.assetA.symbol}<br />{formatUnits(removal.amountB, editingPair.assetB.decimals)} {editingPair.assetB.symbol}</dd></div><div><dt>Remaining reserves</dt><dd>{formatUnits(removal.remainingA, editingPair.assetA.decimals)} {editingPair.assetA.symbol}<br />{formatUnits(removal.remainingB, editingPair.assetB.decimals)} {editingPair.assetB.symbol}</dd></div></>}
-            <div><dt>Manager</dt><dd>{shortOwnership(sessionOwner)}</dd></div><div><dt>Fee</dt><dd>{formatBasisPoints(SWAP_FEE_BPS)}</dd></div>
+            <div><dt>Manager</dt><dd><CopyableValue label="Manager" value={formatLocusId(sessionOwner)} /></dd></div><div><dt>Fee</dt><dd>{formatBasisPoints(SWAP_FEE_BPS)}</dd></div>
           </dl>
           {editKind === "remove" && percentageBps === 10_000 && <p className="managed-liquidity-warning managed-liquidity-warning--danger">Removing 100% of reserves makes this pool unavailable for swaps until it is reseeded. The Pool record remains on-chain.</p>}
         </>}
