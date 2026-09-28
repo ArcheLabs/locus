@@ -57,8 +57,10 @@ there is no price oracle. Pool state remains authoritative for whether a pair is
 available.
 
 The seed command is idempotent for pools that already match the configured
-reserves and Treasury manager. A conflicting pool state fails closed. It never
-tops up or replaces a pool automatically.
+reserves and Treasury manager for the historical v1 deployment. Permissionless
+Liquidity v2 supersedes that policy and uses independent LP share accounting. A
+conflicting v1 pool must be preserved and reseeded by its capital providers; it
+is never converted automatically.
 
 ## Treasury signer boundary
 
