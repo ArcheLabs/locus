@@ -20,7 +20,7 @@ export function ThemeControl() {
       </button>
     </DropdownMenu.Trigger>
     <DropdownMenu.Portal>
-      <DropdownMenu.Content className="theme-menu" sideOffset={8} align="end" aria-label="Choose theme">
+      <DropdownMenu.Content className="theme-menu dropdown-surface" sideOffset={8} align="end" aria-label="Choose theme">
         <DropdownMenu.Label className="theme-menu-label">Appearance</DropdownMenu.Label>
         <DropdownMenu.RadioGroup value={preference} onValueChange={(value) => setPreference(value as ThemePreference)}>
           {options.map(({ value, label, Icon: OptionIcon }) => <DropdownMenu.RadioItem className="theme-option" value={value} key={value}>

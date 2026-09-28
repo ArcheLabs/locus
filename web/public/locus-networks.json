@@ -5,7 +5,8 @@
     "local": {
       "label": "DevNet",
       "backendUrl": "/rpc",
-      "deploymentUrl": "/deployments/local.json"
+      "deploymentUrl": "/deployments/local.json",
+      "matrixResolverUrl": "/matrix-resolver"
     },
     "testnet": {
       "label": "TestNet",

@@ -28,7 +28,7 @@ export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkM
           </button>
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
-          <DropdownMenu.Content className="type-menu identity-recipient-menu" sideOffset={6} align="start">
+          <DropdownMenu.Content className="type-menu identity-recipient-menu dropdown-surface" sideOffset={6} align="start">
             {types.map((entry) => {
               const disabled = !configured(entry);
               const selected = entry === type;

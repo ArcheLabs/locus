@@ -7,6 +7,8 @@ type EvmEventProvider = Eip1193Provider & {
 };
 
 type EventSource = Pick<EventTarget, "addEventListener" | "removeEventListener">;
+const ACCOUNT_QUERY_TIMEOUT_MS = 2_500;
+const EXISTING_ACCOUNT_FAST_PATH_MS = 650;
 
 export type EvmSessionBridgeOptions = {
   getSession: () => LocusWebSession | null;
@@ -75,7 +77,12 @@ export class EvmSessionBridge {
   async beginConnection(): Promise<boolean> {
     this.pending = true;
     this.expectedAddress = null;
-    await this.reconcile();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      this.reconcile(),
+      new Promise<void>((resolve) => { timeout = setTimeout(resolve, EXISTING_ACCOUNT_FAST_PATH_MS); }),
+    ]);
+    if (timeout !== undefined) clearTimeout(timeout);
     return this.options.getSession()?.kind === "evm";
   }
 
@@ -117,9 +124,25 @@ export class EvmSessionBridge {
     if (!provider) return;
     let accounts: unknown;
     try {
-      accounts = await provider.request({ method: "eth_accounts" });
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      let result: { timedOut: false; value: unknown } | { timedOut: true };
+      try {
+        result = await Promise.race([
+          provider.request({ method: "eth_accounts" }).then((value) => ({ timedOut: false as const, value })),
+          new Promise<{ timedOut: true }>((resolve) => {
+            timeout = setTimeout(() => resolve({ timedOut: true }), ACCOUNT_QUERY_TIMEOUT_MS);
+          }),
+        ]);
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+      }
+      if (result.timedOut) {
+        if (this.pending && this.expectedAddress) this.options.onError?.(new Error("The EVM wallet did not respond while restoring this account. Reconnect it, then try again."));
+        return;
+      }
+      accounts = result.value;
     } catch (cause) {
-      if (this.pending) this.options.onError?.(cause instanceof Error ? cause : new Error("Could not read accounts from the connected EVM wallet."));
+      if (this.pending && this.expectedAddress) this.options.onError?.(cause instanceof Error ? cause : new Error("Could not read accounts from the connected EVM wallet."));
       return;
     }
     if (provider !== this.provider || this.disposed) return;

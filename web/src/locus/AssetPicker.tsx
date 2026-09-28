@@ -27,7 +27,7 @@ export function AssetPicker({ networkMode, asset, assets, search, open, onOpenCh
   return <Popover.Root open={open} onOpenChange={onOpenChange}>
     <Popover.Trigger asChild>{trigger}</Popover.Trigger>
     <Popover.Portal>
-      <Popover.Content className="asset-menu" sideOffset={8} align="start" aria-label="Select asset">
+      <Popover.Content className="asset-menu dropdown-surface" sideOffset={8} align="start" aria-label="Select asset">
         <input autoFocus value={search} placeholder="Search assets" onChange={(event) => onSearch(event.target.value)} />
         {matching.length === 0 ? <div className="empty-state">No matching assets.</div> : matching.map((entry) => <button type="button" role="option" aria-selected={entry.assetIdHex === selectedId} key={entry.assetIdHex} onClick={() => { onSelect(entry); onOpenChange(false); }}><AssetIcon asset={entry} size={36} /><span><strong>{entry.symbol}</strong><small>{entry.name} · {entry.presentation.badge}</small></span><span>{displayAssetAmount(entry)}</span>{entry.assetIdHex === selectedId && <Check size={15} aria-hidden="true" />}</button>)}
       </Popover.Content>

@@ -20,7 +20,7 @@ export function NetworkSwitcher({ compact = false }: { compact?: boolean }) {
     <DropdownMenu.Root>
       <div className="network-switcher">
         <DropdownMenu.Portal>
-          <DropdownMenu.Content className="network-menu" sideOffset={8} align={compact ? "end" : "start"}>
+          <DropdownMenu.Content className="network-menu dropdown-surface" sideOffset={8} align={compact ? "end" : "start"}>
             <DropdownMenu.RadioGroup value={networkId} onValueChange={(value) => switchNetwork(value as LocusNetworkId)}>
           {options.map((id) => {
             const entry = config.networks[id];

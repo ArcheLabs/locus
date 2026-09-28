@@ -56,7 +56,8 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
   const appkit = await fs.readFile(new URL("../web/src/session/appkit.ts", import.meta.url), "utf8");
   assert.match(responsive, /@media \(min-width: 641px\) and \(max-width: 1024px\)/);
   assert.match(responsive, /@media \(max-width: 640px\)/);
-  assert.match(responsive, /\.assets-toolbar \.asset-filter-tabs \{ display: none; \}/);
+  assert.match(responsive, /\.responsive-select \.responsive-select__tabs \{ display: none; \}/);
+  assert.match(responsive, /\.responsive-select__mobile \{ display: block; width: 100%; min-width: 0; \}/);
   assert.match(responsive, /env\(safe-area-inset-bottom\)/);
   assert.match(responsive, /100dvh/);
   assert.match(responsive, /\.modal\s*\{/);

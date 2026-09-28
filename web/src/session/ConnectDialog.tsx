@@ -8,6 +8,7 @@ import { MatrixLoginDialog } from "../matrix/MatrixLoginDialog.js";
 import type { MatrixConnected } from "../matrix/MatrixConnector.js";
 import { Wallet, X } from "lucide-react";
 import { ActionButton } from "../components/ActionButton.js";
+import { SelectField } from "../components/SelectField.js";
 
 type Props = {
   open: boolean;
@@ -15,6 +16,7 @@ type Props = {
   onCancelMatrix: (connection: MatrixConnected | null) => void;
   onMatrixSelected: () => void;
   onConnected: (session: LocusWebSession) => void;
+  onConnectionPendingChange?: (kind: SessionKind | null) => void;
   onEvmConnectRequested: () => Promise<boolean>;
   onEvmConnectCancelled: () => void;
   evmAccountAvailable?: boolean;
@@ -23,12 +25,24 @@ type Props = {
   initialMatrixConnection?: MatrixConnected | null;
 };
 
+const WALLET_RESPONSE_TIMEOUT_MS = 120_000;
+
+function waitForWalletResponse<T>(task: Promise<T>): Promise<T> {
+  let timeout: number | undefined;
+  return Promise.race([
+    task,
+    new Promise<T>((_, reject) => {
+      timeout = window.setTimeout(() => reject(new Error("The wallet did not finish connecting. Return to Locus and try again.")), WALLET_RESPONSE_TIMEOUT_MS);
+    }),
+  ]).finally(() => { if (timeout !== undefined) window.clearTimeout(timeout); });
+}
+
 function available(kind: SessionKind): boolean {
   if (kind === "solana") return hasSolanaWallet();
   return true;
 }
 
-export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected, onConnected, onEvmConnectRequested, onEvmConnectCancelled, evmError = "", evmAccountAvailable = false, locus, initialMatrixConnection = null }: Props) {
+export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected, onConnected, onConnectionPendingChange, onEvmConnectRequested, onEvmConnectCancelled, evmError = "", evmAccountAvailable = false, locus, initialMatrixConnection = null }: Props) {
   const [connecting, setConnecting] = useState<SessionKind | null>(null);
   const [error, setError] = useState("");
   const [accountOptions, setAccountOptions] = useState<BrowserAccountOption[]>([]);
@@ -38,6 +52,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
   const [waitingForEvm, setWaitingForEvm] = useState(false);
   const evmRequestInFlight = useRef(false);
   const evmRequestGeneration = useRef(0);
+  const evmRequestTimeout = useRef<number | null>(null);
   const appKitModalOpen = useRef(false);
   const { open: openAppKit, close: closeAppKit } = useAppKit();
   const closeAppKitRef = useRef(closeAppKit);
@@ -46,6 +61,9 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
 
   useEffect(() => {
     if (!open) {
+      if (evmRequestTimeout.current !== null) window.clearTimeout(evmRequestTimeout.current);
+      evmRequestTimeout.current = null;
+      onConnectionPendingChange?.(null);
       if (appKitModalOpen.current) {
         appKitModalOpen.current = false;
         void closeAppKitRef.current();
@@ -58,7 +76,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       evmRequestInFlight.current = false;
       evmRequestGeneration.current += 1;
     }
-  }, [open]);
+  }, [onConnectionPendingChange, open]);
 
   useEffect(() => {
     if (initialMatrixConnection) setMatrixOpen(true);
@@ -72,12 +90,13 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       evmRequestGeneration.current += 1;
       setWaitingForEvm(false);
       onEvmConnectCancelled();
+      onConnectionPendingChange?.(null);
       if (appKitModalOpen.current) {
         appKitModalOpen.current = false;
         void closeAppKitRef.current();
       }
     }
-  }, [evmError, onEvmConnectCancelled]);
+  }, [evmError, onConnectionPendingChange, onEvmConnectCancelled]);
 
   async function chooseConnector(kind: SessionKind) {
     if (connecting !== null || evmRequestInFlight.current) return;
@@ -92,6 +111,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       const requestGeneration = ++evmRequestGeneration.current;
       setError("");
       setWaitingForEvm(true);
+      onConnectionPendingChange?.("evm");
       try {
         // A wallet that is already connected to Locus should restore directly.
         // Opening AppKit first leaves mobile wallets on a stale "already linked"
@@ -101,17 +121,36 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
         if (reconnected) {
           evmRequestInFlight.current = false;
           setWaitingForEvm(false);
+          onConnectionPendingChange?.(null);
           onClose();
           return;
         }
         appKitModalOpen.current = true;
+        if (evmRequestTimeout.current !== null) window.clearTimeout(evmRequestTimeout.current);
+        evmRequestTimeout.current = window.setTimeout(() => {
+          if (!evmRequestInFlight.current || requestGeneration !== evmRequestGeneration.current) return;
+          evmRequestInFlight.current = false;
+          evmRequestGeneration.current += 1;
+          evmRequestTimeout.current = null;
+          setWaitingForEvm(false);
+          onEvmConnectCancelled();
+          onConnectionPendingChange?.(null);
+          setError("The EVM wallet did not finish connecting. Return to Locus and try again.");
+          if (appKitModalOpen.current) {
+            appKitModalOpen.current = false;
+            void closeAppKitRef.current();
+          }
+        }, 120_000);
         await openAppKit({ view: "Connect", namespace: "eip155" });
       }
       catch (cause) {
         if (requestGeneration !== evmRequestGeneration.current) return;
+        if (evmRequestTimeout.current !== null) window.clearTimeout(evmRequestTimeout.current);
+        evmRequestTimeout.current = null;
         evmRequestInFlight.current = false;
         setWaitingForEvm(false);
         onEvmConnectCancelled();
+        onConnectionPendingChange?.(null);
         if (appKitModalOpen.current) {
           appKitModalOpen.current = false;
           void closeAppKit();
@@ -121,11 +160,12 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       return;
     }
     setConnecting(kind);
+    onConnectionPendingChange?.(kind);
     setSelectedKind(null);
     setAccountOptions([]);
     setError("");
     try {
-      const accounts = await listBrowserAccounts(kind);
+      const accounts = await waitForWalletResponse(listBrowserAccounts(kind));
       if (accounts.length === 1) {
         await connect(kind, accounts[0].id);
         return;
@@ -137,6 +177,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       setError(cause instanceof Error ? cause.message : "Wallet discovery failed.");
     } finally {
       setConnecting(null);
+      onConnectionPendingChange?.(null);
     }
   }
 
@@ -144,10 +185,13 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
   const displayOptions = [matrixEntry, ...options];
 
   function cancelEvmRequest() {
+    if (evmRequestTimeout.current !== null) window.clearTimeout(evmRequestTimeout.current);
+    evmRequestTimeout.current = null;
     evmRequestInFlight.current = false;
     evmRequestGeneration.current += 1;
     setWaitingForEvm(false);
     onEvmConnectCancelled();
+    onConnectionPendingChange?.(null);
     if (appKitModalOpen.current) {
       appKitModalOpen.current = false;
       void closeAppKit();
@@ -156,6 +200,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
 
   function closeConnectDialog() {
     if (evmRequestInFlight.current) cancelEvmRequest();
+    onConnectionPendingChange?.(null);
     onClose();
   }
 
@@ -163,7 +208,8 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
     setConnecting(kind);
     setError("");
     try {
-      onConnected(await connectBrowserSession(kind, accountId));
+      onConnected(await waitForWalletResponse(connectBrowserSession(kind, accountId)));
+      onConnectionPendingChange?.(null);
       onClose();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Wallet connection failed.");
@@ -189,7 +235,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
             <IdentityOption
               kind={entry.kind}
               title={entry.label}
-              description={waitingForEvm && entry.kind === "evm" ? evmAccountAvailable ? "Reconnecting the selected wallet account…" : "Approve or cancel the wallet request" : connecting === entry.kind ? "Finding accounts…" : entry.available ? entry.description : "No compatible wallet detected"}
+              description={waitingForEvm && entry.kind === "evm" ? evmAccountAvailable ? "Wallet approved. Finishing sign-in…" : "Approve in your wallet app, then return here" : connecting === entry.kind ? entry.kind === "solana" ? "Approve in your Solana wallet…" : "Preparing the selected account…" : entry.available ? entry.description : "No compatible wallet detected"}
               variant="comfortable"
               disabled={connecting !== null || waitingForEvm || !entry.available}
               trailing="arrow"
@@ -199,9 +245,13 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       </div>
       {selectedKind && <div className="account-picker">
         <label htmlFor="wallet-account">Choose account</label>
-        <select id="wallet-account" value={selectedAccount} onChange={(event) => setSelectedAccount(event.target.value)}>
-          {accountOptions.map((account) => <option key={account.id} value={account.id}>{account.label} — {account.description}</option>)}
-        </select>
+        <SelectField
+          id="wallet-account"
+          value={selectedAccount}
+          onValueChange={setSelectedAccount}
+          placeholder="Select account"
+          options={accountOptions.map((account) => ({ value: account.id, label: `${account.label} — ${account.description}` }))}
+        />
         <ActionButton variant="primary" icon={Wallet} fullWidth disabled={!selectedAccount || connecting !== null} onClick={() => connect(selectedKind, selectedAccount)}>Connect selected account</ActionButton>
       </div>}
       {waitingForEvm && <ActionButton className="cancel-wallet-connect" variant="tertiary" size="small" icon={X} onClick={cancelEvmRequest}>Cancel wallet connection</ActionButton>}
