@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { ChevronDown, Unplug, UserRound, X } from "lucide-react";
+import { CheckCircle2, ChevronDown, Unplug, UserRound, X } from "lucide-react";
 import { formatLocusId } from "@archelabs/locus";
 import { useEffect, useState } from "react";
 import type { LocusWebSession, SessionKind } from "../session/types.js";
@@ -95,25 +95,25 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
 
           <section className="account-center-section">
             <h3>Ownership</h3>
-            <CopyableValue label="Locus ID" value={locusId} />
-            <CopyableValue label="Controller" value={formatLocusId(session.controller)} />
+            <CopyableValue label="Locus ID" value={locusId} layout="inline" copyPlacement="left" />
+            <CopyableValue label="Controller" value={formatLocusId(session.controller)} layout="inline" copyPlacement="left" />
           </section>
 
           <section className="account-center-section">
             <h3>Connection</h3>
             {session.kind === "matrix" ? <>
-              <CopyableValue label="Matrix account" value={session.matrix?.userId ?? session.address} />
-              <CopyableValue label="Device" value={session.matrix?.deviceId ?? "Unknown device"} />
+              <CopyableValue label="Matrix account" value={session.matrix?.userId ?? session.address} layout="inline" copyPlacement="left" />
+              <CopyableValue label="Device" value={session.matrix?.deviceId ?? "Unknown device"} layout="inline" copyPlacement="left" />
               <div className="account-center-detail"><small>Homeserver</small><span>{session.matrix?.homeserver ?? "Matrix"}</span></div>
-              <div className="account-center-detail"><small>Verification</small><span className="account-verified-text">Verified</span></div>
-            </> : <CopyableValue label={`${session.kind[0].toUpperCase()}${session.kind.slice(1)} signer`} value={signerLabel} />}
+              <div className="account-center-detail"><small>Verification</small><span className="account-verified-text"><CheckCircle2 size={15} aria-hidden="true" />Verified</span></div>
+            </> : <CopyableValue label={`${session.kind[0].toUpperCase()}${session.kind.slice(1)} signer`} value={signerLabel} layout="inline" copyPlacement="left" />}
           </section>
 
           {session.kind === "matrix" && <section className="account-center-section account-security-section">
             <h3>Security</h3>
             {!removeConfirmation ? <>
               <p>Disconnecting keeps this verified device for your next Locus session.</p>
-            <ActionButton variant="danger" onClick={() => setRemoveConfirmation(true)}>Remove Matrix device</ActionButton>
+              <div className="account-security-action"><strong>Remove Matrix device</strong><ActionButton variant="danger" size="small" onClick={() => setRemoveConfirmation(true)}>Remove</ActionButton></div>
             </> : <div className="remove-device-confirm" role="alertdialog" aria-labelledby="remove-device-title">
               <strong id="remove-device-title">Remove this Matrix device?</strong>
               <p>This removes the saved Locus Matrix device from this browser and signs it out of Matrix. The next sign-in creates a new device and requires verification in Element.</p>

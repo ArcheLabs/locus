@@ -433,7 +433,7 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
     })() : null;
 
   return <section className="page liquidity-page">
-    <header className="page-heading"><div><h1>Liquidity</h1><p className="muted">Provide liquidity and receive non-transferable pool shares. Swap fees remain in pool reserves.</p></div>
+    <header className="liquidity-page-actions">
       {sessionOwner ? <ActionButton variant="primary" icon={Plus} onClick={() => document.getElementById("liquidity-new-position")?.scrollIntoView({ behavior: "smooth", block: "center" })}>New position</ActionButton> : <ActionButton variant="primary" onClick={onConnect}>Connect</ActionButton>}
     </header>
     {poolsError && <div className="inline-alert" role="alert">Pool information could not be refreshed. Existing on-chain data is shown where available.</div>}

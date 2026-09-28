@@ -3,7 +3,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 import { formatLocusId, formatUnits, ownershipKey, parseUnits, toHex, type LocusClient, type Ownership } from "@archelabs/locus";
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CirclePlus, Coins, Droplets, History, RefreshCw, Send, X } from "lucide-react";
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CirclePlus, Coins, Droplets, History, List, ListFilter, RefreshCw, Search, Send, Shapes, TrendingUp, X } from "lucide-react";
 import { useNetwork } from "./network/NetworkProvider.js";
 import { NetworkSwitcher } from "./network/NetworkSwitcher.js";
 import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
@@ -26,7 +26,7 @@ import { AssetPicker } from "./locus/AssetPicker.js";
 import { Modal } from "./components/Modal.js";
 import { AccountMenu } from "./components/AccountMenu.js";
 import { ActionButton } from "./components/ActionButton.js";
-import { FormField } from "./forms/FormField.js";
+import { FieldMessage } from "./forms/FieldMessage.js";
 import { ResponsiveSelect } from "./components/ResponsiveSelect.js";
 import { SegmentedControl } from "./components/SegmentedControl.js";
 import { AssetIcon } from "./components/AssetIcon.js";
@@ -853,7 +853,6 @@ function SendPage({ networkMode, status, asset, assets, assetSearch, assetPicker
   onCycleDemo: () => void;
   onClear: () => void;
 }) {
-  const symbol = asset?.symbol ?? "Asset";
   const decimals = asset?.decimals ?? 0;
   const balance = asset?.balance ?? null;
   const busy = sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted";
@@ -862,24 +861,24 @@ function SendPage({ networkMode, status, asset, assets, assetSearch, assetPicker
       : sendState.status === "submitted" ? "Waiting for confirmation…"
         : sendState.status === "applied" ? "Sent" : "Review transfer";
   return <section className="page send-page">
-    <h1>Send</h1>
     <div className="card send-card">
-      <div className="field-group"><label>Asset</label><AssetPicker networkMode={networkMode} asset={asset} assets={assets} search={assetSearch} open={assetPickerOpen} onOpenChange={onToggleAssets} onSearch={onSearchAssets} onSelect={onSelectAsset} onCycleDemo={onCycleDemo} /></div>
-      <OwnershipInput type={recipientType} value={recipient} open={typeOpen} networkMode={networkMode} message={recipientMessage} valid={resolution.valid} error={recipientError} onBlur={onRecipientBlur} onType={onChooseType} onToggle={onToggleTypes} onChange={onRecipient} onClear={onClear} />
-      <FormField label="Amount" htmlFor="send-amount" error={amountError} errorId="send-amount-error" className="send-amount-field">
-        <div className="amount-control">
-          <input id="send-amount" value={amount} inputMode="decimal" placeholder="0" onBlur={onAmountBlur} onChange={(event) => onAmount(event.target.value)} aria-invalid={Boolean(amountError)} aria-describedby={amountError ? "send-amount-error" : undefined} />
-          <strong>{symbol}</strong>
-          <ActionButton className="amount-max-button" variant="tertiary" size="small" icon={ArrowUpRight} disabled={!asset || asset.balance === null} onClick={onMax}>Max</ActionButton>
+      <div className="send-amount-field">
+        <label className="sr-only" htmlFor="send-amount">Amount</label>
+        <div className="send-amount-control">
+          <AssetPicker networkMode={networkMode} asset={asset} assets={assets} search={assetSearch} open={assetPickerOpen} onOpenChange={onToggleAssets} onSearch={onSearchAssets} onSelect={onSelectAsset} onCycleDemo={onCycleDemo} variant="compact" />
+          <div className="send-amount-entry"><input id="send-amount" value={amount} inputMode="decimal" placeholder="0" onBlur={onAmountBlur} onChange={(event) => onAmount(event.target.value)} aria-label="Amount to send" aria-invalid={Boolean(amountError)} aria-describedby={amountError ? "send-amount-error" : undefined} />
+            <button type="button" className="send-max-button" disabled={!asset || asset.balance === null} onClick={onMax}>Max</button>
+          </div>
+          <div className="send-amount-balance"><span>Balance</span><strong>{displayAmount(balance, decimals)}</strong></div>
         </div>
-        <div className="amount-foot"><span>{networkMode ? "No market price is configured" : "Demo balance"}</span><span>Balance: {displayAmount(balance, decimals)} {asset ? symbol : ""}</span></div>
-      </FormField>
+        <FieldMessage id="send-amount-error" error={amountError} />
+      </div>
+      <OwnershipInput type={recipientType} value={recipient} open={typeOpen} networkMode={networkMode} message={recipientMessage} valid={resolution.valid} error={recipientError} onBlur={onRecipientBlur} onType={onChooseType} onToggle={onToggleTypes} onChange={onRecipient} onClear={onClear} />
       {formError && <p className="action-status action-status--error" role="alert">{formError}</p>}
       <ActionButton variant="primary" icon={ArrowUpRight} fullWidth disabled={!asset || busy || sendState.status === "applied" || (networkMode && status !== "ready")} onClick={onContinue}>{sendLabel}</ActionButton>
       {sendState.status === "failed" && <div className="transaction-error" role="alert">{sendState.error}</div>}
       {sendState.status === "submitted" && <Receipt state={sendState} />}
       {sendState.status === "applied" && <Receipt state={sendState} />}
-      <div className="notice">The recipient type describes who controls the destination Ownership, not a target chain.</div>
     </div>
   </section>;
 }
@@ -889,13 +888,18 @@ function Receipt({ state }: { state: Extract<SendState, { status: "submitted" | 
 }
 
 function AssetsPage({ networkMode, loading, error, assets, featuredAssets, search, setSearch, filter, setFilter, getBalanceState, onRetry, onOpenDetail, onCreate }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; featuredAssets: AssetView[]; search: string; setSearch: (value: string) => void; filter: "all" | "crypto" | "equities" | "custom"; setFilter: (value: "all" | "crypto" | "equities" | "custom") => void; getBalanceState: (asset: AssetView) => "known" | "loading" | "unavailable"; onRetry: () => void; onOpenDetail: (asset: AssetView | DemoAsset) => void; onCreate: () => void }) {
-  const filters = [{ id: "all", label: "All" }, { id: "crypto", label: "Crypto" }, { id: "equities", label: "Equities" }, { id: "custom", label: "Custom" }] as const;
+  const filters = [
+    { id: "all", label: <><List size={16} aria-hidden="true" /><span>All</span></>, textValue: "All" },
+    { id: "crypto", label: <><Coins size={16} aria-hidden="true" /><span>Crypto</span></>, textValue: "Crypto" },
+    { id: "equities", label: <><TrendingUp size={16} aria-hidden="true" /><span>Equities</span></>, textValue: "Equities" },
+    { id: "custom", label: <><Shapes size={16} aria-hidden="true" /><span>Custom</span></>, textValue: "Custom" },
+  ] as const;
   return <section className="page">
-    <div className="page-heading"><h1>Assets</h1>{networkMode && <ActionButton variant="secondary" icon={CirclePlus} onClick={onCreate}>Create asset</ActionButton>}</div>
+    {networkMode && <div className="assets-create-row"><span /><ActionButton className="assets-create-action" variant="secondary" icon={CirclePlus} onClick={onCreate}>Create asset</ActionButton></div>}
     <div className="assets-layout"><div>
       <div className="assets-toolbar">
-        {networkMode && <ResponsiveSelect id="asset-filter" ariaLabel="Filter assets" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters.map((entry) => ({ value: entry.id, label: entry.label }))} />}
-        <input className="search" value={search} placeholder="Search assets..." onChange={(event) => setSearch(event.target.value)} />
+        {networkMode && <ResponsiveSelect id="asset-filter" ariaLabel="Filter assets" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters.map((entry) => ({ value: entry.id, label: entry.label, textValue: entry.textValue }))} />}
+        <label className="assets-search"><Search size={17} aria-hidden="true" /><input className="search" aria-label="Search assets" value={search} placeholder="Search assets..." onChange={(event) => setSearch(event.target.value)} /></label>
       </div>
       {error && <div className="empty-state" role="alert">{error}<ActionButton size="small" variant="tertiary" icon={RefreshCw} onClick={onRetry}>Try again</ActionButton></div>}
       {loading && assets.length === 0 && <AssetListSkeleton />}
@@ -907,11 +911,10 @@ function AssetsPage({ networkMode, loading, error, assets, featuredAssets, searc
         const amountText = isNetworkAsset && entry.balance !== null
           ? formatUnits(entry.balance, entry.decimals)
           : isNetworkAsset ? "" : displayAmount(entry.balance, entry.decimals);
-        const balanceUnit = isNetworkAsset && entry.presentation.unit === "shares" ? "shares" : entry.symbol;
         return <div className="asset-row" key={id} role="button" tabIndex={0} onClick={() => onOpenDetail(entry)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(entry); } }}>
           {isNetworkAsset ? <AssetIcon asset={entry} size={40} /> : <span className="coin small-coin" style={{ background: entry.color }}>{entry.symbol[0]}</span>}
           <span className="asset-row-info"><strong>{entry.name}</strong><small>{entry.symbol}</small></span>
-          <span className="asset-row-balance">{balanceStatus === "loading" ? <Skeleton width={82} height={17} aria-label="Loading balance" /> : balanceStatus === "unavailable" ? <span className="asset-balance-unavailable">Unavailable</span> : <><strong>{amountText}</strong><small>{balanceUnit}</small></>}</span>
+          <span className="asset-row-balance">{balanceStatus === "loading" ? <Skeleton width={82} height={17} aria-label="Loading balance" /> : balanceStatus === "unavailable" ? <span className="asset-balance-unavailable">Unavailable</span> : <strong>{amountText}</strong>}</span>
         </div>;
       })}</div>}
     </div><aside className="latest-assets"><h2>Featured Assets</h2><div className="card latest-list">{featuredAssets.length === 0 ? <div className="empty-state">Curated test assets will appear after their catalog and on-chain metadata match.</div> : featuredAssets.map((asset) => <button type="button" className="latest-asset" key={asset.assetIdHex} onClick={() => onOpenDetail(asset)}><AssetIcon asset={asset} size={36} /><span><strong>{asset.symbol}</strong><small>{asset.name} · {asset.presentation.badge}</small></span><span className="latest-chevron">›</span></button>)}</div></aside></div>
@@ -929,13 +932,37 @@ function AssetDetailModal({ asset, networkMode, getBalanceState, onClose, onRece
   const balance = isNetworkAsset
     ? getBalanceState(asset) === "loading" ? "Loading balance…" : getBalanceState(asset) === "unavailable" ? "Balance unavailable" : displayAssetAmount(asset)
     : `${displayAmount(asset.balance, asset.decimals)} ${asset.symbol}`;
-  return <Modal open title={`${asset.symbol} details`} onClose={onClose} footer={<><ActionButton variant="secondary" icon={ArrowDownLeft} onClick={() => onReceive(asset)}>Receive</ActionButton><ActionButton variant="primary" icon={Send} onClick={() => onSend(asset)}>Send</ActionButton></>}><div className="detail-modal">{isNetworkAsset ? <AssetIcon asset={asset} size={64} /> : <span className="coin detail-coin" style={{ background: asset.color }}>{asset.symbol[0]}</span>}<h2>{asset.name}</h2><p className="muted">{asset.symbol}{isNetworkAsset && ` · ${asset.presentation.badge}`}</p><dl><div><dt>Decimals</dt><dd>{asset.decimals}</dd></div><div><dt>Balance</dt><dd>{balance}</dd></div><div><dt>Total supply</dt><dd>{totalSupply}</dd></div><div><dt>Value</dt><dd>{networkMode ? "Not priced" : (asset as DemoAsset).value}</dd></div>{isNetworkAsset && <><div><dt>Asset class</dt><dd>{asset.presentation.class}</dd></div><div><dt>Issuer</dt><dd><CopyableValue label="Issuer" value={formatLocusId(asset.issuer)} /></dd></div><div><dt>Asset ID</dt><dd><CopyableValue label="Asset ID" value={asset.assetIdHex} /></dd></div></>}</dl>{isNetworkAsset && asset.presentation.disclosure ? <p className="asset-disclosure">{asset.presentation.disclosure}</p> : <p className="modal-note">Asset balances and supply are read from the selected Locus network.</p>}</div></Modal>;
+  return <Modal open title={`${asset.symbol} details`} onClose={onClose} footer={<><ActionButton variant="secondary" icon={ArrowDownLeft} onClick={() => onReceive(asset)}>Receive</ActionButton><ActionButton variant="primary" icon={Send} onClick={() => onSend(asset)}>Send</ActionButton></>}>
+    <div className="detail-modal">
+      <div className="asset-detail-icon">{isNetworkAsset ? <AssetIcon asset={asset} size={64} /> : <span className="coin detail-coin" style={{ background: asset.color }}>{asset.symbol[0]}</span>}</div>
+      <h2>{asset.name}</h2>
+      <p className="muted">{asset.symbol}{isNetworkAsset && ` · ${asset.presentation.badge}`}</p>
+      <div className="asset-detail-balance"><small>Balance</small><strong>{balance}</strong></div>
+      <details className="asset-detail-more">
+        <summary>More</summary>
+        <dl>
+          <div><dt>Decimals</dt><dd>{asset.decimals}</dd></div>
+          <div><dt>Total supply</dt><dd>{totalSupply}</dd></div>
+          {!networkMode && <div><dt>Value</dt><dd>{(asset as DemoAsset).value}</dd></div>}
+          {isNetworkAsset && <>
+            <div><dt>Asset class</dt><dd>{asset.presentation.class}</dd></div>
+            <div className="asset-detail-copy"><CopyableValue label="Issuer" value={formatLocusId(asset.issuer)} layout="inline" copyPlacement="left" /></div>
+            <div className="asset-detail-copy"><CopyableValue label="Asset ID" value={asset.assetIdHex} layout="inline" copyPlacement="left" /></div>
+          </>}
+        </dl>
+        {isNetworkAsset && asset.presentation.disclosure && asset.symbol !== "DOT" && <p className="asset-detail-disclosure">{asset.presentation.disclosure}</p>}
+      </details>
+    </div>
+  </Modal>;
 }
 
 function ActivityPage({ networkMode, filter, setFilter, rows }: { networkMode: boolean; filter: "all" | "sent" | "swap"; setFilter: (value: "all" | "sent" | "swap") => void; rows: ActivityItem[] }) {
+  const filters = activityFilters(BROWSER_LOCAL_ACTIVITY_CAPABILITIES).map((entry) => {
+    const Icon = entry.value === "all" ? ListFilter : entry.value === "sent" ? ArrowUpRight : ArrowLeftRight;
+    return { value: entry.value, label: <><Icon size={16} aria-hidden="true" /><span>{entry.label}</span></>, textValue: entry.label };
+  });
   return <section className="page">
-    <div className="page-heading"><div><h1>Activity</h1><p className="muted">{networkMode ? "Recent activity on this browser · not a complete chain history" : "Connect to a network to view your recent activity."}</p></div></div>
-    {networkMode && <SegmentedControl className="activity-filter-tabs" ariaLabel="Filter activity" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={activityFilters(BROWSER_LOCAL_ACTIVITY_CAPABILITIES)} />}
+    {networkMode && <SegmentedControl className="activity-filter-tabs" ariaLabel="Filter activity" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters} />}
     {rows.length === 0
       ? <div className="card empty-state">{networkMode ? "No recent transactions in this browser yet. Incoming transfers and complete history are not indexed here." : "No network activity is available in Demo mode."}</div>
       : <div className="card activity-list">{rows.map((entry, index) => entry.kind === "swap"

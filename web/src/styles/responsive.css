@@ -347,8 +347,7 @@ textarea {
     padding-bottom: env(safe-area-inset-bottom);
     transform: none;
     border-radius: 20px 20px 0 0;
-    overflow-x: hidden;
-    overflow-y: auto;
+    overflow: hidden;
   }
   .modal-header { padding: 18px 18px 12px; }
   .modal-header h2,
@@ -412,6 +411,39 @@ textarea {
 .theme-trigger { width: 36px; height: 36px; border-radius: 10px; }
 .network-trigger.network-trigger-compact { width: 36px; min-width: 36px; min-height: 36px; height: 36px; border-radius: 10px; }
 .network-trigger.network-trigger-compact .network-compact-status { top: 3px; right: 3px; }
+
+@media (max-width: 900px) {
+  .assets-create-row { grid-template-columns: minmax(0, 1fr); }
+  .assets-create-row > span { display: none; }
+}
+
+@media (max-width: 640px) {
+  .send-amount-control { grid-template-columns: minmax(0, .82fr) minmax(0, 1fr); grid-template-rows: minmax(58px, auto) 32px; }
+  .send-amount-control .asset-picker { gap: 6px; padding: 8px; }
+  .send-amount-control .asset-picker .asset-identity__copy small,
+  .send-amount-control .asset-picker .asset-copy small { max-width: 92px; }
+  .send-amount-entry { gap: 5px; padding-inline: 9px; }
+  .send-amount-entry input { font-size: 22px; }
+  .send-max-button { min-height: 32px; padding-inline: 8px; }
+  .send-amount-balance { padding-inline: 9px; font-size: 11px; }
+  .assets-search { min-height: 46px; padding-inline: 10px; gap: 7px; }
+  .assets-search .search { min-height: 42px; padding: 0; }
+  .assets-create-action { min-height: 44px; }
+  .asset-row > .asset-row-balance > strong { font-size: clamp(17px, 4vw, 21px); }
+  .swap-page-toolbar { margin-bottom: 4px; }
+  .swap-direction { margin: 0 auto 28px; }
+  .liquidity-deposit-form { grid-template-columns: minmax(0, 1fr); }
+  .liquidity-deposit-form > .muted, .liquidity-deposit-form > .liquidity-disclosure,
+  .liquidity-deposit-form > .action-button { grid-column: 1; }
+  .activity-filter-tabs { width: 100%; }
+  .activity-filter-tabs button { min-width: 0; flex: 1 1 auto; padding-inline: 10px; }
+  .copyable-value--inline { gap: 8px; }
+  .copyable-value--inline > small { max-width: 40%; overflow-wrap: anywhere; }
+  .copyable-value--inline .copyable-value__row { max-width: 60%; }
+  .modal { overflow: hidden; }
+  .modal-body { flex: 0 1 auto; overflow-x: hidden; overflow-y: auto; }
+  .modal-footer { position: static; }
+}
 
 @media (max-width: 640px) {
   .theme-trigger,
