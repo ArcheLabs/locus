@@ -91,10 +91,14 @@ test("tracked and present worktree files contain no signer or seed filenames", (
   assert.deepEqual(paths.filter((file) => secretFileName.test(file)), []);
 });
 
-test("Swap UX distinguishes pool pricing from market data and discloses demo equity", async () => {
-  const source = await fs.readFile(new URL("../../web/src/app.tsx", import.meta.url), "utf8");
-  assert.match(source, /Pool price · Demo liquidity · No market oracle/);
-  assert.match(source, /Demo equity · No real securities rights/);
-  assert.match(source, /No liquidity is available for this pair/);
-  assert.doesNotMatch(source, /Market data/);
+test("Swap uses direct pool quotes and curated demo equities disclose their limits", async () => {
+  const swapSource = await fs.readFile(new URL("../../web/src/locus/swap/SwapPage.tsx", import.meta.url), "utf8");
+  const assetSource = await fs.readFile(new URL("../../web/src/locus/assets.ts", import.meta.url), "utf8");
+  assert.match(swapSource, /directPoolForPair\(pools, assetIn\.assetIdHex, assetOut\.assetIdHex\)/);
+  assert.match(swapSource, /This pair is not available for swapping yet\./);
+  assert.match(swapSource, /Quotes use on-chain pool reserves/);
+  assert.match(swapSource, /No market oracle is used/);
+  assert.match(assetSource, /disclosure: "Demo representation only\./);
+  assert.match(assetSource, /does not represent equity ownership, voting rights, dividends, custody, or redemption rights/);
+  assert.doesNotMatch(swapSource, /Market data/);
 });

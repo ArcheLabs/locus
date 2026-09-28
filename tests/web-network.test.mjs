@@ -61,7 +61,7 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
   assert.match(responsive, /env\(safe-area-inset-bottom\)/);
   assert.match(responsive, /100dvh/);
   assert.match(responsive, /\.modal\s*\{/);
-  assert.match(app, /className="mobile-bottom-nav"/);
+  assert.match(app, /mobile-bottom-nav/);
   assert.match(appkit, /themeMode: initialThemeMode/);
   assert.equal(JSON.parse(await fs.readFile(new URL("../web/package.json", import.meta.url), "utf8")).dependencies["@mui/material"], undefined);
 });

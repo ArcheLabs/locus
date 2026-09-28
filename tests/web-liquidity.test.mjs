@@ -19,6 +19,8 @@ import {
   parseManagedLiquidityConfig,
 } from "../web/src/locus/liquidity/liquidityConfig.ts";
 import { isConfiguredLiquidityManager } from "../web/src/locus/liquidity/liquidityAccess.ts";
+import { directPoolForPair, poolListQueryKey } from "../web/src/locus/pools/poolQueries.ts";
+const swapSource = await readFile(new URL("../web/src/locus/swap/SwapPage.tsx", import.meta.url), "utf8");
 
 const localCatalog = JSON.parse(await readFile(new URL("../web/public/catalogs/local.json", import.meta.url), "utf8"));
 const catalogKeys = localCatalog.assets.map(({ key }) => key);
@@ -137,8 +139,9 @@ test("manager access is based on the configured Ownership key", () => {
 });
 
 test("managed liquidity is gated and chain pool state remains authoritative", () => {
-  assert.match(appSource, /locus\.listPools\(\)/);
+  assert.deepEqual(poolListQueryKey("local", 153994977), ["locus", "pools", "local", 153994977]);
   assert.match(appSource, /isConfiguredLiquidityManager\(currentOwnerKey, managedLiquidityConfig\)/);
+  assert.match(appSource, /page === "liquidity" && isLiquidityManager/);
   assert.match(managedPanelSource, /ownerKey\(pool\.manager\) === config\.managerKey/);
   assert.match(managedPanelSource, /This pair already exists, but its on-chain manager does not match/);
   assert.match(managedPanelSource, /canManage && !pair\.pool/);
@@ -157,8 +160,14 @@ test("managed liquidity review protects ratio, drain, transaction, and fee seman
 });
 
 test("Swap continues to enumerate chain pools and does not fabricate quotes", () => {
-  assert.match(appSource, /locus\.listPools\(\)/);
-  assert.match(appSource, /No liquidity is available yet/);
-  assert.match(appSource, /No quote is available until the pool is seeded/);
-  assert.match(appSource, /formatBasisPoints\(SWAP_FEE_BPS\)/);
+  const asset0 = new Uint8Array([1, 2]);
+  const asset1 = new Uint8Array([3, 4]);
+  const pool = { asset0, asset1, reserve0: 10n, reserve1: 20n };
+  assert.equal(directPoolForPair([pool], toHex(asset0), toHex(asset1)), pool);
+  assert.equal(directPoolForPair([pool], toHex(asset1), toHex(asset0)), pool);
+  assert.equal(directPoolForPair([pool], toHex(asset0), toHex(asset0)), null);
+  assert.match(swapSource, /directPoolForPair\(pools, assetIn\.assetIdHex, assetOut\.assetIdHex\)/);
+  assert.match(swapSource, /formatBasisPoints\(SWAP_FEE_BPS\)/);
+  assert.match(swapSource, /This pair is not available for swapping yet/);
+  assert.doesNotMatch(swapSource, /htmlFor="swap-pool"/);
 });
