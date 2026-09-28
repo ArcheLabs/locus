@@ -5,7 +5,7 @@ import { IdentityOption } from "../components/IdentityOption.js";
 import { connectBrowserSession, connectorInfo, hasSolanaWallet, listBrowserAccounts, type BrowserAccountOption } from "./connectors.js";
 import type { LocusWebSession, SessionKind } from "./types.js";
 import { MatrixLoginDialog } from "../matrix/MatrixLoginDialog.js";
-import type { MatrixConnected } from "../matrix/MatrixConnector.js";
+import { readStoredMatrixSession, restoreMatrixSession, type MatrixConnected } from "../matrix/MatrixConnector.js";
 import { Wallet, X } from "lucide-react";
 import { ActionButton } from "../components/ActionButton.js";
 import { SelectField } from "../components/SelectField.js";
@@ -49,6 +49,8 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
   const [selectedKind, setSelectedKind] = useState<SessionKind | null>(null);
   const [selectedAccount, setSelectedAccount] = useState("");
   const [matrixOpen, setMatrixOpen] = useState(false);
+  const [savedMatrixConnection, setSavedMatrixConnection] = useState<MatrixConnected | null>(null);
+  const [continueWithNewMatrixDevice, setContinueWithNewMatrixDevice] = useState(false);
   const [waitingForEvm, setWaitingForEvm] = useState(false);
   const evmRequestInFlight = useRef(false);
   const evmRequestGeneration = useRef(0);
@@ -102,8 +104,34 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
     if (connecting !== null || evmRequestInFlight.current) return;
     if (kind === "matrix") {
       onMatrixSelected();
-      onClose();
-      setMatrixOpen(true);
+      setError("");
+      setContinueWithNewMatrixDevice(false);
+      const stored = readStoredMatrixSession();
+      if (!stored) {
+        setSavedMatrixConnection(null);
+        onClose();
+        setMatrixOpen(true);
+        return;
+      }
+      setConnecting("matrix");
+      onConnectionPendingChange?.("matrix");
+      void restoreMatrixSession(stored, { locus }).then((connected) => {
+        setSavedMatrixConnection(connected);
+        if (connected.state === "READY") {
+          onConnected(connected.session);
+          onClose();
+          return;
+        }
+        onClose();
+        setMatrixOpen(true);
+      }).catch((cause: unknown) => {
+        const detail = cause instanceof Error ? cause.message : "The saved device could not be restored.";
+        setError(`Saved Matrix device could not be restored. ${detail}`);
+        setContinueWithNewMatrixDevice(true);
+      }).finally(() => {
+        setConnecting(null);
+        onConnectionPendingChange?.(null);
+      });
       return;
     }
     if (kind === "evm") {
@@ -181,7 +209,13 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
     }
   }
 
-  const matrixEntry = { kind: "matrix" as const, label: "Matrix", description: "Use a verified Matrix device controller", available: true };
+  const savedMatrix = readStoredMatrixSession();
+  const matrixEntry = {
+    kind: "matrix" as const,
+    label: savedMatrix ? "Continue with Matrix" : "Matrix",
+    description: savedMatrix ? savedMatrix.userId : "Sign in with a verified Matrix device",
+    available: true,
+  };
   const displayOptions = [matrixEntry, ...options];
 
   function cancelEvmRequest() {
@@ -256,9 +290,10 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       </div>}
       {waitingForEvm && <ActionButton className="cancel-wallet-connect" variant="tertiary" size="small" icon={X} onClick={cancelEvmRequest}>Cancel wallet connection</ActionButton>}
       {error && <div className="transaction-error">{error}</div>}
+      {continueWithNewMatrixDevice && <ActionButton variant="primary" fullWidth onClick={() => { setSavedMatrixConnection(null); onClose(); setMatrixOpen(true); }}>Continue with a new Matrix device</ActionButton>}
       <p className="modal-note">Locus keeps assets attached to Ownership. Wallets only authorize actions.</p>
     </Modal>
-    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onCancel={onCancelMatrix} onConnected={(session) => { onConnected(session); setMatrixOpen(false); onClose(); }} locus={locus} initialConnection={initialMatrixConnection} />
+    <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onCancel={onCancelMatrix} onConnected={(session) => { onConnected(session); setMatrixOpen(false); onClose(); }} locus={locus} initialConnection={savedMatrixConnection ?? initialMatrixConnection} />
     </>
   );
 }
