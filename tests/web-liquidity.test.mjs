@@ -18,6 +18,7 @@ import {
   loadManagedLiquidityConfig,
   parseManagedLiquidityConfig,
 } from "../web/src/locus/liquidity/liquidityConfig.ts";
+import { isConfiguredLiquidityManager } from "../web/src/locus/liquidity/liquidityAccess.ts";
 
 const localCatalog = JSON.parse(await readFile(new URL("../web/public/catalogs/local.json", import.meta.url), "utf8"));
 const catalogKeys = localCatalog.assets.map(({ key }) => key);
@@ -126,11 +127,18 @@ test("the local managed liquidity config contains only crypto pairs and canonica
   assert.equal(config.pairs.some(({ assetA, assetB }) => [assetA, assetB].some((key) => ["aapl", "nvda", "tsla"].includes(key))), false);
 });
 
-test("manager tools require the configured Ownership and on-chain pool manager", () => {
-  assert.match(appSource, /currentOwnerKey === managedLiquidityConfig\.managerKey/);
-  assert.match(appSource, /isLiquidityManager && <div className="swap-product-tabs"/);
-  assert.match(appSource, /isLiquidityManager && activeView === "liquidity"/);
+test("manager access is based on the configured Ownership key", () => {
+  const managerKey = `0x${"ab".repeat(32)}`;
+  assert.equal(isConfiguredLiquidityManager(managerKey, { managerKey }), true);
+  assert.equal(isConfiguredLiquidityManager(managerKey.toUpperCase(), { managerKey }), true);
+  assert.equal(isConfiguredLiquidityManager(`0x${"cd".repeat(32)}`, { managerKey }), false);
+  assert.equal(isConfiguredLiquidityManager(null, { managerKey }), false);
+  assert.equal(isConfiguredLiquidityManager(managerKey, null), false);
+});
+
+test("managed liquidity is gated and chain pool state remains authoritative", () => {
   assert.match(appSource, /locus\.listPools\(\)/);
+  assert.match(appSource, /isConfiguredLiquidityManager\(currentOwnerKey, managedLiquidityConfig\)/);
   assert.match(managedPanelSource, /ownerKey\(pool\.manager\) === config\.managerKey/);
   assert.match(managedPanelSource, /This pair already exists, but its on-chain manager does not match/);
   assert.match(managedPanelSource, /canManage && !pair\.pool/);

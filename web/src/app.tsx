@@ -9,6 +9,7 @@ import { NetworkSwitcher } from "./network/NetworkSwitcher.js";
 import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
 import { ManagedLiquidityPanel, type ManagedLiquidityScope } from "./locus/liquidity/ManagedLiquidityPanel.js";
 import { loadManagedLiquidityConfig } from "./locus/liquidity/liquidityConfig.js";
+import { isConfiguredLiquidityManager } from "./locus/liquidity/liquidityAccess.js";
 import { formatBasisPoints } from "./locus/liquidity/liquidityMath.js";
 import { SWAP_FEE_BPS } from "@archelabs/locus";
 import { assetBalanceQueryKey, assetIdsQueryKey, assetMetadataQueryKey, assetQueryRetry, assetQueryRetryDelay } from "./locus/assetQueries.js";
@@ -812,7 +813,7 @@ function SwapPage({ networkMode, networkId, status, serviceId, deploymentGenesis
   });
   const managedLiquidityConfig = managedLiquidityQuery.data ?? null;
   const currentOwnerKey = sessionOwner ? toHex(ownershipKey(sessionOwner)).toLowerCase() : null;
-  const isLiquidityManager = !!managedLiquidityConfig && currentOwnerKey === managedLiquidityConfig.managerKey;
+  const isLiquidityManager = isConfiguredLiquidityManager(currentOwnerKey, managedLiquidityConfig);
 
   useEffect(() => {
     if (!isLiquidityManager) setActiveView("swap");
