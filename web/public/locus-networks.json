@@ -3,12 +3,13 @@
   "defaultNetwork": "local",
   "networks": {
     "local": {
-      "label": "Local",
-      "backendUrl": "http://127.0.0.1:8090",
-      "deploymentUrl": "/deployments/local.json"
+      "label": "DevNet",
+      "backendUrl": "/rpc",
+      "deploymentUrl": "/deployments/local.json",
+      "matrixResolverUrl": "/matrix-resolver"
     },
     "testnet": {
-      "label": "Testnet",
+      "label": "TestNet",
       "backendUrl": null,
       "deploymentUrl": null
     }

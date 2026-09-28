@@ -1,0 +1,16 @@
+services:
+  tuwunel:
+    image: ghcr.io/matrix-construct/tuwunel:v1.9.3@sha256:678b7f5350e06a41614444497c587da9dddf66767e4068a27480402f3c1367d0
+    restart: unless-stopped
+    stop_grace_period: 30m
+    environment:
+      TUWUNEL_CONFIG: /etc/tuwunel/tuwunel.toml
+    ports:
+      - "127.0.0.1:8008:8008"
+    volumes:
+      - /var/lib/tuwunel:/var/lib/tuwunel
+      - /etc/tuwunel/tuwunel.toml:/etc/tuwunel/tuwunel.toml:ro
+      - /etc/tuwunel/appservices:/etc/tuwunel/appservices:ro
+
+# Run the resolver as a separate host service bound to 127.0.0.1:8787.
+# Do not publish port 8787 and do not place the Application Service token here.

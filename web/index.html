@@ -2,9 +2,48 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#f7f9fc" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#f8f9fc" />
+    <meta name="color-scheme" content="light dark" />
     <title>Locus</title>
+    <script>
+      (() => {
+        const url = new URL(window.location.href);
+        const search = url.search;
+        const hash = url.hash;
+        const query = new URLSearchParams(search);
+        const fragment = new URLSearchParams(hash.replace(/^#/, ""));
+        const keys = ["code", "loginToken", "matrix_sso_state", "error"];
+        if (!keys.some((key) => query.has(key) || fragment.has(key))) return;
+
+        let pending = { search, hash };
+        window.__locusMatrixAuthCallback = {
+          hasPending: () => pending !== null,
+          take: () => {
+            const callback = pending;
+            pending = null;
+            return callback;
+          },
+        };
+        url.search = "";
+        url.hash = "";
+        window.history.replaceState(window.history.state, "", url.toString());
+      })();
+    </script>
+    <script>
+      try {
+        const choice = localStorage.getItem("locus.theme.v1");
+        const dark = choice === "dark" || (choice !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.style.backgroundColor = dark ? "#0c0d10" : "#f8f9fc";
+        document.documentElement.style.colorScheme = dark ? "dark" : "light";
+        document.querySelector('meta[name="theme-color"]').content = dark ? "#0c0d10" : "#f8f9fc";
+      } catch {
+        const dark = typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches;
+        document.documentElement.dataset.theme = dark ? "dark" : "light";
+        document.documentElement.style.backgroundColor = dark ? "#0c0d10" : "#f8f9fc";
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

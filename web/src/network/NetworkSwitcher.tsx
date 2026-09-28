@@ -1,4 +1,5 @@
-import { useState } from "react";
+import * as DropdownMenu from "@radix-ui/react-dropdown-menu";
+import { Check, ChevronDown, Network as NetworkIcon } from "lucide-react";
 import { useNetwork } from "./NetworkProvider.js";
 import type { LocusNetworkId } from "./types.js";
 
@@ -10,39 +11,52 @@ function statusLabel(status: string): string {
   return "Idle";
 }
 
-export function NetworkSwitcher() {
+export function NetworkSwitcher({ compact = false }: { compact?: boolean }) {
   const { networkId, config, status, switchNetwork } = useNetwork();
-  const [open, setOpen] = useState(false);
   if (!config) return null;
   const options: LocusNetworkId[] = ["local", "testnet"];
   const selected = config.networks[networkId];
   return (
-    <div className="network-switcher">
-      {open && (
-        <div className="network-menu" role="menu">
+    <DropdownMenu.Root>
+      <div className="network-switcher">
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content className="network-menu dropdown-surface" sideOffset={8} align={compact ? "end" : "start"}>
+            <DropdownMenu.RadioGroup value={networkId} onValueChange={(value) => switchNetwork(value as LocusNetworkId)}>
           {options.map((id) => {
             const entry = config.networks[id];
             return (
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={id === networkId}
+              <DropdownMenu.RadioItem
+                value={id}
                 className={id === networkId ? "network-option active" : "network-option"}
                 key={id}
-                onClick={() => { switchNetwork(id); setOpen(false); }}
+                onSelect={() => switchNetwork(id)}
               >
-                <span className="network-option-check">{id === networkId ? "✓" : ""}</span>
-                <span><strong>{entry.label}</strong><small>{id === "local" ? "Local development" : "MiniJAM Testnet"}</small></span>
-              </button>
+                <DropdownMenu.ItemIndicator className="network-option-check"><Check size={15} aria-hidden="true" /></DropdownMenu.ItemIndicator>
+                <span><strong>{entry.label}</strong></span>
+              </DropdownMenu.RadioItem>
             );
           })}
-        </div>
-      )}
-      <button type="button" className="network-trigger" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <span className={`status-dot ${status}`} aria-hidden="true" />
-        <span><strong>{selected.label}</strong><small>{statusLabel(status)}</small></span>
-        <span className="network-chevron">{open ? "▴" : "▾"}</span>
-      </button>
-    </div>
+            </DropdownMenu.RadioGroup>
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+        <DropdownMenu.Trigger asChild>
+          <button
+            type="button"
+            className={compact ? "network-trigger network-trigger-compact" : "network-trigger"}
+            aria-label={compact ? `Select network. Current network: ${selected.label}, ${statusLabel(status)}` : undefined}
+            title={compact ? `Network: ${selected.label} (${statusLabel(status)})` : undefined}
+          >
+            {compact ? <>
+              <NetworkIcon size={19} aria-hidden="true" />
+              <span className={`status-dot network-compact-status ${status}`} aria-hidden="true" />
+            </> : <>
+              <span className={`status-dot ${status}`} aria-hidden="true" />
+              <span><strong>{selected.label}</strong></span>
+              <span className="network-chevron"><ChevronDown size={16} aria-hidden="true" /></span>
+            </>}
+          </button>
+        </DropdownMenu.Trigger>
+      </div>
+    </DropdownMenu.Root>
   );
 }

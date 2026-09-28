@@ -1,16 +1,52 @@
-import { createContext, useContext, useMemo, useState, type PropsWithChildren } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type PropsWithChildren } from "react";
 import type { LocusWebSession } from "./types.js";
+import { activeSessionKind, clearManualDisconnect, clearPersistedWalletSession, hasManualDisconnect, persistWalletSession, WALLET_SESSION_KEY } from "./sessionPersistence.js";
 
+export type SessionLifecycle = "restoring" | "connected" | "disconnected";
 type SessionContextValue = {
   session: LocusWebSession | null;
-  setSession: (session: LocusWebSession | null) => void;
+  lifecycle: SessionLifecycle;
+  restoreError: string;
+  setSession: (session: LocusWebSession) => void;
+  clearSession: () => void;
+  finishRestore: (error?: string) => void;
 };
 
 const SessionContext = createContext<SessionContextValue | null>(null);
 
+function hasStoredSession(): boolean {
+  if (typeof window === "undefined") return false;
+  if (hasManualDisconnect(window.localStorage)) return false;
+  const active = activeSessionKind(window.localStorage);
+  if (active === "matrix") return Boolean(window.localStorage.getItem("locus.matrix.session.v1"));
+  if (active) return Boolean(window.localStorage.getItem(WALLET_SESSION_KEY));
+  return Boolean(window.localStorage.getItem(WALLET_SESSION_KEY) || window.localStorage.getItem("locus.matrix.session.v1"));
+}
+
 export function SessionProvider({ children, initialSession = null }: PropsWithChildren<{ initialSession?: LocusWebSession | null }>) {
   const [session, setSession] = useState<LocusWebSession | null>(initialSession);
-  const value = useMemo(() => ({ session, setSession }), [session]);
+  const [lifecycle, setLifecycle] = useState<SessionLifecycle>(initialSession ? "connected" : hasStoredSession() ? "restoring" : "disconnected");
+  const [restoreError, setRestoreError] = useState("");
+  const commitSession = useCallback((next: LocusWebSession) => {
+    if (typeof window !== "undefined") {
+      persistWalletSession(window.localStorage, next);
+      clearManualDisconnect(window.localStorage);
+    }
+    setSession(next);
+    setLifecycle("connected");
+    setRestoreError("");
+  }, []);
+  const clearSession = useCallback(() => {
+    if (typeof window !== "undefined") clearPersistedWalletSession(window.localStorage);
+    setSession(null);
+    setLifecycle("disconnected");
+    setRestoreError("");
+  }, []);
+  const finishRestore = useCallback((error = "") => {
+    setRestoreError(error);
+    setLifecycle((current) => current === "restoring" ? "disconnected" : current);
+  }, []);
+  const value = useMemo(() => ({ session, lifecycle, restoreError, setSession: commitSession, clearSession, finishRestore }), [clearSession, commitSession, finishRestore, lifecycle, restoreError, session]);
   return <SessionContext.Provider value={value}>{children}</SessionContext.Provider>;
 }
 

@@ -1,4 +1,5 @@
 import { NetworkBootstrapError, type LocusNetworkId, type RuntimeNetworkConfig, type DeploymentDescriptor, type RuntimeNetwork } from "./types.js";
+import { networkConfigPath } from "./paths.js";
 export { selectNetwork } from "./selection.js";
 
 export const NETWORK_STORAGE_KEY = "locus.network.v1";
@@ -34,10 +35,12 @@ function asRuntimeConfig(value: unknown): RuntimeNetworkConfig {
     if (typeof candidate.label !== "string") throw new Error(`${id} label is invalid`);
     if (candidate.backendUrl !== null && typeof candidate.backendUrl !== "string") throw new Error(`${id} backendUrl is invalid`);
     if (candidate.deploymentUrl !== null && typeof candidate.deploymentUrl !== "string") throw new Error(`${id} deploymentUrl is invalid`);
+    if (candidate.matrixResolverUrl !== undefined && candidate.matrixResolverUrl !== null && typeof candidate.matrixResolverUrl !== "string") throw new Error(`${id} matrixResolverUrl is invalid`);
     result[id] = {
       label: candidate.label,
       backendUrl: candidate.backendUrl as string | null,
       deploymentUrl: candidate.deploymentUrl as string | null,
+      ...(typeof candidate.matrixResolverUrl === "string" ? { matrixResolverUrl: candidate.matrixResolverUrl } : {}),
     };
   }
   return { version: 1, defaultNetwork: record.defaultNetwork, networks: result };
@@ -46,7 +49,7 @@ function asRuntimeConfig(value: unknown): RuntimeNetworkConfig {
 export async function loadRuntimeNetworkConfig(fetchImpl: typeof fetch = fetch): Promise<RuntimeNetworkConfig> {
   let response: Response;
   try {
-    response = await fetchImpl("/locus-networks.json", { cache: "no-store" });
+    response = await fetchImpl(networkConfigPath(import.meta.env.BASE_URL), { cache: "no-store" });
   } catch (error) {
     throw new Error("Network configuration unavailable.", { cause: error });
   }

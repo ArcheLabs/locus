@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "network": "local",
+  "mode": "managed",
+  "managerKey": "0xb6df5ef151fee07dd0e5133928dd219354e3a81fcb264e122f8cda696fc4704e",
+  "pairs": [
+    { "assetA": "dot", "assetB": "mini", "enabled": true },
+    { "assetA": "mini", "assetB": "usdt", "enabled": true }
+  ]
+}

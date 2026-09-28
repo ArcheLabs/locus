@@ -1,0 +1,29 @@
+# Add this site block alongside the existing locus.minijam.xyz site.
+# This intentionally exposes federation and server keys only; the public
+# Matrix Client-Server API is not routed through Caddy.
+matrix.minijam.xyz {
+	@server_well_known path /.well-known/matrix/server
+	handle @server_well_known {
+		header Content-Type application/json
+		respond `{"m.server":"matrix.minijam.xyz:443"}` 200
+	}
+
+	@federation path /_matrix/federation/*
+	handle @federation {
+		reverse_proxy 127.0.0.1:8008
+	}
+
+	@server_keys path /_matrix/key/*
+	handle @server_keys {
+		reverse_proxy 127.0.0.1:8008
+	}
+
+	respond 404
+}
+
+# Merge this route into the existing locus.minijam.xyz site without replacing
+# its current /rpc, static-file, or deployment handlers.
+#
+# handle_path /matrix-resolver/* {
+#     reverse_proxy 127.0.0.1:8787
+# }

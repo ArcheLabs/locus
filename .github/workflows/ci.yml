@@ -6,11 +6,12 @@ on:
   workflow_dispatch:
 
 env:
-  JAMSCRIPT_VERSION: v0.1.0-rc.7
+  JAMSCRIPT_VERSION: v0.1.0-rc.8
   NODE_VERSION: 24.15.0
 
 jobs:
   consumer:
+    name: Consumer CI (published packages)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -19,9 +20,20 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
 
       - name: Install published consumer dependencies
-        run: npm install --ignore-scripts --no-audit --no-fund
+        run: |
+          npm ci
+          npm --prefix web ci
+
+      - name: Verify published Client package and phased API
+        run: |
+          npm ls @jamscript/client --depth=0
+          npm --prefix web ls @jamscript/client --depth=0
+          node scripts/assert-published-client.mjs
 
       - name: Install published JamScript CLI
         run: |
@@ -37,13 +49,14 @@ jobs:
       - name: SDK and ownership model tests
         run: npm test
 
-      - name: Build frontend prototype
-        run: |
-          npm --prefix web install --ignore-scripts --no-audit --no-fund
-          npm run build:web
+      - name: Verify Ownership Matrix adapter boundary
+        run: ./scripts/check-ownership-adapter-boundary.sh
 
-      - name: Consumer service check and ABI validation
-        run: jams check .
+      - name: Build web client
+        run: npm run build:web
 
-      - name: Consumer PVM artifact build
-        run: jams build . --output ./dist
+      - name: Consumer service checks and ABI validation
+        run: npm run check
+
+      - name: Build canonical Locus PVM artifact
+        run: npm run build

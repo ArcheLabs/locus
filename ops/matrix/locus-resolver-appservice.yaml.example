@@ -1,0 +1,12 @@
+id: locus-resolver
+url: null
+as_token: "<GENERATE_ON_SERVER_AND_COPY_TO_PROTECTED_TOKEN_FILE>"
+hs_token: "<GENERATE_INDEPENDENTLY_ON_SERVER>"
+sender_localpart: locus-resolver
+rate_limited: false
+namespaces:
+  users:
+    - exclusive: true
+      regex: '^@locus-resolver:matrix\.minijam\.xyz$'
+  aliases: []
+  rooms: []

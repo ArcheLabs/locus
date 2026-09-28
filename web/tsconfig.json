@@ -10,6 +10,7 @@
     "strict": true,
     "module": "ESNext",
     "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
     "baseUrl": ".",
     "paths": {
       "@archelabs/locus": ["../sdk/src/index.ts"]

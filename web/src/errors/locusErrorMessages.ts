@@ -1,0 +1,15 @@
+export const LOCUS_ERROR_MESSAGES: Readonly<Record<number, string>> = {
+  3002: "Your balance is too low for this action.",
+  3003: "This amount exceeds the supported range.",
+  5001: "This controller is not authorized for the Ownership.",
+  5003: "This controller was revoked and can no longer authorize actions.",
+  5005: "The identity authorization proof was rejected.",
+  6001: "This pool could not be found.",
+  6002: "This asset pair already has a pool.",
+  6003: "A pool requires two different assets.",
+  6004: "Enter valid non-zero amounts.",
+  6005: "There is not enough liquidity for this action.",
+  6006: "The quote changed beyond your slippage limit. Review a new quote.",
+  6007: "This Ownership is not the manager of this pool.",
+  6008: "The pool reserve limit would be exceeded.",
+};

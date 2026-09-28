@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "network": "local",
+  "demoOnly": true,
+  "amountUnit": "human",
+  "priceDisclosure": "Pool price only; demo liquidity with no market oracle.",
+  "pools": [
+    { "base": "DOT", "quote": "USDT", "baseAmount": "100000", "quoteAmount": "500000" },
+    { "base": "MINI", "quote": "USDT", "baseAmount": "10000000", "quoteAmount": "1000000" },
+    { "base": "AAPL", "quote": "USDT", "baseAmount": "10000", "quoteAmount": "1000000" },
+    { "base": "NVDA", "quote": "USDT", "baseAmount": "10000", "quoteAmount": "1000000" },
+    { "base": "TSLA", "quote": "USDT", "baseAmount": "10000", "quoteAmount": "1000000" }
+  ]
+}

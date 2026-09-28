@@ -9,7 +9,10 @@ if [[ -z "${JAMSCRIPT_CLI}" || ! -x "${JAMSCRIPT_CLI}" ]]; then
   exit 2
 fi
 
-args=(build "${ROOT_DIR}" --output "${ROOT_DIR}/dist")
+generated_project="$(mktemp -d)"
+trap 'rm -rf "${generated_project}"' EXIT
+node "${ROOT_DIR}/scripts/bundle-service.mjs" "${ROOT_DIR}" "${generated_project}"
+args=(build "${generated_project}" --output "${ROOT_DIR}/dist")
 if [[ "${LOCUS_BUILD_OFFLINE:-0}" == "1" ]]; then args+=(--offline); fi
 "${JAMSCRIPT_CLI}" "${args[@]}"
 echo "CONSUMER_MODE=true"

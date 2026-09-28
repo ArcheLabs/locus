@@ -14,6 +14,7 @@ export type RuntimeNetwork = {
   label: string;
   backendUrl: string | null;
   deploymentUrl: string | null;
+  matrixResolverUrl?: string;
 };
 
 export type RuntimeNetworkConfig = {

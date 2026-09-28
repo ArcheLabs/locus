@@ -9,12 +9,27 @@ import type {
   JamScriptLikeClient,
   LocusRecord,
   LocusValue,
+  ExactInQuote,
   OwnershipSession,
+  PreparedOwnershipAction,
+  OwnershipPreparationPhase,
+  SignedOwnershipAction,
+  Pool,
 } from "./types.js";
+
+export const MAX_POOL_RESERVE = (1n << 64n) - 1n;
+export const SWAP_FEE_BPS = 30 as const;
+const BPS = 10000n;
+
+export type ControllerStatus = "absent" | "active" | "revoked";
 
 function asBigInt(value: LocusValue | null, label: string): bigint {
   if (typeof value !== "bigint") throw new Error(`${label} query did not return bigint`);
   return value;
+}
+
+function asBigIntOrZero(value: LocusValue | null, label: string): bigint {
+  return value === null ? 0n : asBigInt(value, label);
 }
 
 function asBytes(value: LocusValue | null, label: string): Uint8Array {
@@ -46,6 +61,23 @@ function asAsset(value: LocusValue | null): Asset | null {
   };
 }
 
+function asPool(value: LocusValue | null, key: { asset0: AssetId; asset1: AssetId }): Pool | null {
+  if (value === null) return null;
+  if (!value || typeof value !== "object" || value instanceof Uint8Array || Array.isArray(value)) {
+    throw new Error("pool query did not return a record");
+  }
+  const pool = value as Record<string, LocusValue>;
+  if (typeof pool.version !== "number" || pool.version !== 1) throw new Error("unsupported pool version");
+  return {
+    version: 1,
+    manager: asOwnership(pool.manager),
+    asset0: key.asset0,
+    asset1: key.asset1,
+    reserve0: asBigInt(pool.reserve0, "pool reserve0"),
+    reserve1: asBigInt(pool.reserve1, "pool reserve1"),
+  };
+}
+
 function assertAmount(amount: Amount, label = "amount"): void {
   if (typeof amount !== "bigint" || amount < 0n || amount >= 1n << 128n) {
     throw new Error(`${label} must be a u128 bigint`);
@@ -70,11 +102,67 @@ function balanceQueryKey(assetId: AssetId, owner: Ownership): LocusRecord {
   return { assetId, ownerKey: ownershipKey(owner) };
 }
 
+function compareAssetIds(left: AssetId, right: AssetId): number {
+  for (let index = 0; index < 32; index += 1) {
+    if (left[index] < right[index]) return -1;
+    if (left[index] > right[index]) return 1;
+  }
+  return 0;
+}
+
+export function canonicalPoolKey(assetA: AssetId, assetB: AssetId): { asset0: AssetId; asset1: AssetId } {
+  assertId(assetA, "assetA");
+  assertId(assetB, "assetB");
+  const order = compareAssetIds(assetA, assetB);
+  if (order === 0) throw locusError(LOCUS_ERROR_CODES.INVALID_POOL_PAIR);
+  return order < 0 ? { asset0: assetA, asset1: assetB } : { asset0: assetB, asset1: assetA };
+}
+
+function assertPoolReserve(value: Amount, label: string): void {
+  assertAmount(value, label);
+  if (value > MAX_POOL_RESERVE) throw locusError(LOCUS_ERROR_CODES.POOL_RESERVE_LIMIT);
+}
+
+export function quoteExactIn(reserveIn: Amount, reserveOut: Amount, amountIn: Amount): ExactInQuote {
+  assertPoolReserve(reserveIn, "reserveIn");
+  assertPoolReserve(reserveOut, "reserveOut");
+  assertPoolReserve(amountIn, "amountIn");
+  if (amountIn === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+  if (reserveIn === 0n || reserveOut === 0n) throw locusError(LOCUS_ERROR_CODES.INSUFFICIENT_POOL_LIQUIDITY);
+  const amountInAfterFee = amountIn * (BPS - BigInt(SWAP_FEE_BPS)) / BPS;
+  if (amountInAfterFee === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+  const amountOut = reserveOut * amountInAfterFee / (reserveIn + amountInAfterFee);
+  if (amountOut === 0n || amountOut >= reserveOut) throw locusError(LOCUS_ERROR_CODES.INSUFFICIENT_POOL_LIQUIDITY);
+  const minimumAmountOut = amountOut;
+  return {
+    amountIn,
+    amountOut,
+    minimumAmountOut,
+    feeAmount: amountIn - amountInAfterFee,
+    feeBps: SWAP_FEE_BPS,
+  };
+}
+
+export function minimumAmountOut(amountOut: Amount, slippageBps: number): Amount {
+  assertAmount(amountOut, "amountOut");
+  if (!Number.isInteger(slippageBps) || slippageBps < 0 || slippageBps >= 10000) {
+    throw new Error("slippageBps must be an integer from 0 to 9999");
+  }
+  return amountOut * BigInt(10000 - slippageBps) / BPS;
+}
+
 function allowanceQueryKey(assetId: AssetId, owner: Ownership, spender: Ownership): LocusRecord {
   return {
     assetId,
     ownerKey: ownershipKey(owner),
     spenderKey: ownershipKey(spender),
+  };
+}
+
+function controllerGrantQueryKey(subject: Ownership, controller: Ownership): LocusRecord {
+  return {
+    subjectKey: ownershipKey(subject),
+    controllerKey: ownershipKey(controller),
   };
 }
 
@@ -90,6 +178,7 @@ export class LocusClient {
 
   private requireSession(): OwnershipSession {
     if (!this.session) throw locusError(LOCUS_ERROR_CODES.NO_OWNERSHIP_SESSION, "an Ownership session is required for this action");
+    assertOwnership(this.session.subject, "session.subject");
     return this.session;
   }
 
@@ -98,7 +187,12 @@ export class LocusClient {
     input: Record<string, LocusValue>,
   ): Promise<SubmitActionResult> {
     try {
-      return await this.jamClient.submitOwnershipAction(actionName, input, this.requireSession().signer);
+      const session = this.requireSession();
+      return await this.jamClient.submitOwnershipAction(
+        actionName,
+        { ...input, subject: session.subject },
+        session.signer,
+      );
     } catch (error) {
       throw normalizeLocusError(error) ?? error;
     }
@@ -113,16 +207,93 @@ export class LocusClient {
     return this.jamClient.waitForAction(transactionId, options);
   }
 
+  async waitForActionByHash(
+    transactionId: string,
+    actionHash: string,
+    options?: { intervalMs?: number; timeoutMs?: number },
+  ) {
+    return this.jamClient.waitForAction(transactionId, actionHash, options);
+  }
+
+  /** Complete all deployment/state reads before the caller opens a wallet. */
+  prepareOwnershipAction(
+    actionName: string,
+    input: Record<string, LocusValue>,
+    options: { onProgress?: (phase: OwnershipPreparationPhase) => void } = {},
+  ): Promise<PreparedOwnershipAction> {
+    const session = this.requireSession();
+    const prepare = this.jamClient.prepareOwnershipAction;
+    if (!prepare) throw new Error("the configured JamScript client does not expose phased Ownership actions");
+    return prepare.call(this.jamClient, actionName, { ...input, subject: session.subject }, session.signer, options);
+  }
+
+  /** Starts the wallet request synchronously when called from a user gesture. */
+  signPreparedOwnershipAction(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction> {
+    this.requireSession();
+    const sign = this.jamClient.signPreparedOwnershipAction;
+    if (!sign) throw new Error("the configured JamScript client does not expose phased Ownership actions");
+    return sign.call(this.jamClient, prepared);
+  }
+
+  abandonPreparedOwnershipAction(prepared: PreparedOwnershipAction): void {
+    const abandon = this.jamClient.abandonPreparedOwnershipAction;
+    if (!abandon) return;
+    abandon.call(this.jamClient, prepared);
+  }
+
+  submitSignedOwnershipAction(signed: SignedOwnershipAction) {
+    this.requireSession();
+    const submit = this.jamClient.submitSignedOwnershipAction;
+    if (!submit) throw new Error("the configured JamScript client does not expose phased Ownership actions");
+    return submit.call(this.jamClient, signed);
+  }
+
+  async transactionStatus(transactionId: string) {
+    if (!this.jamClient.transactionStatus) throw new Error("the configured JamScript client does not expose transaction status");
+    return this.jamClient.transactionStatus(transactionId);
+  }
+
+  async finalizedContext() {
+    if (!this.jamClient.finalizedContext) throw new Error("the configured JamScript client does not expose finalized context");
+    return this.jamClient.finalizedContext();
+  }
+
   async createAsset(
     assetId: AssetId,
     name: string | Uint8Array,
     symbol: string | Uint8Array,
     decimals: number,
     initialSupply: Amount,
+    initialHolder?: Ownership,
   ): Promise<SubmitActionResult> {
+    return this.submit("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder));
+  }
+
+  prepareCreateAsset(
+    assetId: AssetId,
+    name: string | Uint8Array,
+    symbol: string | Uint8Array,
+    decimals: number,
+    initialSupply: Amount,
+    initialHolder?: Ownership,
+    onProgress?: (phase: OwnershipPreparationPhase) => void,
+  ): Promise<PreparedOwnershipAction> {
+    return this.prepareOwnershipAction("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder), { onProgress });
+  }
+
+  private createAssetInput(
+    assetId: AssetId,
+    name: string | Uint8Array,
+    symbol: string | Uint8Array,
+    decimals: number,
+    initialSupply: Amount,
+    initialHolder?: Ownership,
+  ): Record<string, LocusValue> {
     assertId(assetId, "assetId");
     assertDecimals(decimals);
     assertAmount(initialSupply, "initialSupply");
+    const holder = initialHolder ?? this.requireSession().subject;
+    assertOwnership(holder, "initialHolder");
     const nameBytes = typeof name === "string" ? encodeAssetName(name) : name;
     const symbolBytes = typeof symbol === "string" ? encodeAssetSymbol(symbol) : symbol;
     if (!(nameBytes instanceof Uint8Array) || nameBytes.length === 0 || nameBytes.length > 64) {
@@ -131,13 +302,14 @@ export class LocusClient {
     if (!(symbolBytes instanceof Uint8Array) || symbolBytes.length === 0 || symbolBytes.length > 16) {
       throw locusError(LOCUS_ERROR_CODES.INVALID_ASSET_SYMBOL);
     }
-    return this.submit("createAsset", {
+    return {
       assetId,
       name: nameBytes,
       symbol: symbolBytes,
       decimals,
       initialSupply,
-    });
+      initialHolder: holder,
+    };
   }
 
   async transfer(assetId: AssetId, to: Ownership, amount: Amount): Promise<SubmitActionResult> {
@@ -180,6 +352,37 @@ export class LocusClient {
     return this.submit("burn", { assetId, amount });
   }
 
+  async authorizeMatrixController(proof: Uint8Array): Promise<SubmitActionResult> {
+    if (!(proof instanceof Uint8Array) || proof.length === 0 || proof.length > 4096) {
+      throw new Error("Matrix controller authorization proof must be between 1 and 4096 bytes");
+    }
+    return this.submit("authorizeMatrixController", { proof });
+  }
+
+  async addController(controller: Ownership): Promise<SubmitActionResult> {
+    assertOwnership(controller, "controller");
+    return this.submit("addController", { controller });
+  }
+
+  async revokeController(controller: Ownership): Promise<SubmitActionResult> {
+    assertOwnership(controller, "controller");
+    return this.submit("revokeController", { controller });
+  }
+
+  async getControllerStatus(subject: Ownership, controller: Ownership): Promise<ControllerStatus> {
+    assertOwnership(subject, "subject");
+    assertOwnership(controller, "controller");
+    const value = await this.queryValue("getControllerGrant", controllerGrantQueryKey(subject, controller));
+    if (value === null) return "absent";
+    if (value === 1n || value === 1) return "active";
+    if (value === 0n || value === 0) return "revoked";
+    throw new Error("controller grant query returned an unknown status");
+  }
+
+  async isControllerActive(subject: Ownership, controller: Ownership): Promise<boolean> {
+    return (await this.getControllerStatus(subject, controller)) === "active";
+  }
+
   async getAsset(assetId: AssetId): Promise<Asset | null> {
     assertId(assetId, "assetId");
     return asAsset(await this.queryValue("getAsset", assetId));
@@ -201,7 +404,7 @@ export class LocusClient {
   }
 
   async listAssets(): Promise<AssetId[]> {
-    const count = asBigInt(await this.queryValue("getAssetCount"), "asset count");
+    const count = asBigIntOrZero(await this.queryValue("getAssetCount"), "asset count");
     const result: AssetId[] = [];
     for (let index = 0n; index < count; index += 1n) {
       result.push(asBytes(await this.queryValue("getAssetByIndex", index), "asset index"));
@@ -209,9 +412,91 @@ export class LocusClient {
     return result;
   }
 
+  async getPool(assetA: AssetId, assetB: AssetId): Promise<Pool | null> {
+    const key = canonicalPoolKey(assetA, assetB);
+    return asPool(await this.queryValue("getPool", key), key);
+  }
+
+  async listPools(): Promise<Pool[]> {
+    const count = asBigIntOrZero(await this.queryValue("getPoolCount"), "pool count");
+    const result: Pool[] = [];
+    for (let index = 0n; index < count; index += 1n) {
+      const value = await this.queryValue("getPoolByIndex", index);
+      if (!value || typeof value !== "object" || value instanceof Uint8Array || Array.isArray(value)) {
+        throw new Error("pool index query did not return a PoolKey");
+      }
+      const key = value as Record<string, LocusValue>;
+      const pool = await this.getPool(asBytes(key.asset0, "pool asset0"), asBytes(key.asset1, "pool asset1"));
+      if (!pool) throw new Error("indexed pool does not exist");
+      result.push(pool);
+    }
+    return result;
+  }
+
+  pool(assetA: AssetId, assetB: AssetId): BoundPool {
+    const key = canonicalPoolKey(assetA, assetB);
+    return new BoundPool(this, key.asset0, key.asset1);
+  }
+
+  async createPool(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+    canonicalPoolKey(assetA, assetB);
+    assertPoolReserve(amountA, "amountA");
+    assertPoolReserve(amountB, "amountB");
+    if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+    return this.submit("createPool", { assetA, assetB, amountA, amountB });
+  }
+
+  async addPoolLiquidity(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+    canonicalPoolKey(assetA, assetB);
+    assertPoolReserve(amountA, "amountA");
+    assertPoolReserve(amountB, "amountB");
+    if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+    return this.submit("addPoolLiquidity", { assetA, assetB, amountA, amountB });
+  }
+
+  async removePoolLiquidity(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+    canonicalPoolKey(assetA, assetB);
+    assertPoolReserve(amountA, "amountA");
+    assertPoolReserve(amountB, "amountB");
+    return this.submit("removePoolLiquidity", { assetA, assetB, amountA, amountB });
+  }
+
+  async swapExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult> {
+    canonicalPoolKey(assetIn, assetOut);
+    assertPoolReserve(amountIn, "amountIn");
+    assertAmount(minAmountOut, "minAmountOut");
+    if (amountIn === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
+    return this.submit("swapExactIn", { assetIn, assetOut, amountIn, minAmountOut });
+  }
+
+  async quoteExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount): Promise<ExactInQuote> {
+    const pool = await this.getPool(assetIn, assetOut);
+    if (!pool) throw locusError(LOCUS_ERROR_CODES.POOL_NOT_FOUND);
+    const assetInIs0 = compareAssetIds(assetIn, pool.asset0) === 0;
+    return quoteExactIn(assetInIs0 ? pool.reserve0 : pool.reserve1, assetInIs0 ? pool.reserve1 : pool.reserve0, amountIn);
+  }
+
   asset(assetId: AssetId): BoundAsset {
     assertId(assetId, "assetId");
     return new BoundAsset(this, assetId);
+  }
+}
+
+export class BoundPool {
+  constructor(private readonly client: LocusClient, readonly asset0: AssetId, readonly asset1: AssetId) {}
+
+  get(): Promise<Pool | null> { return this.client.getPool(this.asset0, this.asset1); }
+  quoteExactIn(assetIn: AssetId, amountIn: Amount): Promise<ExactInQuote> {
+    return this.client.quoteExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn);
+  }
+  swapExactIn(assetIn: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult> {
+    return this.client.swapExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn, minAmountOut);
+  }
+  addLiquidity(amount0: Amount, amount1: Amount): Promise<SubmitActionResult> {
+    return this.client.addPoolLiquidity(this.asset0, this.asset1, amount0, amount1);
+  }
+  removeLiquidity(amount0: Amount, amount1: Amount): Promise<SubmitActionResult> {
+    return this.client.removePoolLiquidity(this.asset0, this.asset1, amount0, amount1);
   }
 }
 
