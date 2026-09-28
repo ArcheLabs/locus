@@ -2,10 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowLeftRight, Settings2, X } from "lucide-react";
 import { formatUnits, minimumAmountOut, ownershipKey, parseUnits, quoteExactIn, SWAP_FEE_BPS, toHex, type LocusClient, type Ownership, type Pool } from "@archelabs/locus";
 import type { AssetView } from "../assets.js";
-import { AssetIcon } from "../../components/AssetIcon.js";
+import { AssetIdentity, AssetSelector } from "../../components/AssetSelector.js";
 import { ActionButton } from "../../components/ActionButton.js";
 import { Modal } from "../../components/Modal.js";
-import { SelectField } from "../../components/SelectField.js";
 import { FieldMessage } from "../../forms/FieldMessage.js";
 import { FormField } from "../../forms/FormField.js";
 import { normalizeActionError } from "../../errors/normalizeError.js";
@@ -221,8 +220,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       <FormField label="You pay" htmlFor="swap-amount" error={visibleValidation} errorId="swap-amount-error" className="swap-amount-field">
         <div className="swap-side-label"><span>Balance: {assetIn?.balance === null || !assetIn ? "Unavailable" : formatUnits(assetIn.balance, assetIn.decimals)} {assetIn?.symbol ?? ""}</span></div>
         <div className="swap-token-card swap-token-input">
-          {assetIn && <AssetIcon asset={assetIn} size={34} />}
-          <SelectField id="swap-token-in" aria-label="Asset to pay" triggerClassName="swap-token-select" value={assetInId} onValueChange={(value) => updatePair(value, assetOutId)} placeholder="Select asset" options={assets.map((asset) => ({ value: asset.assetIdHex, label: `${asset.symbol} · ${asset.name}`, textValue: `${asset.symbol} ${asset.name}` }))} />
+          <AssetSelector aria-label="Asset to pay" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} value={assetInId} assets={assets} onValueChange={(asset) => updatePair(asset.assetIdHex, assetOutId)} />
           <input id="swap-amount" value={amount} inputMode="decimal" placeholder="0.00" onBlur={() => setAmountTouched(true)} onChange={(event) => { setAmount(event.target.value); setSubmission("idle"); setActionError(""); }} aria-label="Amount to pay" aria-invalid={Boolean(visibleValidation)} aria-describedby={visibleValidation ? "swap-amount-error" : undefined} />
           <button type="button" className="swap-max-button" onClick={useMax} disabled={!assetIn || assetIn.balance === null}>Max</button>
         </div>
@@ -232,8 +230,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
 
       <div className="swap-side-label"><label htmlFor="swap-token-out">You receive</label><span>{quote && assetOut ? `≈ ${formatUnits(quote.amountOut, assetOut.decimals)} ${assetOut.symbol}` : "Estimated amount"}</span></div>
       <div className="swap-token-card swap-token-output">
-        {assetOut && <AssetIcon asset={assetOut} size={34} />}
-        <SelectField id="swap-token-out" aria-label="Asset to receive" triggerClassName="swap-token-select" value={assetOutId} onValueChange={(value) => updatePair(assetInId, value)} placeholder="Select asset" options={assets.map((asset) => ({ value: asset.assetIdHex, label: `${asset.symbol} · ${asset.name}`, textValue: `${asset.symbol} ${asset.name}` }))} />
+        <AssetSelector id="swap-token-out" aria-label="Asset to receive" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} value={assetOutId} assets={assets} onValueChange={(asset) => updatePair(assetInId, asset.assetIdHex)} />
         <strong>{quote && assetOut ? formatUnits(quote.amountOut, assetOut.decimals) : "—"}</strong>
       </div>
       {assetIn && assetOut && assetIn.assetIdHex === assetOut.assetIdHex && <FieldMessage error="Choose two different assets." />}
@@ -268,9 +265,9 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
     {reviewOpen && quote && assetIn && assetOut && <Modal open title="Review swap" onClose={() => setReviewOpen(false)} footer={<><ActionButton variant="secondary" icon={X} onClick={() => setReviewOpen(false)}>Cancel</ActionButton><ActionButton variant="primary" icon={ArrowLeftRight} disabled={busy} onClick={() => void confirmSwap()}>Swap</ActionButton></>}>
       <p className="modal-lead">Check the amounts before signing.</p>
       <dl className="review-list">
-        <div><dt>You pay</dt><dd>{formatUnits(quote.amountIn, assetIn.decimals)} {assetIn.symbol}</dd></div>
-        <div><dt>You receive</dt><dd>≈ {formatUnits(quote.amountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
-        <div><dt>Minimum received</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
+        <div><dt>You pay</dt><dd><AssetIdentity asset={assetIn} size={30} amount={formatUnits(quote.amountIn, assetIn.decimals)} className="asset-identity--review" /></dd></div>
+        <div><dt>You receive</dt><dd><AssetIdentity asset={assetOut} size={30} amount={`≈ ${formatUnits(quote.amountOut, assetOut.decimals)}`} className="asset-identity--review" /></dd></div>
+        <div><dt>Minimum received</dt><dd><AssetIdentity asset={assetOut} size={30} amount={formatUnits(quote.minimumAmountOut, assetOut.decimals)} className="asset-identity--review" /></dd></div>
         <div><dt>Fee</dt><dd>{feeLabel}</dd></div>
         {impact !== null && impact >= 1 && <div><dt>Price impact</dt><dd>{impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</dd></div>}
       </dl>
