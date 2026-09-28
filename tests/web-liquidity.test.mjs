@@ -15,7 +15,7 @@ const validConfig = { version: 2, network: "local", mode: "permissionless", feat
 
 test("liquidity config follows candidate base path", () => {
   assert.equal(liquidityConfigPath("local", "/"), "/liquidity/local.json");
-  assert.equal(liquidityConfigPath("local", "/candidate-v2/"), "/candidate-v2/liquidity/local.json");
+  assert.equal(liquidityConfigPath("local", "/candidate/"), "/candidate/liquidity/local.json");
 });
 
 test("featured liquidity pairs are display-only and strictly validated", () => {
@@ -29,8 +29,8 @@ test("featured liquidity pairs are display-only and strictly validated", () => {
 });
 
 test("missing or invalid optional featured config never disables permissionless liquidity", async () => {
-  assert.equal(await loadPermissionlessLiquidityConfig("local", assetKeys, "/candidate-v2/", async (url) => {
-    assert.equal(url, "/candidate-v2/liquidity/local.json");
+  assert.equal(await loadPermissionlessLiquidityConfig("local", assetKeys, "/candidate/", async (url) => {
+    assert.equal(url, "/candidate/liquidity/local.json");
     return new Response("", { status: 404 });
   }), null);
   assert.equal(await loadPermissionlessLiquidityConfig("local", assetKeys, "/", async () => new Response("{}", { status: 200 })), null);
