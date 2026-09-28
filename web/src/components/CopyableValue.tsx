@@ -4,7 +4,13 @@ import { compactValue } from "./valueFormatting.js";
 
 export { compactValue } from "./valueFormatting.js";
 
-export function CopyableValue({ label, value, className = "" }: { label?: string; value: string; className?: string }) {
+export function CopyableValue({ label, value, className = "", layout = "stacked", copyPlacement = "right" }: {
+  label?: string;
+  value: string;
+  className?: string;
+  layout?: "stacked" | "inline";
+  copyPlacement?: "left" | "right";
+}) {
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -34,13 +40,15 @@ export function CopyableValue({ label, value, className = "" }: { label?: string
     }
   }
 
-  return <span className={`copyable-value ${className}`.trim()}>
+  const copyButton = <button type="button" className="copyable-value__button" onClick={() => void copy()} aria-label={copied ? `${label ?? "Value"} copied` : `Copy ${label ?? "value"}`} title={copied ? "Copied" : "Copy"}>
+    {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
+  </button>;
+  return <span className={`copyable-value copyable-value--${layout} copyable-value--copy-${copyPlacement} ${className}`.trim()}>
     {label && <small>{label}</small>}
     <span className="copyable-value__row">
+      {copyPlacement === "left" && copyButton}
       <code title={value}>{compactValue(value)}</code>
-      <button type="button" className="copyable-value__button" onClick={() => void copy()} aria-label={copied ? `${label ?? "Value"} copied` : `Copy ${label ?? "value"}`} title={copied ? "Copied" : "Copy"}>
-        {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
-      </button>
+      {copyPlacement === "right" && copyButton}
     </span>
   </span>;
 }

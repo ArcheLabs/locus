@@ -3,8 +3,9 @@
 Locus is an Ownership-native multi-asset service for JamScript. Assets are
 owned directly by canonical JamScript `Ownership` values; Locus does not
 create application identities, wallet accounts, or bridge destinations. The
-v0.3 web client presents curated MiniJAM test assets and demo equities and
-supports single-pool exact-input swaps when operator-managed liquidity exists.
+v0.3 web client presents curated MiniJAM test assets and demo equities,
+supports single-pool exact-input swaps, and provides permissionless liquidity
+positions with non-transferable per-Ownership shares.
 
 ```text
 Asset → Ownership

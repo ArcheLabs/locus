@@ -40,6 +40,7 @@ html[data-theme="dark"] {
   border: 0;
   border-radius: 0;
   background: transparent;
+  overflow: visible;
 }
 
 .identity-icon {
@@ -62,7 +63,6 @@ html[data-theme="dark"] {
 
 .evm-address-glyph {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 15px;
   line-height: 1;
   font-weight: 750;
   letter-spacing: -0.05em;
@@ -78,7 +78,7 @@ html[data-theme="dark"] {
   background: var(--surface, var(--identity-menu-surface));
   color: var(--text, var(--identity-menu-text));
 }
-.type-button .identity-icon-slot { width: 32px; height: 32px; }
+.type-button .identity-icon-slot { width: 36px; height: 36px; flex-basis: 36px; }
 .type-menu.identity-recipient-menu {
   z-index: 120;
   width: min(360px, calc(100vw - 24px));
@@ -93,7 +93,7 @@ html[data-theme="dark"] {
 .identity-option-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 32px minmax(0, 1fr) 20px;
+  grid-template-columns: 36px minmax(0, 1fr) 20px;
   align-items: center;
   gap: 12px;
   border: 1px solid var(--border, var(--identity-menu-border));
@@ -132,6 +132,7 @@ button.identity-option-row { cursor: pointer; }
 .type-menu .identity-option-row--compact { border-radius: 10px; }
 .connect-options { display: grid; gap: 10px; }
 .identity-icon-slot { background: transparent; }
+.identity-option-row .identity-icon-slot { width: 36px; height: 36px; flex-basis: 36px; }
 
 @media (hover: hover) and (pointer: fine) {
   .identity-option-row:not([data-disabled]):hover {

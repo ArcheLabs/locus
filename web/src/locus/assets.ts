@@ -16,6 +16,7 @@ export type AssetPresentation = {
 export type AssetView = {
   assetId: AssetId;
   assetIdHex: string;
+  catalogKey?: string;
   issuer: Ownership;
   name: string;
   symbol: string;
@@ -151,6 +152,7 @@ export async function loadAssetMetadataForId(
   return {
     assetId,
     assetIdHex,
+    ...(curated ? { catalogKey: curated.key } : {}),
     issuer: asset.issuer,
     name,
     symbol,

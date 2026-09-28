@@ -10,6 +10,8 @@ export const LOCUS_ERROR_MESSAGES: Readonly<Record<number, string>> = {
   6004: "Enter valid non-zero amounts.",
   6005: "There is not enough liquidity for this action.",
   6006: "The quote changed beyond your slippage limit. Review a new quote.",
-  6007: "This Ownership is not the manager of this pool.",
   6008: "The pool reserve limit would be exceeded.",
+  6009: "Enter positive amounts that can mint liquidity shares.",
+  6010: "You do not have enough liquidity shares for this withdrawal.",
+  6011: "The pool changed beyond your liquidity slippage limit. Review the updated quote.",
 };

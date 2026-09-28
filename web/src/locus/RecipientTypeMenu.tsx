@@ -25,7 +25,7 @@ export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkM
       <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
         <DropdownMenu.Trigger asChild>
           <button type="button" className="type-button" aria-label="Recipient type">
-            <span className="identity-icon-slot"><RecipientIcon type={type} size={24} /></span>
+            <span className="identity-icon-slot"><RecipientIcon type={type} size={28} /></span>
             <ChevronDown size={16} className="muted" aria-hidden="true" />
           </button>
         </DropdownMenu.Trigger>
