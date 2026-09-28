@@ -9,6 +9,12 @@ import {
   evmOwnership,
   minimumAmountOut,
   quoteExactIn,
+  integerSqrt,
+  ceilDiv,
+  quoteInitialLiquidity,
+  quoteAddLiquidity,
+  quoteRemoveLiquidity,
+  formatLiquiditySharePercentage,
 } from "../../dist/sdk/index.js";
 import { LocusModel, MAX_U128, id, owner, key } from "./locus-model.mjs";
 
@@ -80,14 +86,17 @@ test("SDK defaults initialHolder to session.subject and validates explicit Owner
   assert.equal(calls.length, submissions);
 });
 
-test("issuer cannot spend treasury's initial balance or become its pool manager", () => {
+test("issuer cannot spend treasury's initial balance; LP management is permissionless", () => {
   const model = new LocusModel();
   model.createAsset(alice, assetA, new Uint8Array([65]), new Uint8Array([65]), 6, 1_000n, treasury);
   model.createAsset(alice, assetB, new Uint8Array([66]), new Uint8Array([66]), 6, 1_000n, treasury);
   expectCode(3002, () => model.transfer(alice, assetA, bob, 1n));
   model.createPoolAs(treasury, treasury, assetA, assetB, 10n, 10n);
-  expectCode(6007, () => model.addPoolLiquidityAs(alice, alice, assetA, assetB, 1n, 1n));
-  assert.equal(model.balance(assetA, treasury), 990n);
+  model.transfer(treasury, assetA, alice, 5n);
+  model.transfer(treasury, assetB, alice, 5n);
+  model.addPoolLiquidityAs(alice, alice, assetA, assetB, 5n, 5n, 5n);
+  assert.ok(model.liquidityShares.get(model.shareKey(assetA, assetB, alice)) > 0n);
+  assert.equal(model.balance(assetA, treasury), 985n);
 });
 
 test("pool pair is canonical and reversed pair cannot create another pool", () => {
@@ -98,25 +107,150 @@ test("pool pair is canonical and reversed pair cannot create another pool", () =
   assert.deepEqual(pool.asset1, assetB);
   assert.equal(pool.reserve0, 200n);
   assert.equal(pool.reserve1, 100n);
+  assert.equal(pool.version, 2);
+  assert.equal(pool.totalShares, 141n);
+  const forwardOrder = fundedModel();
+  forwardOrder.createPoolAs(alice, alice, assetA, assetB, 200n, 100n);
+  assert.deepEqual(forwardOrder.pool(assetA, assetB), pool);
   assert.equal(model.poolIndex.length, 1);
   expectCode(6002, () => model.createPoolAs(alice, alice, assetA, assetB, 1n, 1n));
   expectCode(6003, () => model.createPoolAs(alice, alice, assetA, assetA, 1n, 1n));
   expectCode(2001, () => model.createPoolAs(alice, alice, assetA, id(33), 1n, 1n));
 });
 
-test("only pool manager can add/remove liquidity; supply accounting remains conserved", () => {
+test("multiple Ownership providers receive shares and withdrawals conserve supply", () => {
   const model = fundedModel();
   const supplyA = model.asset(assetA).totalSupply;
   const supplyB = model.asset(assetB).totalSupply;
   model.createPoolAs(alice, alice, assetA, assetB, 100n, 200n);
-  expectCode(6007, () => model.addPoolLiquidityAs(bob, bob, assetA, assetB, 1n, 2n));
-  expectCode(6007, () => model.removePoolLiquidityAs(bob, bob, assetA, assetB, 1n, 2n));
-  model.addPoolLiquidityAs(alice, alice, assetA, assetB, 50n, 80n);
+  model.transfer(alice, assetA, bob, 50n);
+  model.transfer(alice, assetB, bob, 100n);
+  const added = model.addPoolLiquidityAs(bob, bob, assetA, assetB, 10n, 20n, 14n);
+  assert.deepEqual(added, { usedA: 10n, usedB: 20n, mintedShares: 14n });
+  const aliceShares = model.liquidityShares.get(model.shareKey(assetA, assetB, alice));
+  const bobShares = model.liquidityShares.get(model.shareKey(assetA, assetB, bob));
+  expectCode(6010, () => model.removePoolLiquidityAs(alice, alice, assetA, assetB, aliceShares + 1n));
+  const bobBefore = model.balance(assetA, bob);
+  model.removePoolLiquidityAs(bob, bob, assetA, assetB, 7n);
+  assert.ok(model.liquidityShares.get(model.shareKey(assetA, assetB, alice)) === aliceShares);
+  assert.ok(model.balance(assetA, bob) > bobBefore);
   assert.equal(model.totalAccounted(assetA), supplyA);
   assert.equal(model.totalAccounted(assetB), supplyB);
-  model.removePoolLiquidityAs(alice, alice, assetB, assetA, 10n, 5n);
+  model.removePoolLiquidityAs(alice, alice, assetB, assetA, aliceShares);
   assert.equal(model.totalAccounted(assetA), supplyA);
   assert.equal(model.totalAccounted(assetB), supplyB);
+});
+
+test("fixed liquidity vectors conserve shares and assets across providers and swaps", () => {
+  const model = fundedModel();
+  const carol = owner(105);
+  const initialA = model.asset(assetA).totalSupply;
+  const initialB = model.asset(assetB).totalSupply;
+  model.createPoolAs(alice, alice, assetA, assetB, 10_000n, 20_000n);
+  model.transfer(alice, assetA, bob, 3_000n);
+  model.transfer(alice, assetB, bob, 6_000n);
+  model.transfer(alice, assetA, carol, 2_000n);
+  model.transfer(alice, assetB, carol, 4_000n);
+  model.addPoolLiquidityAs(bob, bob, assetA, assetB, 2_000n, 6_000n);
+  model.addPoolLiquidityAs(carol, carol, assetB, assetA, 4_000n, 2_000n);
+  model.transfer(alice, assetA, carol, 100n);
+
+  const owners = [alice, bob, carol];
+  const assertSharesAndSupply = () => {
+    const pool = model.pool(assetA, assetB);
+    const sum = owners.reduce((total, provider) => total + (model.liquidityShares.get(model.shareKey(assetA, assetB, provider)) ?? 0n), 0n);
+    assert.equal(sum, pool.totalShares);
+    assert.ok(pool.reserve0 <= MAX_POOL_RESERVE && pool.reserve1 <= MAX_POOL_RESERVE);
+    assert.equal(model.totalAccounted(assetA), initialA);
+    assert.equal(model.totalAccounted(assetB), initialB);
+    model.assertPoolInvariant(pool);
+  };
+  assertSharesAndSupply();
+  const totalSharesBeforeSwap = model.pool(assetA, assetB).totalShares;
+  const swapIn = 100n;
+  model.swapExactInAs(carol, carol, assetA, assetB, swapIn, 0n);
+  assert.equal(model.pool(assetA, assetB).totalShares, totalSharesBeforeSwap);
+  assertSharesAndSupply();
+
+  const bobShares = model.liquidityShares.get(model.shareKey(assetA, assetB, bob));
+  model.removePoolLiquidityAs(bob, bob, assetA, assetB, bobShares / 2n);
+  assertSharesAndSupply();
+  for (const provider of owners) {
+    const shares = model.liquidityShares.get(model.shareKey(assetA, assetB, provider)) ?? 0n;
+    if (shares > 0n) model.removePoolLiquidityAs(provider, provider, assetA, assetB, shares);
+    assertSharesAndSupply();
+  }
+  const empty = model.pool(assetA, assetB);
+  assert.deepEqual([empty.reserve0, empty.reserve1, empty.totalShares], [0n, 0n, 0n]);
+  model.transfer(alice, assetA, bob, 1n);
+  model.transfer(alice, assetB, bob, 1n);
+  model.addPoolLiquidityAs(bob, bob, assetA, assetB, 1n, 1n, 1n);
+  assertSharesAndSupply();
+});
+
+test("failed remove and slippage actions leave reserves, shares, balances and index unchanged", () => {
+  const model = fundedModel();
+  model.createPoolAs(alice, alice, assetA, assetB, 100n, 200n);
+  const bobShares = model.liquidityShares.get(model.shareKey(assetA, assetB, bob)) ?? 0n;
+  const snapshot = () => ({
+    pool: structuredClone(model.pool(assetA, assetB)),
+    aliceA: model.balance(assetA, alice),
+    aliceB: model.balance(assetB, alice),
+    aliceShares: model.liquidityShares.get(model.shareKey(assetA, assetB, alice)),
+    bobShares: model.liquidityShares.get(model.shareKey(assetA, assetB, bob)) ?? 0n,
+    alicePositions: structuredClone(model.liquidityPositions.get(key(alice))),
+    bobPositions: structuredClone(model.liquidityPositions.get(key(bob)) ?? []),
+  });
+  const before = snapshot();
+  expectCode(6010, () => model.removePoolLiquidityAs(bob, bob, assetA, assetB, 1n));
+  assert.deepEqual(snapshot(), before);
+  const aliceShares = before.aliceShares;
+  expectCode(6011, () => model.removePoolLiquidityAs(alice, alice, assetA, assetB, aliceShares, MAX_U128, 0n));
+  assert.deepEqual(snapshot(), before);
+  expectCode(6011, () => model.addPoolLiquidityAs(alice, alice, assetA, assetB, 10n, 20n, MAX_U128));
+  assert.deepEqual(snapshot(), before);
+  assert.equal(bobShares, 0n);
+});
+
+test("add uses proportional amounts, leaves excess untouched, and protects minimum shares atomically", () => {
+  const model = fundedModel();
+  model.createPoolAs(alice, alice, assetA, assetB, 100n, 1_000n);
+  model.transfer(alice, assetA, bob, 50n);
+  model.transfer(alice, assetB, bob, 1_000n);
+  const beforePool = structuredClone(model.pool(assetA, assetB));
+  const beforeA = model.balance(assetA, bob); const beforeB = model.balance(assetB, bob);
+  expectCode(6011, () => model.addPoolLiquidityAs(bob, bob, assetA, assetB, 10n, 1_000n, 101n));
+  assert.deepEqual(model.pool(assetA, assetB), beforePool);
+  assert.equal(model.balance(assetA, bob), beforeA); assert.equal(model.balance(assetB, bob), beforeB);
+  const result = model.addPoolLiquidityAs(bob, bob, assetA, assetB, 10n, 1_000n, 0n);
+  assert.equal(result.usedA, 10n); assert.equal(result.usedB, 99n);
+  assert.equal(model.balance(assetB, bob), beforeB - 99n);
+  assert.equal(model.liquidityShares.get(model.shareKey(assetA, assetB, bob)), result.mintedShares);
+});
+
+test("swap changes reserves but not shares; fees remain in reserves; last LP exits exactly and pool can be reinitialized", () => {
+  const model = fundedModel();
+  model.createPoolAs(alice, alice, assetA, assetB, 100_000n, 200_000n);
+  model.transfer(alice, assetA, bob, 1_000n);
+  const poolBefore = structuredClone(model.pool(assetA, assetB));
+  const totalBefore = poolBefore.totalShares;
+  const swapOut = model.swapExactInAs(bob, bob, assetA, assetB, 100n, 0n);
+  const afterSwap = model.pool(assetA, assetB);
+  assert.equal(afterSwap.totalShares, totalBefore);
+  assert.ok(afterSwap.reserve0 * afterSwap.reserve1 >= poolBefore.reserve0 * poolBefore.reserve1);
+  const ownerShares = model.liquidityShares.get(model.shareKey(assetA, assetB, alice));
+  const quote0 = afterSwap.reserve0; const quote1 = afterSwap.reserve1;
+  model.removePoolLiquidityAs(alice, alice, assetA, assetB, ownerShares);
+  const empty = model.pool(assetA, assetB);
+  assert.equal(empty.reserve0, 0n); assert.equal(empty.reserve1, 0n); assert.equal(empty.totalShares, 0n);
+  assert.equal(model.balance(assetB, alice), 2_000_000n - 200_000n + quote1);
+  assert.ok(swapOut > 0n && quote0 > 0n);
+  model.transfer(alice, assetA, bob, 1n);
+  model.transfer(alice, assetB, bob, 1n);
+  model.addPoolLiquidityAs(bob, bob, assetA, assetB, 1n, 1n, 1n);
+  assert.equal(model.pool(assetA, assetB).totalShares, 1n);
+  assert.equal(model.liquidityPositions.get(key(alice)).length, 1);
+  assert.equal(model.liquidityPositions.get(key(bob)).length, 1);
 });
 
 test("exact-input swaps apply fee, both directions, slippage and atomic rollback", () => {
@@ -157,7 +291,7 @@ test("reserve bounds protect u128 multiplication and empty pools reject quotes",
   model.createAsset(alice, assetB, new Uint8Array([66]), new Uint8Array([66]), 0, MAX_U128);
   expectCode(6008, () => model.createPoolAs(alice, alice, assetA, assetB, MAX_POOL_RESERVE + 1n, 1n));
   model.createPoolAs(alice, alice, assetA, assetB, 1n, 1n);
-  expectCode(6008, () => model.addPoolLiquidityAs(alice, alice, assetA, assetB, MAX_POOL_RESERVE, 1n));
+  expectCode(6008, () => model.addPoolLiquidityAs(alice, alice, assetA, assetB, MAX_POOL_RESERVE, MAX_POOL_RESERVE));
   model.createAsset(alice, wide, new Uint8Array([67]), new Uint8Array([67]), 0, 0n);
   expectCode(6001, () => model.quoteExactIn(assetA, wide, 1n));
   expectCode(6004, () => quoteExactIn(100n, 100n, 0n));
@@ -190,6 +324,33 @@ test("SDK quote, pool read and slippage helper use exact integer rules", async (
   }
 });
 
+test("permissionless liquidity math stays integer-only at u64/u128 boundaries", () => {
+  assert.equal(integerSqrt(0n), 0n);
+  assert.equal(integerSqrt(1n), 1n);
+  assert.equal(integerSqrt(2n), 1n);
+  assert.equal(integerSqrt(15n), 3n);
+  assert.equal(integerSqrt(MAX_POOL_RESERVE * MAX_POOL_RESERVE), MAX_POOL_RESERVE);
+  assert.equal(integerSqrt(MAX_U128), MAX_POOL_RESERVE);
+  assert.equal(ceilDiv(0n, 7n), 0n);
+  assert.equal(ceilDiv(15n, 7n), 3n);
+  assert.equal(ceilDiv(MAX_U128, MAX_U128), 1n);
+  assert.throws(() => ceilDiv(1n, 0n), /denominator/);
+
+  const initial = quoteInitialLiquidity(100n, 1_000n);
+  assert.equal(initial.sharesMinted, 316n);
+  const add = quoteAddLiquidity(100n, 1_000n, 316n, 10n, 1_000n);
+  assert.deepEqual(add, { maxAmount0: 10n, maxAmount1: 1_000n, amount0Used: 10n, amount1Used: 99n, sharesMinted: 31n });
+  const remove = quoteRemoveLiquidity(110n, 1_099n, 347n, 31n, 15n);
+  assert.deepEqual(remove, { sharesBurned: 15n, amount0: 4n, amount1: 47n });
+  const last = quoteRemoveLiquidity(110n, 1_099n, 347n, 347n, 347n);
+  assert.deepEqual(last, { sharesBurned: 347n, amount0: 110n, amount1: 1_099n });
+  assert.equal(formatLiquiditySharePercentage(1n, 1_000_000n), "<0.01%");
+  assert.equal(formatLiquiditySharePercentage(1242n, 10_000n), "12.42%");
+  assert.throws(() => quoteInitialLiquidity(MAX_POOL_RESERVE, MAX_POOL_RESERVE + 1n), /reserve limit/);
+  assert.throws(() => quoteAddLiquidity(100n, 1_000n, 316n, 10n, 0n), /greater than zero/);
+  assert.throws(() => quoteRemoveLiquidity(100n, 1_000n, 316n, 10n, 11n), /insufficient/);
+});
+
 test("SDK treats never-written asset and pool counts as zero on a fresh Service", async () => {
   const adapter = {
     async queryLatest() { return { value: null }; },
@@ -200,13 +361,13 @@ test("SDK treats never-written asset and pool counts as zero on a fresh Service"
   assert.deepEqual(await locus.listPools(), []);
 });
 
-test("SDK hydrates pool pair keys from the query key when the stored descriptor contains reserves only", async () => {
+test("SDK hydrates V2 pool key fields from the query key", async () => {
   const canonical = { asset0: assetA, asset1: assetB };
   const value = {
-    version: 1,
-    manager: alice,
+    version: 2,
     reserve0: 123n,
     reserve1: 456n,
+    totalShares: 236n,
   };
   const adapter = {
     async queryLatest(queryName) {
@@ -223,7 +384,52 @@ test("SDK hydrates pool pair keys from the query key when the stored descriptor 
   assert.deepEqual(pool.asset1, assetB);
   assert.equal(pool.reserve0, 123n);
   assert.equal(pool.reserve1, 456n);
+  assert.equal(pool.totalShares, 236n);
   assert.deepEqual(await locus.listPools(), [pool]);
+});
+
+test("SDK pool listing is bounded and supports an explicit page offset", async () => {
+  const keys = [assetA, assetB, id(33), id(44)].slice(1).map((asset, index, all) => ({
+    asset0: assetA,
+    asset1: asset,
+  }));
+  const adapter = {
+    async queryLatest(name, queryKey) {
+      if (name === "getPoolCount") return { value: BigInt(keys.length) };
+      if (name === "getPoolByIndex") return { value: keys[Number(queryKey)] };
+      if (name === "getPool") return { value: { version: 2, reserve0: 10n, reserve1: 20n, totalShares: 14n } };
+      throw new Error(`unexpected query ${name}`);
+    },
+    async submitOwnershipAction() { throw new Error("unexpected submission"); },
+  };
+  const locus = new LocusClient(adapter, null);
+  const page = await locus.listPools({ offset: 1n, limit: 1 });
+  assert.equal(page.length, 1);
+  assert.deepEqual(page[0].asset1, id(33));
+  await assert.rejects(() => locus.listPools({ offset: 0n, limit: 101 }), /limit must be/);
+  await assert.rejects(() => locus.listPools({ offset: 4n }), /offset is outside/);
+});
+
+test("SDK lists only an Ownership's active indexed liquidity positions", async () => {
+  const model = fundedModel();
+  model.createPoolAs(alice, alice, assetA, assetB, 100_000n, 200_000n);
+  model.transfer(alice, assetA, bob, 1_000n);
+  model.transfer(alice, assetB, bob, 2_000n);
+  model.addPoolLiquidityAs(bob, bob, assetA, assetB, 1_000n, 2_000n, 1_000n);
+  const adapter = {
+    async queryLatest(name, queryKey) { return { value: model.query(name, queryKey) }; },
+    async submitOwnershipAction() { throw new Error("unexpected submission"); },
+  };
+  const locus = new LocusClient(adapter, null);
+  assert.equal(await locus.liquidityPositionCount(alice), 1n);
+  assert.equal(await locus.liquidityPositionCount(bob), 1n);
+  const alicePositions = await locus.listLiquidityPositions(alice, { limit: 1 });
+  const bobPositions = await locus.listLiquidityPositions(bob, { offset: 0n, limit: 1 });
+  assert.equal(alicePositions.length, 1);
+  assert.equal(bobPositions.length, 1);
+  assert.equal(alicePositions[0].shares, 141_421n);
+  assert.equal(bobPositions[0].shares, 1_414n);
+  assert.deepEqual(await locus.listLiquidityPositions(alice, { offset: 1n }), []);
 });
 
 test("deterministic swap sample vectors preserve the constant-product invariant", () => {

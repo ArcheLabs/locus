@@ -30,12 +30,33 @@ export interface Asset {
 }
 
 export interface Pool {
-  version: 1;
-  manager: Ownership;
+  version: 2;
   asset0: AssetId;
   asset1: AssetId;
   reserve0: Amount;
   reserve1: Amount;
+  totalShares: Amount;
+}
+
+export interface LiquidityPosition {
+  pool: Pool;
+  shares: Amount;
+  amount0: Amount;
+  amount1: Amount;
+}
+
+export interface AddLiquidityQuote {
+  maxAmount0: Amount;
+  maxAmount1: Amount;
+  amount0Used: Amount;
+  amount1Used: Amount;
+  sharesMinted: Amount;
+}
+
+export interface RemoveLiquidityQuote {
+  sharesBurned: Amount;
+  amount0: Amount;
+  amount1: Amount;
 }
 
 export interface ExactInQuote {

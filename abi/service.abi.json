@@ -214,13 +214,19 @@
           }
         },
         {
-          "name": "amountA",
+          "name": "maxAmountA",
           "type": {
             "kind": "u128"
           }
         },
         {
-          "name": "amountB",
+          "name": "maxAmountB",
+          "type": {
+            "kind": "u128"
+          }
+        },
+        {
+          "name": "minShares",
           "type": {
             "kind": "u128"
           }
@@ -259,13 +265,19 @@
           }
         },
         {
-          "name": "amountA",
+          "name": "shares",
           "type": {
             "kind": "u128"
           }
         },
         {
-          "name": "amountB",
+          "name": "minAmountA",
+          "type": {
+            "kind": "u128"
+          }
+        },
+        {
+          "name": "minAmountB",
           "type": {
             "kind": "u128"
           }
@@ -727,12 +739,6 @@
               }
             },
             {
-              "name": "manager",
-              "type": {
-                "kind": "ownership"
-              }
-            },
-            {
               "name": "reserve0",
               "type": {
                 "kind": "u128"
@@ -740,6 +746,12 @@
             },
             {
               "name": "reserve1",
+              "type": {
+                "kind": "u128"
+              }
+            },
+            {
+              "name": "totalShares",
               "type": {
                 "kind": "u128"
               }
@@ -769,6 +781,103 @@
       "state": "poolByIndex",
       "keyType": {
         "kind": "u64"
+      },
+      "output": {
+        "type": {
+          "kind": "record",
+          "fields": [
+            {
+              "name": "asset0",
+              "type": {
+                "kind": "fixedBytes",
+                "len": 32
+              }
+            },
+            {
+              "name": "asset1",
+              "type": {
+                "kind": "fixedBytes",
+                "len": 32
+              }
+            }
+          ]
+        },
+        "nullable": true
+      }
+    },
+    {
+      "name": "getLiquidityShares",
+      "kind": "state_get",
+      "state": "liquidityShares",
+      "keyType": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "asset0",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "asset1",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "ownerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
+      },
+      "output": {
+        "type": {
+          "kind": "u128"
+        },
+        "nullable": true
+      }
+    },
+    {
+      "name": "getLiquidityPositionCount",
+      "kind": "state_get",
+      "state": "liquidityPositionCount",
+      "keyType": {
+        "kind": "fixedBytes",
+        "len": 32
+      },
+      "output": {
+        "type": {
+          "kind": "u64"
+        },
+        "nullable": true
+      }
+    },
+    {
+      "name": "getLiquidityPositionByIndex",
+      "kind": "state_get",
+      "state": "liquidityPositionByIndex",
+      "keyType": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "ownerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "index",
+            "type": {
+              "kind": "u64"
+            }
+          }
+        ]
       },
       "output": {
         "type": {
@@ -825,6 +934,36 @@
       "descriptor": {
         "kind": "fixedBytes",
         "len": 32
+      }
+    },
+    "Record<asset0:FixedBytes<32>,asset1:FixedBytes<32>,ownerKey:FixedBytes<32>>": {
+      "kind": "record",
+      "max": null,
+      "descriptor": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "asset0",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "asset1",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "ownerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
       }
     },
     "Record<asset0:FixedBytes<32>,asset1:FixedBytes<32>>": {
@@ -903,6 +1042,28 @@
         ]
       }
     },
+    "Record<ownerKey:FixedBytes<32>,index:u64>": {
+      "kind": "record",
+      "max": null,
+      "descriptor": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "ownerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "index",
+            "type": {
+              "kind": "u64"
+            }
+          }
+        ]
+      }
+    },
     "Record<subjectKey:FixedBytes<32>,controllerKey:FixedBytes<32>>": {
       "kind": "record",
       "max": null,
@@ -973,7 +1134,7 @@
         ]
       }
     },
-    "Record<version:u8,manager:ownership,reserve0:u128,reserve1:u128>": {
+    "Record<version:u8,reserve0:u128,reserve1:u128,totalShares:u128>": {
       "kind": "record",
       "max": null,
       "descriptor": {
@@ -986,12 +1147,6 @@
             }
           },
           {
-            "name": "manager",
-            "type": {
-              "kind": "ownership"
-            }
-          },
-          {
             "name": "reserve0",
             "type": {
               "kind": "u128"
@@ -999,6 +1154,12 @@
           },
           {
             "name": "reserve1",
+            "type": {
+              "kind": "u128"
+            }
+          },
+          {
+            "name": "totalShares",
             "type": {
               "kind": "u128"
             }
@@ -1215,7 +1376,7 @@
     },
     {
       "name": "pools",
-      "schema": "locus.pool.v1",
+      "schema": "locus.pool.v2",
       "kind": "map",
       "keyType": {
         "kind": "record",
@@ -1246,12 +1407,6 @@
             }
           },
           {
-            "name": "manager",
-            "type": {
-              "kind": "ownership"
-            }
-          },
-          {
             "name": "reserve0",
             "type": {
               "kind": "u128"
@@ -1262,13 +1417,19 @@
             "type": {
               "kind": "u128"
             }
+          },
+          {
+            "name": "totalShares",
+            "type": {
+              "kind": "u128"
+            }
           }
         ]
       }
     },
     {
       "name": "poolCount",
-      "schema": "locus.pool-count.v1",
+      "schema": "locus.pool-count.v2",
       "kind": "scalar",
       "keyType": {
         "kind": "unit"
@@ -1279,10 +1440,98 @@
     },
     {
       "name": "poolByIndex",
-      "schema": "locus.pool-index.v1",
+      "schema": "locus.pool-index.v2",
       "kind": "map",
       "keyType": {
         "kind": "u64"
+      },
+      "valueType": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "asset0",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "asset1",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "liquidityShares",
+      "schema": "locus.liquidity-share.v1",
+      "kind": "map",
+      "keyType": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "asset0",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "asset1",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "ownerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          }
+        ]
+      },
+      "valueType": {
+        "kind": "u128"
+      }
+    },
+    {
+      "name": "liquidityPositionCount",
+      "schema": "locus.liquidity-position-count.v1",
+      "kind": "map",
+      "keyType": {
+        "kind": "fixedBytes",
+        "len": 32
+      },
+      "valueType": {
+        "kind": "u64"
+      }
+    },
+    {
+      "name": "liquidityPositionByIndex",
+      "schema": "locus.liquidity-position-index.v1",
+      "kind": "map",
+      "keyType": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "ownerKey",
+            "type": {
+              "kind": "fixedBytes",
+              "len": 32
+            }
+          },
+          {
+            "name": "index",
+            "type": {
+              "kind": "u64"
+            }
+          }
+        ]
       },
       "valueType": {
         "kind": "record",

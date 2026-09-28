@@ -25,3 +25,13 @@ test("service is Ownership-native and keeps protocol boundaries explicit", () =>
   assert.doesNotMatch(source, /parseInt\([^)]*amount/);
   assert.doesNotMatch(source, /native JAM|jamBalance|wrapJAM/i);
 });
+
+test("permissionless pool state shape and canonical create reserve mapping are stable", () => {
+  const poolRecord = source.match(/const PoolV2 = record\(\{([^}]*)\}\)/)?.[1] ?? "";
+  const poolFields = [...poolRecord.matchAll(/(\w+):\s*u\d+/g)].map((match) => match[1]);
+  assert.deepEqual(poolFields, ["version", "reserve0", "reserve1", "totalShares"]);
+  assert.match(source, /let amount0: u128 = input\.amountA;\s*let amount1: u128 = input\.amountB;\s*if \(compareAssetIds\(input\.assetA, key\.asset0\) !== 0\)/);
+  assert.match(source, /export const getLiquidityShares = query\(liquidityShares\)/);
+  assert.match(source, /export const getLiquidityPositionCount = query\(liquidityPositionCount\)/);
+  assert.match(source, /export const getLiquidityPositionByIndex = query\(liquidityPositionByIndex\)/);
+});
