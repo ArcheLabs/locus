@@ -486,8 +486,10 @@ button:disabled { cursor: not-allowed; }
 .form-field__message-slot:empty { height: 20px; min-height: 20px; }
 .form-field__message-slot .field-message { overflow: hidden; margin: 0; text-overflow: ellipsis; white-space: nowrap; }
 .swap-direction-row { display: grid; min-height: 38px; grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr); align-items: center; margin-top: 24px; }
-.swap-direction-row > .field-message { grid-column: 1; grid-row: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .swap-direction-row > .swap-direction { grid-column: 2; grid-row: 1; }
+.swap-direction-row--invalid { grid-template-rows: auto 38px; margin-top: 5px; }
+.swap-direction-row--invalid > .field-message { grid-column: 1 / -1; grid-row: 1; min-width: 0; margin: 0 2px; }
+.swap-direction-row--invalid > .swap-direction { grid-row: 2; }
 .swap-card > .swap-side-label { margin-top: 0; }
 .account-center-section > .copyable-value--inline,
 .account-center-section > .account-center-detail { min-height: 38px; }

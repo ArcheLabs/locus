@@ -58,8 +58,6 @@
 .liquidity-asset-selector .asset-identity { flex: 1 1 auto; min-width: 0; }
 .liquidity-asset-selector .asset-identity__copy { max-width: 220px; }
 .liquidity-asset-selector .asset-identity__copy small { max-width: 200px; }
-.liquidity-switch-pair { display: grid; place-items: center; width: 44px; height: 44px; margin-bottom: 1px; }
-.liquidity-switch-pair:disabled { opacity: .45; }
 .liquidity-select-hint { margin: 0; color: var(--text-secondary); font-size: 13px; }
 .liquidity-pool-state { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 11px; border: 1px solid var(--accent-border); border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 700; }
 .liquidity-pool-state--existing { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
@@ -88,7 +86,6 @@
 .liquidity-tx-receipt code { color: var(--text-secondary); overflow-wrap: anywhere; }
 .permissionless-liquidity-error { color: var(--danger); }
 .liquidity-new-card .liquidity-deposit-form { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-.liquidity-new-card .liquidity-switch-pair { width: 36px; height: 36px; justify-self: center; margin: -2px 0; }
 @media (min-width: 960px) { .liquidity-deposit-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
   .liquidity-page { gap: 14px; }
@@ -113,7 +110,6 @@
   .liquidity-position-actions > .action-button { flex: 1 1 auto; }
   .liquidity-position-remove-options { grid-column: auto; }
   .liquidity-pair-selectors { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .liquidity-switch-pair { justify-self: center; transform: none; }
   .liquidity-new-card { padding: 15px; }
   .liquidity-deposit-form { grid-template-columns: minmax(0, 1fr); }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { ArrowDown, ArrowDownUp, ArrowLeft, Droplets, Plus, RefreshCw, X } from "lucide-react";
+import { ArrowDown, ArrowLeft, Droplets, Plus, RefreshCw, X } from "lucide-react";
 import { formatLiquiditySharePercentage, formatLocusId, formatUnits, minimumLiquidityAmount, ownershipKey, parseUnits, quoteAddLiquidity as calculateAddLiquidity, quoteInitialLiquidity, toHex, type LocusClient, type LiquidityPosition, type Ownership, type Pool } from "@archelabs/locus";
 import type { AssetView } from "../assets.js";
 import { AssetIdentity, AssetSelector } from "../../components/AssetSelector.js";
@@ -597,7 +597,6 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
             disabled={busyOrPending}
             ariaLabel={`${selectedA?.symbol ?? "Token A"} amount`}
           />
-          <button type="button" className="icon-button liquidity-switch-pair" aria-label="Switch token order" disabled={!assetAId || !assetBId || assetAId === assetBId || busyOrPending} onClick={() => setPair(assetBId, assetAId)}><ArrowDownUp size={18} aria-hidden="true" /></button>
           <AssetAmountInput
             className="liquidity-amount-field"
             selector={<AssetSelector aria-label="Token B" value={assetBId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetAId) setPair(assetAId, asset.assetIdHex); }} variant="compact" showBalance={false} disabled={busyOrPending} triggerClassName="liquidity-asset-selector" />}
