@@ -20,6 +20,8 @@ html[data-theme="light"] {
   --accent-soft: #eef2ff;
   --accent-border: #b8c4ff;
   --accent-glow: #e9edff;
+  --selection-surface: var(--accent-soft);
+  --selection-border: var(--accent-border);
   --success: #12b76a;
   --success-soft: #f6fef9;
   --success-border: #d7f0df;
@@ -52,11 +54,13 @@ html[data-theme="dark"] {
   --text-inverse: #0c0d10;
   --border: #272b33;
   --border-strong: #343a46;
-  --accent: #8295ff;
-  --accent-hover: #9baaff;
+  --accent: #4b69ff;
+  --accent-hover: #3d58ed;
   --accent-soft: #202b50;
-  --accent-border: #7184d8;
+  --accent-border: #566bc2;
   --accent-glow: #1b2443;
+  --selection-surface: var(--accent-soft);
+  --selection-border: var(--accent-border);
   --success: #32d583;
   --success-soft: #10261b;
   --success-border: #214d35;
@@ -70,5 +74,5 @@ html[data-theme="dark"] {
   --overlay: rgb(0 0 0 / 62%);
   --shadow: rgb(0 0 0 / 30%);
   --shadow-soft: rgb(0 0 0 / 20%);
-  --focus-ring: #aab6ff;
+  --focus-ring: #9ba9ff;
 }
