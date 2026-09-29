@@ -43,9 +43,6 @@
 .liquidity-position-main { display: grid; gap: 8px; min-width: 0; }
 .liquidity-position-underlying { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--text); font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .liquidity-position-share { color: var(--text-secondary); font-size: 12px; }
-.liquidity-position-ownership { display: grid; gap: 3px; min-width: 0; }
-.liquidity-position-ownership small { color: var(--text-secondary); font-size: 11px; }
-.liquidity-position-ownership code { max-width: 100%; color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
 .liquidity-position-actions { justify-content: flex-end; }
 .liquidity-position-remove-options { grid-column: 1 / -1; color: var(--text-secondary); font-size: 12px; }
 .liquidity-position-remove-options summary { min-height: 34px; cursor: pointer; }
@@ -81,8 +78,6 @@
 .liquidity-amount-control input { width: 100%; min-width: 0; min-height: 42px; padding: 4px 0; border: 0; outline: 0; background: transparent; color: var(--text); font-size: 20px; font-variant-numeric: tabular-nums; }
 .liquidity-amount-control button { min-width: 54px; min-height: 40px; padding: 5px 9px; border: 0; border-radius: 8px; background: var(--accent-soft); color: var(--accent); font-size: 11px; font-weight: 750; }
 .liquidity-amount-control button:disabled { opacity: .55; }
-.liquidity-owner-summary { display: grid; gap: 4px; margin: 0; color: var(--text-secondary); font-size: 12px; }
-.liquidity-owner-summary code { color: var(--text); overflow-wrap: anywhere; }
 .liquidity-review { display: grid; gap: 10px; color: var(--text); font-size: 14px; line-height: 1.5; }
 .liquidity-review p { margin: 0; overflow-wrap: anywhere; }
 .liquidity-review-assets { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }

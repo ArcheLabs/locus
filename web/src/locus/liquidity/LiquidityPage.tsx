@@ -5,6 +5,7 @@ import type { AssetView } from "../assets.js";
 import { AssetIdentity, AssetSelector } from "../../components/AssetSelector.js";
 import { AssetAmountInput } from "../../components/AssetAmountInput.js";
 import { ActionButton } from "../../components/ActionButton.js";
+import { CopyableValue } from "../../components/CopyableValue.js";
 import { Modal } from "../../components/Modal.js";
 import { normalizeActionError } from "../../errors/normalizeError.js";
 import { poolPriceDisplay, proportionalAmount } from "./liquidityMath.js";
@@ -562,7 +563,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
                 <div className="liquidity-asset-pair">{asset0 && <AssetIdentity asset={asset0} size={30} />}<span className="liquidity-pair-divider">/</span>{asset1 && <AssetIdentity asset={asset1} size={30} />}</div>
                 <div className="liquidity-position-underlying">{asset0 ? <AssetIdentity asset={asset0} size={22} amount={`${formatUnits(position.amount0, asset0.decimals)} ${asset0.symbol}`} className="asset-identity--amount-only" /> : position.amount0.toString()} <span>+</span> {asset1 ? <AssetIdentity asset={asset1} size={22} amount={`${formatUnits(position.amount1, asset1.decimals)} ${asset1.symbol}`} className="asset-identity--amount-only" /> : position.amount1.toString()}</div>
                 <span className="liquidity-position-share">Pool share · {formatLiquiditySharePercentage(position.shares, position.pool.totalShares)}</span>
-                <span className="liquidity-position-ownership"><small>Ownership</small><code>{formatLocusId(sessionOwner)}</code></span>
+                <CopyableValue label="Ownership" value={formatLocusId(sessionOwner)} />
               </div>
               <div className="liquidity-position-actions"><ActionButton size="small" variant="secondary" disabled={busyOrPending || !asset0 || !asset1} onClick={() => { if (asset0 && asset1) onNewPosition(asset0.assetIdHex, asset1.assetIdHex); }}>Manage</ActionButton><ActionButton size="small" variant="secondary" disabled={busyOrPending} onClick={() => void requestRemoval(position, 50)}>Remove</ActionButton></div>
               <details className="liquidity-position-remove-options"><summary>Remove a specific amount</summary><div className="liquidity-position-actions">{[25, 50, 75, 100].map((pct) => <button key={pct} type="button" disabled={busyOrPending} onClick={() => void requestRemoval(position, pct)}>{pct}%</button>)}<button type="button" disabled={busyOrPending} onClick={() => requestCustomRemoval(position)}>Custom</button></div></details>
@@ -625,7 +626,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
           {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && <div className="liquidity-current-rate"><span>Initial price</span><strong>1 {selectedA.symbol} = {initialPrice} {selectedB.symbol}</strong><small>1 {selectedB.symbol} = {selectedAmounts && selectedAmounts[0] > 0n && selectedAmounts[1] > 0n ? poolPriceDisplay(selectedAmounts[1], selectedAmounts[0], selectedB.decimals, selectedA.decimals) : "—"} {selectedA.symbol}</small></div>}
         </>}
         {selectedPoolError && <div className="liquidity-query-error" role="alert"><p>{selectedPoolError}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={() => setPairRefreshRevision((revision) => revision + 1)}>Retry pool lookup</ActionButton></div>}
-        {sessionOwner && <p className="liquidity-owner-summary"><span>Ownership</span><code>{formatLocusId(sessionOwner)}</code></p>}
+        {sessionOwner && <CopyableValue label="Ownership" value={formatLocusId(sessionOwner)} />}
         {positionsPageError && <div className="inline-alert" role="alert">{positionsPageError}</div>}
         <ActionButton variant="primary" icon={sessionOwner ? Droplets : undefined} fullWidth disabled={ctaDisabled} onClick={() => sessionOwner ? submitPreview() : onConnect()}>{ctaLabel}</ActionButton>
       </section>
