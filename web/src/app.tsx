@@ -91,7 +91,7 @@ function activityTimestamp(item: ActivityTimestamp): { label: string; dateTime?:
       : null;
   if (!date || !Number.isFinite(date.getTime())) return { label: "Time unavailable" };
   return {
-    label: new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date),
+    label: new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(date),
     dateTime: date.toISOString(),
   };
 }
