@@ -190,30 +190,21 @@ function ceilDiv(value: u128, denominator: u128): u128 {
   return one + (value - one) / denominator;
 }
 
-function integerSqrt(value: u128): u128 {
+function requireInitialShares(amountA: u128, amountB: u128, shares: u128): void {
   let zero: u128 = 0n;
-  let one: u128 = 1n;
-  let two: u128 = 2n;
-  if (value < two) return value;
-  // Pool reserves are capped at u64, so their product's square root fits u64.
-  // Every midpoint is bounded by u64::MAX, so its square always fits in u128.
-  // Keep this comparison division-free: checkedMul performs an overflow-check
-  // division internally, which made the previous optimization retain one full
-  // u128 division per iteration and still trap during createPool planning.
-  let low: u128 = zero;
-  let high: u128 = 18446744073709551615n;
-  let result: u128 = zero;
-  while (low <= high) {
-    const middle = low + (high - low) / two;
-    const square = middle * middle;
-    if (square <= value) {
-      result = middle;
-      low = middle + one;
-    } else {
-      high = middle - one;
-    }
+  const maxPoolReserve: u128 = 18446744073709551615n;
+  if (shares === zero) abort(6009);
+  if (shares > maxPoolReserve) abort(6008);
+
+  // Both reserves are checked against u64::MAX before this helper is called,
+  // so all three products below fit in u128 without a division-based overflow check.
+  const product = amountA * amountB;
+  const sharesSquared = shares * shares;
+  if (sharesSquared > product) abort(6009);
+  if (shares < maxPoolReserve) {
+    const nextShares = shares + 1n;
+    if (nextShares * nextShares <= product) abort(6009);
   }
-  return result;
 }
 
 function requirePoolInvariant(totalShares: u128, reserve0: u128, reserve1: u128): void {
@@ -410,6 +401,7 @@ export const createPool = action({
     assetB: AssetId,
     amountA: u128,
     amountB: u128,
+    initialShares: u128,
   },
   execute(ctx, input) {
     requireController(input.subject, ctx.controller);
@@ -431,15 +423,14 @@ export const createPool = action({
     const balanceA = balances.get(balanceAKey) ?? 0n;
     const balanceB = balances.get(balanceBKey) ?? 0n;
     if (balanceA < input.amountA || balanceB < input.amountB) abort(3002);
-    const initialShares = integerSqrt(checkedMul(input.amountA, input.amountB));
-    if (initialShares === 0n) abort(6009);
+    requireInitialShares(input.amountA, input.amountB, input.initialShares);
 
     balances.set(balanceAKey, checkedSub(balanceA, input.amountA));
     balances.set(balanceBKey, checkedSub(balanceB, input.amountB));
-    pools.set(key, { version: 2, reserve0: amount0, reserve1: amount1, totalShares: initialShares });
+    pools.set(key, { version: 2, reserve0: amount0, reserve1: amount1, totalShares: input.initialShares });
     const shareKey = liquidityShareKey(key.asset0, key.asset1, input.subject);
     ensureLiquidityPositionIndexed(key, input.subject);
-    liquidityShares.set(shareKey, initialShares);
+    liquidityShares.set(shareKey, input.initialShares);
     const count = poolCount.get() ?? 0n;
     if (count === 18446744073709551615n) abort(3003);
     poolByIndex.set(count, key);
@@ -456,6 +447,7 @@ export const addPoolLiquidity = action({
     maxAmountA: u128,
     maxAmountB: u128,
     minShares: u128,
+    initialShares: u128,
   },
   execute(ctx, input) {
     requireController(input.subject, ctx.controller);
@@ -474,8 +466,10 @@ export const addPoolLiquidity = action({
     if (pool.totalShares === 0n) {
       usedA = input.maxAmountA;
       usedB = input.maxAmountB;
-      mintedShares = integerSqrt(checkedMul(usedA, usedB));
+      requireInitialShares(usedA, usedB, input.initialShares);
+      mintedShares = input.initialShares;
     } else {
+      if (input.initialShares !== 0n) abort(9001);
       const sharesA = checkedMul(input.maxAmountA, pool.totalShares) / reserveA;
       const sharesB = checkedMul(input.maxAmountB, pool.totalShares) / reserveB;
       mintedShares = sharesA;

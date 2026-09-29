@@ -62,12 +62,14 @@ test("Liquidity is visible to all users and positions/pools come from Service qu
   assert.match(pageSource, /locus\.listLiquidityPositions\(sessionOwner, \{ offset: 0n, limit: 50 \}\)/);
   assert.match(pageSource, /locus\.liquidityPositionCount\(sessionOwner\)/);
   assert.match(pageSource, /Load more positions/);
-  assert.match(pageSource, /locus\.createPool\(/);
-  assert.match(pageSource, /locus\.addPoolLiquidity\(/);
-  assert.match(pageSource, /locus\.removePoolLiquidity\(/);
+  assert.match(pageSource, /actionName = "createPool"/);
+  assert.match(pageSource, /initialShares: quote\.sharesMinted/);
+  assert.match(pageSource, /actionName = "addPoolLiquidity"/);
+  assert.match(pageSource, /initialShares: currentPool\.totalShares === 0n \? quote\.sharesMinted : 0n/);
+  assert.match(pageSource, /actionName = "removePoolLiquidity"/);
   assert.match(pageSource, /locus\.listPools\(\{ offset: BigInt\(pools\.length \+ additionalPools\.length\), limit: 50 \}\)/);
   assert.match(pageSource, /Load more pools/);
-  assert.match(pageSource, /locus\.getPool\(selectedA\.assetId, selectedB\.assetId\)/);
+  assert.match(pageSource, /locus\.getPool\(assetA\.assetId, assetB\.assetId\)/);
   assert.match(pageSource, /asset\.catalogKey === assetA/);
   assert.match(pageSource, /Featured pairs are unavailable/i);
   assert.match(pageSource, /role="tablist"/);

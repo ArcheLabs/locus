@@ -358,9 +358,9 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
       }
 
       if (request.operation === "create") {
-        quoteInitialLiquidity(rawA, rawB);
+        const quote = quoteInitialLiquidity(rawA, rawB);
         actionName = "createPool";
-        actionInput = { assetA: assetA.assetId, assetB: assetB.assetId, amountA: rawA, amountB: rawB };
+        actionInput = { assetA: assetA.assetId, assetB: assetB.assetId, amountA: rawA, amountB: rawB, initialShares: quote.sharesMinted };
       } else {
         if (!currentPool) throw new Error("This pool is no longer available. Review the pair again.");
         const aIs0 = toHex(assetA.assetId).toLowerCase() === toHex(currentPool.asset0).toLowerCase();
@@ -381,6 +381,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
           maxAmountA: rawA,
           maxAmountB: rawB,
           minShares: minimumLiquidityAmount(quote.sharesMinted, SLIPPAGE_BPS),
+          initialShares: currentPool.totalShares === 0n ? quote.sharesMinted : 0n,
         };
       }
     }

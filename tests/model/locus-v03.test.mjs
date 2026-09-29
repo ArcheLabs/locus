@@ -322,6 +322,34 @@ test("SDK quote, pool read and slippage helper use exact integer rules", async (
   for (const name of ["createPool", "addPoolLiquidity", "removePoolLiquidity", "swapExactIn"]) {
     assert.ok(abi.actions.some((action) => action.name === name), `${name} ABI action is present`);
   }
+  assert.deepEqual(abi.actions.find((action) => action.name === "createPool").input.map((field) => field.name), [
+    "subject", "assetA", "assetB", "amountA", "amountB", "initialShares",
+  ]);
+  assert.deepEqual(abi.actions.find((action) => action.name === "addPoolLiquidity").input.map((field) => field.name), [
+    "subject", "assetA", "assetB", "maxAmountA", "maxAmountB", "minShares", "initialShares",
+  ]);
+});
+
+test("SDK supplies client-computed initial shares in create and empty-pool initialize actions", async () => {
+  const calls = [];
+  const signer = { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } };
+  const adapter = {
+    async submitOwnershipAction(actionName, input) {
+      calls.push({ actionName, input, payload: encodeActionPayload(abi, actionName, input) });
+      return { transactionId: `0x${calls.length}`, status: "queued", actionHash: "0xaction" };
+    },
+    async queryLatest(name) {
+      return { value: name === "getPool" ? { version: 2, reserve0: 0n, reserve1: 0n, totalShares: 0n } : null };
+    },
+  };
+  const locus = new LocusClient(adapter, { signer, subject: alice });
+  await locus.createPool(assetA, assetB, 100n, 1_000n);
+  await locus.addPoolLiquidity(assetA, assetB, 100n, 1_000n, 316n);
+  assert.equal(calls[0].actionName, "createPool");
+  assert.equal(calls[0].input.initialShares, 316n);
+  assert.equal(calls[1].actionName, "addPoolLiquidity");
+  assert.equal(calls[1].input.initialShares, 316n);
+  assert.ok(calls.every((call) => call.payload instanceof Uint8Array && call.payload.length > 0));
 });
 
 test("permissionless liquidity math stays integer-only at u64/u128 boundaries", () => {

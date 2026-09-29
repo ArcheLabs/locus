@@ -452,7 +452,8 @@ export class LocusClient {
     assertPoolReserve(amountA, "amountA");
     assertPoolReserve(amountB, "amountB");
     if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
-    return this.submit("createPool", { assetA, assetB, amountA, amountB });
+    const initialShares = quoteInitialLiquidity(amountA, amountB).sharesMinted;
+    return this.submit("createPool", { assetA, assetB, amountA, amountB, initialShares });
   }
 
   async addPoolLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount, minShares: Amount): Promise<SubmitActionResult> {
@@ -461,7 +462,11 @@ export class LocusClient {
     assertPoolReserve(maxAmountB, "maxAmountB");
     assertAmount(minShares, "minShares");
     if (maxAmountA === 0n || maxAmountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
-    return this.submit("addPoolLiquidity", { assetA, assetB, maxAmountA, maxAmountB, minShares });
+    const pool = await this.getPool(assetA, assetB);
+    const initialShares = pool?.totalShares === 0n
+      ? quoteInitialLiquidity(maxAmountA, maxAmountB).sharesMinted
+      : 0n;
+    return this.submit("addPoolLiquidity", { assetA, assetB, maxAmountA, maxAmountB, minShares, initialShares });
   }
 
   async removePoolLiquidity(assetA: AssetId, assetB: AssetId, shares: Amount, minAmountA: Amount, minAmountB: Amount): Promise<SubmitActionResult> {

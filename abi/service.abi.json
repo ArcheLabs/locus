@@ -179,6 +179,12 @@
           "type": {
             "kind": "u128"
           }
+        },
+        {
+          "name": "initialShares",
+          "type": {
+            "kind": "u128"
+          }
         }
       ],
       "executeOutput": {
@@ -227,6 +233,12 @@
         },
         {
           "name": "minShares",
+          "type": {
+            "kind": "u128"
+          }
+        },
+        {
+          "name": "initialShares",
           "type": {
             "kind": "u128"
           }

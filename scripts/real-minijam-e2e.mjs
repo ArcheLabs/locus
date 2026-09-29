@@ -55,8 +55,10 @@ function signerFor(seedByte) {
 }
 
 async function applied(submitted, label) {
+  console.log(`${label}_TRANSACTION=${submitted.transactionId}`);
   const result = await protocolClient.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
   assert.equal(result.actionReceipt.status, "applied", `${label} receipt was ${JSON.stringify(result.actionReceipt)}`);
+  console.log(`${label}_ACTION_RECEIPT=APPLIED`);
   return result;
 }
 
@@ -146,5 +148,53 @@ assertAmount(
   "ABC balance sum equals supply",
 );
 console.log("BALANCE_SUM_EQUALS_SUPPLY=PASS");
+
+const poolAssetA = id(0xa3);
+const poolAssetB = id(0xa4);
+await applied(await alice.createAsset(poolAssetA, "Pool Asset A", "PA", 0, 1_000_000n), "POOL_ASSET_A");
+await applied(await alice.createAsset(poolAssetB, "Pool Asset B", "PB", 0, 1_000_000n), "POOL_ASSET_B");
+
+await applied(await alice.createPool(poolAssetA, poolAssetB, 40_000n, 90_000n), "CREATE_POOL");
+console.log("CREATE_POOL_PVM_PLAN=PASS");
+console.log("CREATE_POOL_ACTION_RECEIPT=APPLIED");
+const initialPool = await alice.getPool(poolAssetA, poolAssetB);
+assert.ok(initialPool, "created pool is queryable");
+const poolAssetAIs0 = initialPool.asset0.every((byte, index) => byte === poolAssetA[index]);
+assertAmount(poolAssetAIs0 ? initialPool.reserve0 : initialPool.reserve1, 40_000n, "initial asset A reserve");
+assertAmount(poolAssetAIs0 ? initialPool.reserve1 : initialPool.reserve0, 90_000n, "initial asset B reserve");
+assertAmount(initialPool.totalShares, 60_000n, "initial total shares");
+console.log("POOL_STATE=PASS");
+assertAmount(await alice.liquiditySharesOf(poolAssetA, poolAssetB, aliceOwner), 60_000n, "Alice initial LP position");
+const alicePositions = await alice.listLiquidityPositions(aliceOwner);
+assert.ok(alicePositions.some((position) => position.shares === 60_000n), "Alice LP position is indexed");
+console.log("LP_POSITION=PASS");
+
+await applied(await alice.transfer(poolAssetA, bobOwner, 10_000n), "POOL_TRANSFER_A_TO_BOB");
+await applied(await alice.transfer(poolAssetB, bobOwner, 22_500n), "POOL_TRANSFER_B_TO_BOB");
+await applied(await alice.transfer(poolAssetA, carolOwner, 1_000n), "POOL_TRANSFER_A_TO_CAROL");
+await applied(await bob.addPoolLiquidity(poolAssetA, poolAssetB, 10_000n, 22_500n, 15_000n), "ADD_LIQUIDITY");
+console.log("ADD_LIQUIDITY_ACTION_RECEIPT=APPLIED");
+let poolAfterAdd = await alice.getPool(poolAssetA, poolAssetB);
+assert.ok(poolAfterAdd, "pool remains queryable after add");
+assertAmount(poolAfterAdd.totalShares, 75_000n, "total shares after add");
+assertAmount(await bob.liquiditySharesOf(poolAssetA, poolAssetB, bobOwner), 15_000n, "Bob position after add");
+
+await applied(await bob.removePoolLiquidity(poolAssetA, poolAssetB, 7_500n, 5_000n, 11_250n), "REMOVE_LIQUIDITY");
+console.log("REMOVE_LIQUIDITY_ACTION_RECEIPT=APPLIED");
+const poolAfterRemove = await alice.getPool(poolAssetA, poolAssetB);
+assert.ok(poolAfterRemove, "pool remains queryable after remove");
+assertAmount(poolAfterRemove.totalShares, 67_500n, "total shares after remove");
+assertAmount(await bob.liquiditySharesOf(poolAssetA, poolAssetB, bobOwner), 7_500n, "Bob position after remove");
+
+const quote = await carol.quoteExactIn(poolAssetA, poolAssetB, 1_000n);
+await applied(await carol.swapExactIn(poolAssetA, poolAssetB, 1_000n, quote.amountOut), "SWAP");
+console.log("SWAP_ACTION_RECEIPT=APPLIED");
+const poolAfterSwap = await alice.getPool(poolAssetA, poolAssetB);
+assert.ok(poolAfterSwap, "pool remains queryable after swap");
+assertAmount(await carol.asset(poolAssetB).balanceOf(carolOwner), quote.amountOut, "Carol swap output balance");
+const reserveAAfterRemove = poolAssetAIs0 ? poolAfterRemove.reserve0 : poolAfterRemove.reserve1;
+const reserveAAfterSwap = poolAssetAIs0 ? poolAfterSwap.reserve0 : poolAfterSwap.reserve1;
+assertAmount(reserveAAfterSwap, reserveAAfterRemove + 1_000n, "asset A reserve after swap");
+console.log("LIQUIDITY_SWAP_STATE=PASS");
 console.log("LOCUS_REAL_MINIJAM_E2E=PASS");
 console.log("LOCUS_V0_2=PASS");
