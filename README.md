@@ -158,3 +158,6 @@ CLI/toolchain and [Backend
 The published `@jamscript/client@0.1.0-rc.4` SDK package is pinned in
 `releases.lock` and consumed directly from npm. Locus does not reproduce
 JamScript compiler, runtime, or Ownership protocol features locally.
+
+For a fresh single-host MiniJAM Local deployment, see the
+[Local server deployment runbook](docs/local-server-deployment.md).

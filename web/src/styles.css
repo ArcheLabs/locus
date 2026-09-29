@@ -381,6 +381,7 @@ button:disabled { cursor: not-allowed; }
 .swap-token-output > strong { flex: 1; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 .swap-rate { margin: 14px 0 0; text-align: center; color: var(--text-muted); font-size: 13px; }
 .swap-impact-warning { margin: 12px 0 0; color: var(--warning, #f0aa35); font-size: 13px; }
+.swap-quote-disclosure { margin: 12px 0 0; text-align: center; color: var(--text-muted); font-size: 12px; }
 .swap-advanced-details { margin-top: 18px; border-top: 1px solid var(--border); padding-top: 14px; }
 .swap-advanced-details > summary { color: var(--text-muted); cursor: pointer; font-size: 13px; }
 .swap-settings-field { margin: 14px 0; display: grid; gap: 8px; }

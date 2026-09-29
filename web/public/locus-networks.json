@@ -3,10 +3,9 @@
   "defaultNetwork": "local",
   "networks": {
     "local": {
-      "label": "DevNet",
+      "label": "MiniJAM Local / Development",
       "backendUrl": "/rpc",
-      "deploymentUrl": "/deployments/local.json",
-      "matrixResolverUrl": "/matrix-resolver"
+      "deploymentUrl": "/deployments/local.json"
     },
     "testnet": {
       "label": "TestNet",

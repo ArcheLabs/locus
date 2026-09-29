@@ -1,0 +1,15 @@
+locus.minijam.xyz {
+	encode zstd gzip
+	root * /var/www/locus
+
+	@rpc path /rpc /rpc/*
+	handle @rpc {
+		rewrite * /
+		reverse_proxy 127.0.0.1:8090
+	}
+
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}

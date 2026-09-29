@@ -69,9 +69,10 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
 test("network deployment does not silently configure Testnet as Local", async () => {
   const config = JSON.parse(await fs.readFile(new URL("../web/public/locus-networks.json", import.meta.url), "utf8"));
   assert.equal(config.defaultNetwork, "local");
-  assert.equal(config.networks.local.label, "DevNet");
+  assert.equal(config.networks.local.label, "MiniJAM Local / Development");
   assert.equal(config.networks.local.backendUrl, "/rpc");
   assert.equal(config.networks.local.deploymentUrl, "/deployments/local.json");
+  assert.equal(config.networks.local.matrixResolverUrl, undefined);
   assert.equal(config.networks.testnet.backendUrl, null);
   assert.equal(config.networks.testnet.deploymentUrl, null);
   assert.equal(config.networks.testnet.label, "TestNet");
@@ -833,7 +834,8 @@ test("identity icons use branded marks, generic EVM, and row-level selection", a
   assert.match(identityOption, /trailing === "check"/);
   assert.match(account, /IdentityIcon kind=\{session\.kind\}/);
   assert.doesNotMatch(account, /wallet-mark/);
-  assert.match(identity, /case "evm":[\s\S]*EvmAddressIcon/);
+  assert.match(identity, /case "evm":[\s\S]*evm-address-glyph/);
+  assert.match(identity, />0x<\/span>/);
   assert.match(identity, /import solanaMark from "\.\.\/assets\/brands\/solana\.svg"/);
   assert.match(solana, /linearGradient[\s\S]*#9945FF[\s\S]*#19FB9B/);
   assert.match(recipient, /data-selected=\{selected \? "true"/);

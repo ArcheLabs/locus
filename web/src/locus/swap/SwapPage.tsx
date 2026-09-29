@@ -238,6 +238,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
 
       {quote && assetIn && assetOut && price !== null && <p className="swap-rate">1 {assetIn.symbol} ≈ {price.toLocaleString(undefined, { maximumFractionDigits: 8 })} {assetOut.symbol}</p>}
       {impact !== null && impact >= 5 && <p className="swap-impact-warning" role="status">High price impact: {impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</p>}
+      {networkMode && <p className="swap-quote-disclosure">Quotes use on-chain pool reserves. No market oracle is used.</p>}
 
       <details className="swap-advanced-details" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
         <summary>Transaction details</summary>
