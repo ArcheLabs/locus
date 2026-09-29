@@ -22,13 +22,13 @@ html[data-theme="dark"] {
   --identity-menu-hover: #20242c;
   --identity-menu-border: #272b33;
   --identity-menu-shadow: rgb(0 0 0 / 30%);
-  --identity-accent: #7184ff;
+  --identity-accent: var(--accent);
   --identity-generic: #c7ccd5;
   --text-disabled: #7d8593;
   --brand-matrix: #f5f5f5;
   --brand-github: #f0f6fc;
-  --selection-surface: #1c2230;
-  --selection-border: #394b80;
+  --selection-surface: var(--accent-soft);
+  --selection-border: var(--accent-border);
 }
 
 .identity-icon-slot {

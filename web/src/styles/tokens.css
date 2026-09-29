@@ -52,10 +52,10 @@ html[data-theme="dark"] {
   --text-inverse: #0c0d10;
   --border: #272b33;
   --border-strong: #343a46;
-  --accent: #4b69ff;
-  --accent-hover: #3d58ed;
+  --accent: #8295ff;
+  --accent-hover: #9baaff;
   --accent-soft: #202b50;
-  --accent-border: #566bc2;
+  --accent-border: #7184d8;
   --accent-glow: #1b2443;
   --success: #32d583;
   --success-soft: #10261b;
@@ -70,5 +70,5 @@ html[data-theme="dark"] {
   --overlay: rgb(0 0 0 / 62%);
   --shadow: rgb(0 0 0 / 30%);
   --shadow-soft: rgb(0 0 0 / 20%);
-  --focus-ring: #9ba9ff;
+  --focus-ring: #aab6ff;
 }
