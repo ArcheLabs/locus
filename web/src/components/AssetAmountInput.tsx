@@ -43,20 +43,20 @@ export function AssetAmountInput({
     </div>
     <div className={`asset-amount-control${readOnly ? " asset-amount-control--output" : ""}`}>
       <div className="asset-amount-selector">{selector}</div>
-      {readOnly
-        ? <output id={id} className="asset-amount-output" aria-label={ariaLabel}>{amount}</output>
-        : <input
-          id={id}
-          value={amount}
-          inputMode="decimal"
-          placeholder={placeholder}
-          disabled={disabled}
-          onBlur={onAmountBlur}
-          onChange={(event) => onAmountChange?.(event.target.value)}
-          aria-label={ariaLabel}
-          aria-invalid={ariaInvalid}
-          aria-describedby={ariaDescribedBy}
-        />}
+      <input
+        id={id}
+        className={readOnly ? "asset-amount-output" : undefined}
+        value={amount}
+        inputMode="decimal"
+        placeholder={placeholder}
+        disabled={disabled}
+        readOnly={readOnly}
+        onBlur={onAmountBlur}
+        onChange={(event) => onAmountChange?.(event.target.value)}
+        aria-label={ariaLabel}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedBy}
+      />
       {onMax && <button type="button" className="asset-amount-max" disabled={disabled || maxDisabled} onClick={onMax}>Max</button>}
     </div>
   </div>;

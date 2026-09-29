@@ -525,6 +525,7 @@ button:disabled { cursor: not-allowed; }
 .asset-amount-selector .asset-select-trigger--compact { gap: 8px; }
 .asset-amount-selector .asset-select-trigger__identity,
 .asset-amount-selector .asset-copy { flex: 1 1 auto; min-width: 0; }
+.asset-amount-selector .muted { order: -1; flex: 0 0 auto; }
 .asset-amount-selector .asset-identity__copy small,
 .asset-amount-selector .asset-copy small { max-width: 140px; }
 .asset-amount-selector .asset-picker--compact .coin { width: 32px; height: 32px; flex: 0 0 32px; }
@@ -532,7 +533,7 @@ button:disabled { cursor: not-allowed; }
 .asset-amount-output { width: 100%; min-width: 0; min-height: 66px; align-self: center; padding: 8px 4px 8px 14px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 25px; font-variant-numeric: tabular-nums; text-align: right; }
 .asset-amount-control > input::placeholder { color: var(--text-tertiary); opacity: 1; }
 .asset-amount-control > input:disabled { opacity: .55; }
-.asset-amount-output { display: flex; align-items: center; justify-content: flex-end; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-amount-output { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asset-amount-max { align-self: center; min-height: 34px; margin: 0 12px 0 8px; padding: 0 10px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--surface); color: var(--accent); font-size: 12px; font-weight: 700; }
 .asset-amount-max:disabled { opacity: .5; }
 .asset-amount-control--output > .asset-amount-output { grid-column: 2 / -1; padding-right: 16px; }
