@@ -49,8 +49,7 @@ import { activityFilters, BROWSER_LOCAL_ACTIVITY_CAPABILITIES, includeActivityIt
 
 type Page = AppRoute;
 type DemoAsset = { symbol: string; name: string; balance: bigint; decimals: number; value: string; color: string };
-type ActivityTimestamp = { createdAt?: number; date?: string; transactionId?: string };
-type ActivityItem = ActivityTimestamp & (
+type ActivityItem = { transactionId?: string } & (
   | { kind?: "transfer"; direction: "sent" | "received"; asset: string; recipient: string; amount: string }
   | { kind: "swap"; assetIn: string; assetOut: string; amountIn: string; amountOut: string }
 );
@@ -80,20 +79,6 @@ const demoAssets: DemoAsset[] = [
 
 function sessionActivityKey(networkId: string, owner: string): string {
   return `locus.activity.v1.${networkId}.${owner}`;
-}
-
-function activityTimestamp(item: ActivityTimestamp): { label: string; dateTime?: string } {
-  const legacyDate = item.date?.trim();
-  const date = typeof item.createdAt === "number"
-    ? new Date(item.createdAt)
-    : legacyDate && legacyDate.toLowerCase() !== "just now"
-      ? new Date(legacyDate)
-      : null;
-  if (!date || !Number.isFinite(date.getTime())) return { label: "Time unavailable" };
-  return {
-    label: new Intl.DateTimeFormat(undefined, { dateStyle: "short", timeStyle: "short" }).format(date),
-    dateTime: date.toISOString(),
-  };
 }
 
 function activityAmount(amount: string, asset: string): string {
@@ -781,7 +766,7 @@ export function App() {
       });
       if (!isLiquidityScopeCurrent(expectedScope)) return;
       setSendState(applied);
-      const nextActivity = [{ direction: "sent" as const, asset: assetForSend.symbol, recipient, amount: formatUnits(parsedAmount, assetForSend.decimals), createdAt: Date.now(), transactionId: applied.transactionId }, ...sessionActivity];
+      const nextActivity = [{ direction: "sent" as const, asset: assetForSend.symbol, recipient, amount: formatUnits(parsedAmount, assetForSend.decimals), transactionId: applied.transactionId }, ...sessionActivity];
       setSessionActivity(nextActivity);
       try { window.localStorage.setItem(sessionActivityKey(submittedNetwork, formatLocusId(session.owner)), JSON.stringify(nextActivity)); } catch { /* A local activity write cannot change transaction finality. */ }
       void refreshAssets();
@@ -801,7 +786,6 @@ export function App() {
       assetOut: item.assetOut,
       amountIn: item.amountIn,
       amountOut: item.amountOut,
-      createdAt: Date.now(),
       transactionId: item.transactionId,
     }, ...sessionActivity];
     setSessionActivity(nextActivity);
@@ -939,15 +923,17 @@ function Receipt({ state }: { state: Extract<SendState, { status: "submitted" | 
 
 function AssetsPage({ networkMode, loading, error, assets, featuredAssets, search, setSearch, filter, setFilter, getBalanceState, onRetry, onOpenDetail, onCreate }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; featuredAssets: AssetView[]; search: string; setSearch: (value: string) => void; filter: "all" | "crypto" | "equities" | "custom"; setFilter: (value: "all" | "crypto" | "equities" | "custom") => void; getBalanceState: (asset: AssetView) => "known" | "loading" | "unavailable"; onRetry: () => void; onOpenDetail: (asset: AssetView | DemoAsset) => void; onCreate: () => void }) {
   const filters = [
-    { id: "all", label: <><List size={16} aria-hidden="true" /><span>All</span></>, textValue: "All" },
-    { id: "crypto", label: <><Coins size={16} aria-hidden="true" /><span>Crypto</span></>, textValue: "Crypto" },
-    { id: "equities", label: <><TrendingUp size={16} aria-hidden="true" /><span>Equities</span></>, textValue: "Equities" },
-    { id: "custom", label: <><Shapes size={16} aria-hidden="true" /><span>Custom</span></>, textValue: "Custom" },
+    { id: "all", label: <span className="asset-filter-option"><List size={16} aria-hidden="true" /><span>All</span></span>, textValue: "All" },
+    { id: "crypto", label: <span className="asset-filter-option"><Coins size={16} aria-hidden="true" /><span>Crypto</span></span>, textValue: "Crypto" },
+    { id: "equities", label: <span className="asset-filter-option"><TrendingUp size={16} aria-hidden="true" /><span>Equities</span></span>, textValue: "Equities" },
+    { id: "custom", label: <span className="asset-filter-option"><Shapes size={16} aria-hidden="true" /><span>Custom</span></span>, textValue: "Custom" },
   ] as const;
   return <section className="page">
     <div className={`assets-toolbar${networkMode ? " assets-toolbar--network" : ""}`}>
-      {networkMode && <ResponsiveSelect id="asset-filter" ariaLabel="Filter assets" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters.map((entry) => ({ value: entry.id, label: entry.label, textValue: entry.textValue }))} />}
-      <label className="assets-search"><Search size={17} aria-hidden="true" /><input className="search" aria-label="Search assets" value={search} placeholder="Search assets..." onChange={(event) => setSearch(event.target.value)} /></label>
+      <div className="assets-toolbar-controls">
+        {networkMode && <ResponsiveSelect id="asset-filter" ariaLabel="Filter assets" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters.map((entry) => ({ value: entry.id, label: entry.label, textValue: entry.textValue }))} />}
+        <label className="assets-search"><Search size={17} aria-hidden="true" /><input className="search" aria-label="Search assets" value={search} placeholder="Search assets..." onChange={(event) => setSearch(event.target.value)} /></label>
+      </div>
       {networkMode && <ActionButton className="assets-create-action" variant="secondary" icon={CirclePlus} onClick={onCreate}>Create asset</ActionButton>}
     </div>
     <div className="assets-layout"><div>
@@ -1013,29 +999,29 @@ function ActivityPage({ networkMode, filter, setFilter, rows }: { networkMode: b
     {networkMode && <SegmentedControl className="activity-filter-tabs" ariaLabel="Filter activity" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters} />}
     {rows.length === 0
       ? <div className="card empty-state">{networkMode ? "No recent transactions in this browser yet. Incoming transfers and complete history are not indexed here." : "No network activity is available in Demo mode."}</div>
-      : <div className="card activity-list">{rows.map((entry, index) => {
-        const time = activityTimestamp(entry);
-        const key = `${entry.transactionId ?? entry.createdAt ?? entry.date ?? "activity"}-${index}`;
-        const transaction = entry.transactionId
-          ? <CopyableValue label="Transaction" value={entry.transactionId} layout="inline" className="activity-transaction" />
-          : <span className="copyable-value copyable-value--inline activity-transaction"><small>Transaction</small><span className="activity-unavailable">Unavailable</span></span>;
-        const timestamp = <time className="activity-time" dateTime={time.dateTime}>{time.label}</time>;
-        return entry.kind === "swap"
-          ? <div className="activity-row activity-row--swap" key={key}>
-            <span className="activity-kind activity-kind--swap"><ArrowLeftRight size={15} aria-hidden="true" /> Swapped</span>
-            <strong className="activity-assets">{entry.assetIn} → {entry.assetOut}</strong>
-            <strong className="activity-amount">{activityAmount(entry.amountIn, entry.assetIn)} → {activityAmount(entry.amountOut, entry.assetOut)}</strong>
-            {transaction}
-            {timestamp}
-          </div>
-          : <div className="activity-row" key={key}>
-            <span className="activity-kind activity-kind--sent sent"><ArrowUpRight size={15} aria-hidden="true" /> Sent</span>
-            <strong className="activity-assets">{entry.asset}</strong>
-            <strong className="activity-amount">{activityAmount(entry.amount, entry.asset)}</strong>
-            <CopyableValue label="Recipient" value={entry.recipient} layout="inline" className="activity-recipient" />
-            {transaction}
-            {timestamp}
+      : <div className="card activity-list" role="region" aria-label="Activity history table" tabIndex={0}><div className="activity-table" role="table" aria-label="Activity">
+        <div className="activity-row activity-row--header" role="row">
+          <span role="columnheader">Type</span>
+          <span role="columnheader">Asset / Pair</span>
+          <span role="columnheader" className="activity-amount-heading">Amount</span>
+          <span role="columnheader">Recipient</span>
+          <span role="columnheader">Transaction</span>
+        </div>
+        {rows.map((entry, index) => {
+          const isSwap = entry.kind === "swap";
+          const key = entry.transactionId ?? `activity-${index}`;
+          return <div className={`activity-row${isSwap ? " activity-row--swap" : ""}`} key={key} role="row">
+            <span className={`activity-kind${isSwap ? " activity-kind--swap" : " activity-kind--sent sent"}`} role="cell">
+              {isSwap ? <><ArrowLeftRight size={15} aria-hidden="true" /> Swapped</> : <><ArrowUpRight size={15} aria-hidden="true" /> Sent</>}
+            </span>
+            <strong className="activity-assets" role="cell">{isSwap ? `${entry.assetIn} → ${entry.assetOut}` : entry.asset}</strong>
+            <strong className="activity-amount" role="cell">{isSwap
+              ? `${activityAmount(entry.amountIn, entry.assetIn)} → ${activityAmount(entry.amountOut, entry.assetOut)}`
+              : activityAmount(entry.amount, entry.asset)}</strong>
+            <span className="activity-recipient" role="cell">{isSwap ? <span className="activity-empty-value">—</span> : <CopyableValue value={entry.recipient} layout="inline" />}</span>
+            <span className="activity-transaction" role="cell">{entry.transactionId ? <CopyableValue value={entry.transactionId} layout="inline" /> : <span className="activity-empty-value">—</span>}</span>
           </div>;
-      })}</div>}
+        })}
+      </div></div>}
   </section>;
 }

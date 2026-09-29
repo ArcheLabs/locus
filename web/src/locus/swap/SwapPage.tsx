@@ -233,10 +233,11 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
           ariaInvalid={Boolean(visibleValidation)}
           ariaDescribedBy={visibleValidation ? "swap-amount-error" : undefined}
         />
-        <FieldMessage id="swap-amount-error" error={visibleValidation} />
+        <div className="swap-direction-row">
+          <FieldMessage id="swap-amount-error" error={visibleValidation} />
+          <button className="swap-direction" type="button" aria-label="Switch assets" onClick={flipPair}><ArrowDownUp size={18} aria-hidden="true" /></button>
+        </div>
       </div>
-
-      <button className="swap-direction" type="button" aria-label="Switch assets" onClick={flipPair}><ArrowDownUp size={18} aria-hidden="true" /></button>
 
       <AssetAmountInput
         className="swap-amount-field"
