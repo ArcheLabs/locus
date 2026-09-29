@@ -1,23 +1,21 @@
 # MiniJAM Local deployment ledger
 
-The production web app targets **MiniJAM Local / Development**. The active
-immutable Locus Service is `797069104` with code hash
-`0x9c9cd5766cbdc8cdaa927103899283e974c5cdf9367e49d76369a8d335bd1cb8` and
-service key
-`0xeeb9c2c46f5fff320952ceb77bef3f4152a37e679e92e28603682de5ad8ec254`.
-It was built reproducibly with published `jams v0.1.0-rc.8` and the verified
-canonical rc.8 toolchain (SHA-256
-`f804235bdae7239e57d9a7eb0d4413df65d1f785c05aa0cb4af5a28297548d03`), then
-registered in the existing JamScript Backend. Consumer CI run `36215662751`
-passed on cutover commit `3d786aa81c52ce09950334837cebf901322e5ed2`.
+The production web app targets **MiniJAM Local / Development**. Its active
+immutable Locus Service is `4062826813`, finalized at block `6382`, with code
+hash
+`0x5cebd9fef97033c3f20fc7e1cd35475914ba8ce8513af65e97ae7b3edde819d3`.
+It was built with published `jams v0.1.0-rc.8` and the verified canonical rc.8
+toolchain (SHA-256
+`f804235bdae7239e57d9a7eb0d4413df65d1f785c05aa0cb4af5a28297548d03`) from
+commit `ff828ed`. Pool-share square root planning now uses a bounded,
+division-free comparison to avoid the PVM trap seen on the prior Service.
 
-The HTTPS deployment now serves the Local network configuration and descriptor
-for Service `797069104`; the catalog is bound to the same genesis and Service
-ID. The previous live Service `3083943385` remains registered and is retained
-for rollback, with its descriptor at
-`web/public/deployments/local-3083943385.json` and its prior static build at
-`/var/www/locus-rollback-3083943385-20260926`. `3302613027` remains the older
-rollback deployment.
+The HTTPS `/` deployment and Local catalog both target Service `4062826813`.
+Its state was initialized from scratch: six curated assets have their complete
+initial supply at Treasury, and `poolCount=0`. No state was migrated from the
+previous Service `2323996321`; that immutable Service remains registered with
+its old state and must not be used by the production catalog. `797069104`,
+`3083943385`, and `3302613027` are older historical deployments.
 
 The HTTPS `/rpc` route validated the new descriptor and Backend service state.
 The on-chain Matrix adapter bootstrap, controller grant, authorized action, and
@@ -52,12 +50,10 @@ assets, with each full initial supply held by Treasury, and `poolCount=0`.
 No liquidity was created or seeded. The v2 candidate does not inherit v1 pool
 positions or arbitrary user balances.
 
-The candidate frontend is available at
-`https://locus.minijam.xyz/candidate/`. Live HTTPS checks confirmed its app,
-asset paths, descriptor, catalog, and permissionless liquidity configuration.
-The production `/` frontend and `/deployments/local.json` remain on Service
-`797069104`; no production cutover was performed. The prior candidate static
-build is preserved at
+The separate candidate frontend remains available at
+`https://locus.minijam.xyz/candidate/` and targets Service `2915918722`. Its
+catalog and state are independent of production and are not part of this
+cutover. Candidate rollback builds remain at
 `/var/www/locus-candidate-v1-153994977-before-v2-20260928T130431Z` and
 `/var/www/locus-candidate-v1-live-rollback-20260928T130431Z`.
 

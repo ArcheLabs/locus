@@ -4,9 +4,9 @@
   "backendUrl": "/rpc",
   "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
   "networkDomain": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
-  "serviceId": 2323996321,
-  "serviceKey": "0xdc9492cba031c7408e4c9e63096dc1d9ce699f74a08ea286a1bf28b7750b3c65",
-  "codeHash": "0x579bfe33f2cf4316fceea4853922076691c770ca3378bc5cb49bd80e2f6f29e5",
+  "serviceId": 4062826813,
+  "serviceKey": "0x159550666cb1a9656323f67cd84990175ae63883cdc1d0e8c498e1d317950d1f",
+  "codeHash": "0x5cebd9fef97033c3f20fc7e1cd35475914ba8ce8513af65e97ae7b3edde819d3",
   "abiVersion": 1,
   "abi": {
     "abiVersion": 1,
@@ -1566,7 +1566,7 @@
     ]
   },
   "provenance": {
-    "locusCommit": "77f8a0bf0dea712b3fbdc24a8f292b719456e96b",
+    "locusCommit": "ff828ed",
     "jamscriptVersion": "v0.1.0-rc.8",
     "backendVersion": "backend-v0.1.0-rc.8",
     "minijamVersion": "stage1-v0.2.0"
