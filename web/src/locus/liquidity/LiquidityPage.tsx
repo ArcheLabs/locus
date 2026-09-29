@@ -228,7 +228,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
 
   function updateAmountA(value: string) {
     setAmountA(value);
-    if (!selectedPool || poolEmpty || !selectedA || !selectedB) { setAmountB(""); return; }
+    if (!selectedPool || poolEmpty || !selectedA || !selectedB) return;
     try {
       const rawA = parseUnits(value, selectedA.decimals);
       const aIs0 = toHex(selectedA.assetId).toLowerCase() === toHex(selectedPool.asset0).toLowerCase();
@@ -240,7 +240,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
 
   function updateAmountB(value: string) {
     setAmountB(value);
-    if (!selectedPool || poolEmpty || !selectedA || !selectedB) { setAmountA(""); return; }
+    if (!selectedPool || poolEmpty || !selectedA || !selectedB) return;
     try {
       const rawB = parseUnits(value, selectedB.decimals);
       const aIs0 = toHex(selectedA.assetId).toLowerCase() === toHex(selectedPool.asset0).toLowerCase();
@@ -625,7 +625,6 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
           {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && <div className="liquidity-current-rate"><span>Initial price</span><strong>1 {selectedA.symbol} = {initialPrice} {selectedB.symbol}</strong><small>1 {selectedB.symbol} = {selectedAmounts && selectedAmounts[0] > 0n && selectedAmounts[1] > 0n ? poolPriceDisplay(selectedAmounts[1], selectedAmounts[0], selectedB.decimals, selectedA.decimals) : "—"} {selectedA.symbol}</small></div>}
         </>}
         {selectedPoolError && <div className="liquidity-query-error" role="alert"><p>{selectedPoolError}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={() => setPairRefreshRevision((revision) => revision + 1)}>Retry pool lookup</ActionButton></div>}
-        {sessionOwner && <CopyableValue label="Ownership" value={formatLocusId(sessionOwner)} />}
         {positionsPageError && <div className="inline-alert" role="alert">{positionsPageError}</div>}
         <ActionButton variant="primary" icon={sessionOwner ? Droplets : undefined} fullWidth disabled={ctaDisabled} onClick={() => sessionOwner ? submitPreview() : onConnect()}>{ctaLabel}</ActionButton>
       </section>
