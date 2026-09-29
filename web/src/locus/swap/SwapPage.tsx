@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownUp, ArrowLeftRight, Settings2, X } from "lucide-react";
+import { ArrowDownUp, ArrowLeftRight, X } from "lucide-react";
 import { formatUnits, minimumAmountOut, ownershipKey, parseUnits, quoteExactIn, SWAP_FEE_BPS, toHex, type LocusClient, type Ownership, type Pool } from "@archelabs/locus";
 import type { AssetView } from "../assets.js";
 import { AssetIdentity, AssetSelector } from "../../components/AssetSelector.js";
+import { AssetAmountInput } from "../../components/AssetAmountInput.js";
 import { ActionButton } from "../../components/ActionButton.js";
 import { Modal } from "../../components/Modal.js";
 import { FieldMessage } from "../../forms/FieldMessage.js";
@@ -213,33 +214,46 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   }
 
   return <section className="page swap-page">
-    <div className="swap-page-toolbar"><button type="button" className="icon-button swap-settings-button" aria-label="Transaction settings" onClick={() => setDetailsOpen((open) => !open)}><Settings2 size={19} /></button></div>
     <div className="card swap-card">
       {poolLoading && <p className="muted">Checking available pairs…</p>}
       {poolError && <div className="inline-alert" role="alert">Available pairs could not be loaded. Try again from the network controls.</div>}
-      <FormField label={<span className="swap-side-label"><span>You pay</span><span>Balance: {assetIn?.balance === null || !assetIn ? "Unavailable" : formatUnits(assetIn.balance, assetIn.decimals)} {assetIn?.symbol ?? ""}</span></span>} htmlFor="swap-amount" error={visibleValidation} errorId="swap-amount-error" className="swap-amount-field" reserveMessage>
-        <div className="swap-token-card swap-token-input">
-          <AssetSelector aria-label="Asset to pay" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} value={assetInId} assets={assets} onValueChange={(asset) => updatePair(asset.assetIdHex, assetOutId)} />
-          <input id="swap-amount" value={amount} inputMode="decimal" placeholder="0.00" onBlur={() => setAmountTouched(true)} onChange={(event) => { setAmount(event.target.value); setSubmission("idle"); setActionError(""); }} aria-label="Amount to pay" aria-invalid={Boolean(visibleValidation)} aria-describedby={visibleValidation ? "swap-amount-error" : undefined} />
-          <button type="button" className="swap-max-button" onClick={useMax} disabled={!assetIn || assetIn.balance === null}>Max</button>
-        </div>
-      </FormField>
+      <div className="swap-amount-field">
+        <AssetAmountInput
+          selector={<AssetSelector aria-label="Asset to pay" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} value={assetInId} assets={assets} onValueChange={(asset) => updatePair(asset.assetIdHex, assetOutId)} />}
+          label="You pay"
+          balance={`Balance: ${assetIn?.balance === null || !assetIn ? "Unavailable" : formatUnits(assetIn.balance, assetIn.decimals)} ${assetIn?.symbol ?? ""}`.trim()}
+          id="swap-amount"
+          amount={amount}
+          onAmountChange={(value) => { setAmount(value); setSubmission("idle"); setActionError(""); }}
+          onAmountBlur={() => setAmountTouched(true)}
+          onMax={useMax}
+          maxDisabled={!assetIn || assetIn.balance === null}
+          placeholder="0"
+          ariaLabel="Amount to pay"
+          ariaInvalid={Boolean(visibleValidation)}
+          ariaDescribedBy={visibleValidation ? "swap-amount-error" : undefined}
+        />
+        <FieldMessage id="swap-amount-error" error={visibleValidation} />
+      </div>
 
       <button className="swap-direction" type="button" aria-label="Switch assets" onClick={flipPair}><ArrowDownUp size={18} aria-hidden="true" /></button>
 
-      <div className="swap-side-label"><label htmlFor="swap-token-out">You receive</label><span>{quote && assetOut ? `≈ ${formatUnits(quote.amountOut, assetOut.decimals)} ${assetOut.symbol}` : "Estimated amount"}</span></div>
-      <div className="swap-token-card swap-token-output">
-        <AssetSelector id="swap-token-out" aria-label="Asset to receive" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} value={assetOutId} assets={assets} onValueChange={(asset) => updatePair(assetInId, asset.assetIdHex)} />
-        <strong>{quote && assetOut ? formatUnits(quote.amountOut, assetOut.decimals) : "—"}</strong>
-      </div>
+      <AssetAmountInput
+        className="swap-amount-field"
+        selector={<AssetSelector aria-label="Asset to receive" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} value={assetOutId} assets={assets} onValueChange={(asset) => updatePair(assetInId, asset.assetIdHex)} />}
+        label="You receive"
+        balance="Estimated amount"
+        id="swap-token-out"
+        amount={quote && assetOut ? formatUnits(quote.amountOut, assetOut.decimals) : "0"}
+        readOnly
+        ariaLabel="Estimated amount to receive"
+      />
       {assetIn && assetOut && assetIn.assetIdHex === assetOut.assetIdHex && <FieldMessage error="Choose two different assets." />}
       {assetIn && assetOut && assetIn.assetIdHex !== assetOut.assetIdHex && !pool && !poolLoading && <FieldMessage>This pair is not available for swapping yet.</FieldMessage>}
       {pool && (!pool.reserve0 || !pool.reserve1) && <p className="form-message">This pair is not available for swapping yet.</p>}
 
       {quote && assetIn && assetOut && price !== null && <p className="swap-rate">1 {assetIn.symbol} ≈ {price.toLocaleString(undefined, { maximumFractionDigits: 8 })} {assetOut.symbol}</p>}
       {impact !== null && impact >= 5 && <p className="swap-impact-warning" role="status">High price impact: {impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</p>}
-      {networkMode && <p className="swap-quote-disclosure">Quotes use on-chain pool reserves. No market oracle is used.</p>}
-
       <details className="swap-advanced-details" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
         <summary>Transaction details</summary>
         <FormField label="Slippage tolerance" htmlFor="swap-slippage" error={slippageInvalid ? "Enter a slippage value from 0.01% to 50%." : null} errorId="swap-slippage-error" className="swap-settings-field">

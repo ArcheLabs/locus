@@ -6,7 +6,7 @@ import { formatLocusId, formatUnits, ownershipKey, parseUnits, toHex, type Locus
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CirclePlus, Coins, Droplets, History, List, ListFilter, RefreshCw, Search, Send, Shapes, TrendingUp, X } from "lucide-react";
 import { useNetwork } from "./network/NetworkProvider.js";
 import { NetworkSwitcher } from "./network/NetworkSwitcher.js";
-import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
+import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, formatAssetListAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
 import { type LiquidityScope } from "./locus/liquidity/liquidityTypes.js";
 import { loadPermissionlessLiquidityConfig } from "./locus/liquidity/liquidityConfig.js";
 import { LiquidityPage } from "./locus/liquidity/LiquidityPage.js";
@@ -31,6 +31,7 @@ import { FieldMessage } from "./forms/FieldMessage.js";
 import { ResponsiveSelect } from "./components/ResponsiveSelect.js";
 import { SegmentedControl } from "./components/SegmentedControl.js";
 import { AssetIcon } from "./components/AssetIcon.js";
+import { AssetAmountInput } from "./components/AssetAmountInput.js";
 import { CopyableValue } from "./components/CopyableValue.js";
 import { pathForRoute, routeFromPath, type AppRoute } from "./navigation/routes.js";
 import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, signOutMatrixSession, type MatrixConnected } from "./matrix/MatrixConnector.js";
@@ -823,7 +824,7 @@ export function App() {
         )}
 
         {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} recipientError={recipientFieldError} recipientMessage={recipient.trim() && (resolvedRecipient.valid || matrixResolutionPending) ? resolvedRecipient.message : ""} amount={amount} amountError={amountFieldError} formError={sendFormError} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={(value) => { updateRecipient(value); setRecipientTouched(false); }} onRecipientBlur={() => setRecipientTouched(true)} onAmount={updateAmount} onAmountBlur={() => setAmountTouched(true)} onMax={() => { updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : ""); setAmountTouched(true); }} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
-        {page === "assets" && <AssetsPage networkMode={networkMode} quickAsset={currentAsset} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} getBalanceState={getAssetBalanceState} onRetry={() => void refreshAssets()} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} onSend={() => { if (networkMode && currentNetworkAsset) chooseNetworkAsset(currentNetworkAsset); else navigateToPage("send"); }} onReceive={() => { if (currentAsset) setReceiveAsset(currentAsset); }} onSwap={() => navigateToPage("swap")} />}
+        {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} getBalanceState={getAssetBalanceState} onRetry={() => void refreshAssets()} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} />}
         {page === "swap" && <>
           <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} />
         </>}
@@ -881,14 +882,22 @@ function SendPage({ networkMode, status, asset, assets, assetSearch, assetPicker
   return <section className="page send-page">
     <div className="card send-card">
       <div className="send-amount-field">
-        <label className="sr-only" htmlFor="send-amount">Amount</label>
-        <div className="send-amount-control">
-          <AssetPicker networkMode={networkMode} asset={asset} assets={assets} search={assetSearch} open={assetPickerOpen} onOpenChange={onToggleAssets} onSearch={onSearchAssets} onSelect={onSelectAsset} onCycleDemo={onCycleDemo} variant="compact" />
-          <div className="send-amount-entry"><input id="send-amount" value={amount} inputMode="decimal" placeholder="0" onBlur={onAmountBlur} onChange={(event) => onAmount(event.target.value)} aria-label="Amount to send" aria-invalid={Boolean(amountError)} aria-describedby={amountError ? "send-amount-error" : undefined} />
-            <button type="button" className="send-max-button" disabled={!asset || asset.balance === null} onClick={onMax}>Max</button>
-          </div>
-          <div className="send-amount-balance"><span>Balance</span><strong>{displayAmount(balance, decimals)}</strong></div>
-        </div>
+        <AssetAmountInput
+          className="send-asset-amount"
+          selector={<AssetPicker networkMode={networkMode} asset={asset} assets={assets} search={assetSearch} open={assetPickerOpen} onOpenChange={onToggleAssets} onSearch={onSearchAssets} onSelect={onSelectAsset} onCycleDemo={onCycleDemo} variant="compact" />}
+          label="Amount to send"
+          balance={balance === null ? "Balance unavailable" : `Balance: ${displayAmount(balance, decimals)} ${asset?.symbol ?? ""}`.trim()}
+          id="send-amount"
+          amount={amount}
+          onAmountChange={onAmount}
+          onAmountBlur={onAmountBlur}
+          onMax={onMax}
+          maxDisabled={!asset || asset.balance === null}
+          placeholder="0"
+          ariaLabel="Amount to send"
+          ariaInvalid={Boolean(amountError)}
+          ariaDescribedBy={amountError ? "send-amount-error" : undefined}
+        />
         <FieldMessage id="send-amount-error" error={amountError} />
       </div>
       <OwnershipInput type={recipientType} value={recipient} open={typeOpen} networkMode={networkMode} message={recipientMessage} valid={resolution.valid} error={recipientError} onBlur={onRecipientBlur} onType={onChooseType} onToggle={onToggleTypes} onChange={onRecipient} onClear={onClear} />
@@ -905,7 +914,7 @@ function Receipt({ state }: { state: Extract<SendState, { status: "submitted" | 
   return <div className="receipt"><strong>{state.status === "applied" ? "Transaction applied" : "Transaction submitted"}</strong><span>Network: {state.networkId}</span><span>Status: {state.status}</span><CopyableValue label="Transaction" value={state.transactionId} />{state.actionHash && <CopyableValue label="Action" value={state.actionHash} />}</div>;
 }
 
-function AssetsPage({ networkMode, quickAsset, loading, error, assets, featuredAssets, search, setSearch, filter, setFilter, getBalanceState, onRetry, onOpenDetail, onCreate, onSend, onReceive, onSwap }: { networkMode: boolean; quickAsset: AssetView | DemoAsset | null; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; featuredAssets: AssetView[]; search: string; setSearch: (value: string) => void; filter: "all" | "crypto" | "equities" | "custom"; setFilter: (value: "all" | "crypto" | "equities" | "custom") => void; getBalanceState: (asset: AssetView) => "known" | "loading" | "unavailable"; onRetry: () => void; onOpenDetail: (asset: AssetView | DemoAsset) => void; onCreate: () => void; onSend: () => void; onReceive: () => void; onSwap: () => void }) {
+function AssetsPage({ networkMode, loading, error, assets, featuredAssets, search, setSearch, filter, setFilter, getBalanceState, onRetry, onOpenDetail, onCreate }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; featuredAssets: AssetView[]; search: string; setSearch: (value: string) => void; filter: "all" | "crypto" | "equities" | "custom"; setFilter: (value: "all" | "crypto" | "equities" | "custom") => void; getBalanceState: (asset: AssetView) => "known" | "loading" | "unavailable"; onRetry: () => void; onOpenDetail: (asset: AssetView | DemoAsset) => void; onCreate: () => void }) {
   const filters = [
     { id: "all", label: <><List size={16} aria-hidden="true" /><span>All</span></>, textValue: "All" },
     { id: "crypto", label: <><Coins size={16} aria-hidden="true" /><span>Crypto</span></>, textValue: "Crypto" },
@@ -913,19 +922,12 @@ function AssetsPage({ networkMode, quickAsset, loading, error, assets, featuredA
     { id: "custom", label: <><Shapes size={16} aria-hidden="true" /><span>Custom</span></>, textValue: "Custom" },
   ] as const;
   return <section className="page">
-    <header className="assets-page-heading"><div><h1>Assets</h1><p>Manage your Locus assets.</p></div>
-      <div className="assets-quick-actions">
-        <ActionButton variant="secondary" icon={Send} disabled={!quickAsset} onClick={onSend}>Send</ActionButton>
-        <ActionButton variant="secondary" icon={ArrowDownLeft} disabled={!quickAsset} onClick={onReceive}>Receive</ActionButton>
-        <ActionButton variant="secondary" icon={ArrowLeftRight} onClick={onSwap}>Swap</ActionButton>
-      </div>
-    </header>
-    {networkMode && <div className="assets-create-row"><span /><ActionButton className="assets-create-action" variant="secondary" icon={CirclePlus} onClick={onCreate}>Create asset</ActionButton></div>}
+    <div className={`assets-toolbar${networkMode ? " assets-toolbar--network" : ""}`}>
+      {networkMode && <ResponsiveSelect id="asset-filter" ariaLabel="Filter assets" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters.map((entry) => ({ value: entry.id, label: entry.label, textValue: entry.textValue }))} />}
+      <label className="assets-search"><Search size={17} aria-hidden="true" /><input className="search" aria-label="Search assets" value={search} placeholder="Search assets..." onChange={(event) => setSearch(event.target.value)} /></label>
+      {networkMode && <ActionButton className="assets-create-action" variant="secondary" icon={CirclePlus} onClick={onCreate}>Create asset</ActionButton>}
+    </div>
     <div className="assets-layout"><div>
-      <div className="assets-toolbar">
-        {networkMode && <ResponsiveSelect id="asset-filter" ariaLabel="Filter assets" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters.map((entry) => ({ value: entry.id, label: entry.label, textValue: entry.textValue }))} />}
-        <label className="assets-search"><Search size={17} aria-hidden="true" /><input className="search" aria-label="Search assets" value={search} placeholder="Search assets..." onChange={(event) => setSearch(event.target.value)} /></label>
-      </div>
       {error && <div className="empty-state" role="alert">{error}<ActionButton size="small" variant="tertiary" icon={RefreshCw} onClick={onRetry}>Try again</ActionButton></div>}
       {loading && assets.length === 0 && <AssetListSkeleton />}
       {!error && !loading && assets.length === 0 && <div className="empty-state">{networkMode ? "No matching assets on this network." : "No demo assets found."}</div>}
@@ -933,9 +935,7 @@ function AssetsPage({ networkMode, quickAsset, loading, error, assets, featuredA
         const isNetworkAsset = "assetIdHex" in entry;
         const id = isNetworkAsset ? entry.assetIdHex : entry.symbol;
         const balanceStatus = isNetworkAsset ? getBalanceState(entry) : "known";
-        const amountText = isNetworkAsset && entry.balance !== null
-          ? formatUnits(entry.balance, entry.decimals)
-          : isNetworkAsset ? "" : displayAmount(entry.balance, entry.decimals);
+        const amountText = entry.balance === null ? "" : formatAssetListAmount(entry.balance, entry.decimals);
         return <div className="asset-row" key={id} role="button" tabIndex={0} onClick={() => onOpenDetail(entry)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(entry); } }}>
           {isNetworkAsset ? <AssetIcon asset={entry} size={40} /> : <span className="coin small-coin" style={{ background: entry.color }}>{entry.symbol[0]}</span>}
           <span className="asset-row-info"><strong>{entry.name}</strong><small>{entry.symbol}</small></span>
@@ -991,7 +991,7 @@ function ActivityPage({ networkMode, filter, setFilter, rows }: { networkMode: b
     {rows.length === 0
       ? <div className="card empty-state">{networkMode ? "No recent transactions in this browser yet. Incoming transfers and complete history are not indexed here." : "No network activity is available in Demo mode."}</div>
       : <div className="card activity-list">{rows.map((entry, index) => entry.kind === "swap"
-        ? <div className="activity-row activity-row-swap" key={`${entry.transactionId ?? entry.date}-${index}`}><span className="received"><ArrowLeftRight size={15} aria-hidden="true" /> Swapped</span><strong>{entry.amountIn} {entry.assetIn} → {entry.amountOut} {entry.assetOut}</strong><span>Browser-local<small>Not a complete history</small></span><small>{entry.date}</small>{entry.transactionId && <CopyableValue label="Transaction" value={entry.transactionId} />}</div>
-        : <div className="activity-row" key={`${entry.transactionId ?? entry.date}-${index}`}><span className="sent"><ArrowUpRight size={15} aria-hidden="true" /> Sent</span><strong>{entry.asset}</strong><span><CopyableValue label="Recipient" value={entry.recipient} /></span><strong>{entry.amount}</strong><small>{entry.date}</small>{entry.transactionId && <CopyableValue label="Transaction" value={entry.transactionId} />}</div>)}</div>}
+        ? <div className="activity-row activity-row-swap" key={`${entry.transactionId ?? entry.date}-${index}`}><span className="received"><ArrowLeftRight size={15} aria-hidden="true" /> Swapped</span><strong>{entry.amountIn} {entry.assetIn} → {entry.amountOut} {entry.assetOut}</strong><span>Browser-local<small>Not a complete history</small></span><small>{entry.date}</small>{entry.transactionId && <CopyableValue label="Transaction" value={entry.transactionId} layout="inline" className="activity-transaction" />}</div>
+        : <div className="activity-row" key={`${entry.transactionId ?? entry.date}-${index}`}><span className="sent"><ArrowUpRight size={15} aria-hidden="true" /> Sent</span><strong>{entry.asset}</strong><span><CopyableValue label="Recipient" value={entry.recipient} /></span><strong>{entry.amount}</strong><small>{entry.date}</small>{entry.transactionId && <CopyableValue label="Transaction" value={entry.transactionId} layout="inline" className="activity-transaction" />}</div>)}</div>}
   </section>;
 }

@@ -3,6 +3,7 @@ import { ArrowDown, ArrowDownUp, ArrowLeft, Droplets, Plus, RefreshCw, X } from 
 import { formatLiquiditySharePercentage, formatLocusId, formatUnits, minimumLiquidityAmount, ownershipKey, parseUnits, quoteAddLiquidity as calculateAddLiquidity, quoteInitialLiquidity, toHex, type LocusClient, type LiquidityPosition, type Ownership, type Pool } from "@archelabs/locus";
 import type { AssetView } from "../assets.js";
 import { AssetIdentity, AssetSelector } from "../../components/AssetSelector.js";
+import { AssetAmountInput } from "../../components/AssetAmountInput.js";
 import { ActionButton } from "../../components/ActionButton.js";
 import { Modal } from "../../components/Modal.js";
 import { normalizeActionError } from "../../errors/normalizeError.js";
@@ -508,20 +509,18 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
 
   return <section className={`page liquidity-page${view === "new" ? " liquidity-page--new" : ""}`}>
     {view === "home" ? <>
-      <header className="liquidity-page-heading">
-        <div><h1>Liquidity</h1><p>Create and manage liquidity positions.</p></div>
+      <div className="liquidity-toolbar">
+        <div className="liquidity-tabs" role="tablist" aria-label="Liquidity views" onKeyDown={handleTabKeyDown}>
+          <button id="liquidity-tab-pools" type="button" role="tab" aria-selected={tab === "pools"} aria-controls="liquidity-panel-pools" tabIndex={tab === "pools" ? 0 : -1} className={tab === "pools" ? "active" : ""} onClick={() => updateTab("pools")}>Pools</button>
+          <button id="liquidity-tab-positions" type="button" role="tab" aria-selected={tab === "positions"} aria-controls="liquidity-panel-positions" tabIndex={tab === "positions" ? 0 : -1} className={tab === "positions" ? "active" : ""} onClick={() => updateTab("positions")}>My positions</button>
+        </div>
         <ActionButton variant="primary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton>
-      </header>
+      </div>
       <div className="liquidity-status-messages">
-        {poolsError && <div className="inline-alert" role="alert">Pool information could not be refreshed. Existing on-chain data is shown where available.</div>}
         {error && <div className="inline-alert permissionless-liquidity-error" role="alert">{error}</div>}
         {actionMessage && <div className="inline-alert" role="status">{actionMessage}</div>}
         {transactionId && <div className="liquidity-tx-receipt"><strong>{transactionOutcome === "failed" ? "Liquidity action was not applied" : pending || transactionOutcome === "pending" ? `${pending?.action ?? "Liquidity action"} · transaction pending` : "Liquidity action confirmed"}</strong><code>{transactionId}</code></div>}
         {pending && <div className="inline-alert"><div><strong>{pending.action} is still being checked.</strong><p>Its transaction ID is saved for this network and Ownership. Do not sign another liquidity action until its status is known.</p></div><ActionButton size="small" variant="secondary" icon={RefreshCw} loading={busy} onClick={() => void waitForPending(pending)}>Check transaction status</ActionButton></div>}
-      </div>
-      <div className="liquidity-tabs" role="tablist" aria-label="Liquidity views" onKeyDown={handleTabKeyDown}>
-        <button id="liquidity-tab-pools" type="button" role="tab" aria-selected={tab === "pools"} aria-controls="liquidity-panel-pools" tabIndex={tab === "pools" ? 0 : -1} className={tab === "pools" ? "active" : ""} onClick={() => updateTab("pools")}>Pools</button>
-        <button id="liquidity-tab-positions" type="button" role="tab" aria-selected={tab === "positions"} aria-controls="liquidity-panel-positions" tabIndex={tab === "positions" ? 0 : -1} className={tab === "positions" ? "active" : ""} onClick={() => updateTab("positions")}>My positions</button>
       </div>
       <section id={`liquidity-panel-${tab}`} className="liquidity-tab-panel" role="tabpanel" aria-labelledby={`liquidity-tab-${tab}`}>
         {tab === "pools" ? <>
@@ -577,18 +576,40 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
       <header className="liquidity-new-heading">
         <button type="button" className="liquidity-back-link" onClick={() => onTabChange("pools")}><ArrowLeft size={18} aria-hidden="true" /> Liquidity</button>
         <h1>New position</h1>
-        <p>Select a pair and provide liquidity.</p>
       </header>
       {error && <div className="inline-alert permissionless-liquidity-error" role="alert">{error}</div>}
       {actionMessage && <div className="inline-alert" role="status">{actionMessage}</div>}
       {pending && <div className="inline-alert"><div><strong>{pending.action} is still being checked.</strong><p>Its transaction ID is saved for this network and Ownership. Do not sign another liquidity action until its status is known.</p></div><ActionButton size="small" variant="secondary" icon={RefreshCw} loading={busy} onClick={() => void waitForPending(pending)}>Check transaction status</ActionButton></div>}
       {transactionId && <div className="liquidity-tx-receipt"><strong>{transactionOutcome === "failed" ? "Liquidity action was not applied" : pending || transactionOutcome === "pending" ? `${pending?.action ?? "Liquidity action"} · transaction pending` : "Liquidity action confirmed"}</strong><code>{transactionId}</code></div>}
       <section className="liquidity-section liquidity-new-card">
-        <div className="liquidity-section-heading"><div><h2>Select pair</h2></div></div>
-        <div className="liquidity-pair-selectors">
-          <label><span>Token A</span><AssetSelector aria-label="Token A" value={assetAId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetBId) setPair(asset.assetIdHex, assetBId); }} variant="compact" showBalance={false} triggerClassName="liquidity-asset-selector" /></label>
-          <button type="button" className="icon-button liquidity-switch-pair" aria-label="Switch token order" disabled={!assetAId || !assetBId || assetAId === assetBId} onClick={() => setPair(assetBId, assetAId)}><ArrowDownUp size={18} aria-hidden="true" /></button>
-          <label><span>Token B</span><AssetSelector aria-label="Token B" value={assetBId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetAId) setPair(assetAId, asset.assetIdHex); }} variant="compact" showBalance={false} triggerClassName="liquidity-asset-selector" /></label>
+        <div className="liquidity-deposit-form">
+          <AssetAmountInput
+            className="liquidity-amount-field"
+            selector={<AssetSelector aria-label="Token A" value={assetAId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetBId) setPair(asset.assetIdHex, assetBId); }} variant="compact" showBalance={false} disabled={busyOrPending} triggerClassName="liquidity-asset-selector" />}
+            label="Token A"
+            balance={sessionOwner ? selectedA ? `Balance: ${balanceLabel(selectedA)} ${selectedA.symbol}` : "Select an asset" : "Connect to view balance"}
+            id="liquidity-amount-a"
+            amount={amountA}
+            onAmountChange={updateAmountA}
+            onMax={() => { if (selectedA) updateAmountA(formatUnits(selectedA.balance ?? 0n, selectedA.decimals)); }}
+            maxDisabled={!selectedA || selectedA.balance === null}
+            disabled={busyOrPending}
+            ariaLabel={`${selectedA?.symbol ?? "Token A"} amount`}
+          />
+          <button type="button" className="icon-button liquidity-switch-pair" aria-label="Switch token order" disabled={!assetAId || !assetBId || assetAId === assetBId || busyOrPending} onClick={() => setPair(assetBId, assetAId)}><ArrowDownUp size={18} aria-hidden="true" /></button>
+          <AssetAmountInput
+            className="liquidity-amount-field"
+            selector={<AssetSelector aria-label="Token B" value={assetBId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetAId) setPair(assetAId, asset.assetIdHex); }} variant="compact" showBalance={false} disabled={busyOrPending} triggerClassName="liquidity-asset-selector" />}
+            label="Token B"
+            balance={sessionOwner ? selectedB ? `Balance: ${balanceLabel(selectedB)} ${selectedB.symbol}` : "Select an asset" : "Connect to view balance"}
+            id="liquidity-amount-b"
+            amount={amountB}
+            onAmountChange={updateAmountB}
+            onMax={() => { if (selectedB) updateAmountB(formatUnits(selectedB.balance ?? 0n, selectedB.decimals)); }}
+            maxDisabled={!selectedB || selectedB.balance === null}
+            disabled={busyOrPending}
+            ariaLabel={`${selectedB?.symbol ?? "Token B"} amount`}
+          />
         </div>
         {!selectedA || !selectedB ? <p className="liquidity-select-hint">Choose two different assets to check the current pool.</p> : <>
           <div className={`liquidity-pool-state${selectedPool && !poolEmpty ? " liquidity-pool-state--existing" : ""}`} aria-live="polite">
@@ -601,22 +622,11 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
           </div>
           {networkReady && !selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && <p className="liquidity-disclosure">Your initial deposit establishes this pool’s starting rate. Locus does not use a market oracle.</p>}
           {selectedPool && !poolEmpty && <div className="liquidity-current-rate"><span>Current pool rate</span><strong>1 {selectedA.symbol} = {pairPrice(selectedA, selectedB, selectedPool)} {selectedB.symbol}</strong></div>}
-          <div className="liquidity-deposit-form">
-            <div className="liquidity-amount-field">
-              <div className="liquidity-amount-label"><strong>{selectedA.symbol}</strong><span>{sessionOwner ? `Balance ${balanceLabel(selectedA)}` : "Connect to view"}</span></div>
-              <div className="liquidity-amount-control"><input aria-label={`${selectedA.symbol} amount`} inputMode="decimal" value={amountA} placeholder="0.00" disabled={busyOrPending} onChange={(event) => updateAmountA(event.target.value)} /><button type="button" disabled={busyOrPending || selectedA.balance === null} onClick={() => updateAmountA(formatUnits(selectedA.balance ?? 0n, selectedA.decimals))}>MAX</button></div>
-            </div>
-            <div className="liquidity-amount-field">
-              <div className="liquidity-amount-label"><strong>{selectedB.symbol}</strong><span>{sessionOwner ? `Balance ${balanceLabel(selectedB)}` : "Connect to view"}</span></div>
-              <div className="liquidity-amount-control"><input aria-label={`${selectedB.symbol} amount`} inputMode="decimal" value={amountB} placeholder="0.00" disabled={busyOrPending} onChange={(event) => updateAmountB(event.target.value)} /><button type="button" disabled={busyOrPending || selectedB.balance === null} onClick={() => updateAmountB(formatUnits(selectedB.balance ?? 0n, selectedB.decimals))}>MAX</button></div>
-            </div>
-          </div>
           {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && <div className="liquidity-current-rate"><span>Initial price</span><strong>1 {selectedA.symbol} = {initialPrice} {selectedB.symbol}</strong><small>1 {selectedB.symbol} = {selectedAmounts && selectedAmounts[0] > 0n && selectedAmounts[1] > 0n ? poolPriceDisplay(selectedAmounts[1], selectedAmounts[0], selectedB.decimals, selectedA.decimals) : "—"} {selectedA.symbol}</small></div>}
         </>}
         {selectedPoolError && <div className="liquidity-query-error" role="alert"><p>{selectedPoolError}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={() => setPairRefreshRevision((revision) => revision + 1)}>Retry pool lookup</ActionButton></div>}
         {sessionOwner && <p className="liquidity-owner-summary"><span>Ownership</span><code>{formatLocusId(sessionOwner)}</code></p>}
         {positionsPageError && <div className="inline-alert" role="alert">{positionsPageError}</div>}
-        {poolsError && <div className="inline-alert" role="alert">Pool information could not be refreshed. Existing on-chain data is shown where available.</div>}
         <ActionButton variant="primary" icon={sessionOwner ? Droplets : undefined} fullWidth disabled={ctaDisabled} onClick={() => sessionOwner ? submitPreview() : onConnect()}>{ctaLabel}</ActionButton>
       </section>
     </>}

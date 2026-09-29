@@ -10,6 +10,8 @@
 .liquidity-tabs button { min-height: 42px; padding: 8px 16px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
 .liquidity-tabs button.active { background: var(--accent-soft); color: var(--accent); }
 .liquidity-tabs button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.liquidity-toolbar .liquidity-tabs { flex: 0 1 auto; }
+.liquidity-toolbar > .action-button { min-width: 0; }
 .liquidity-tab-panel { display: grid; gap: 16px; min-width: 0; }
 .liquidity-featured { display: grid; gap: 10px; min-width: 0; }
 .liquidity-section { display: grid; gap: 12px; min-width: 0; padding: 18px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
@@ -90,9 +92,15 @@
 .liquidity-tx-receipt { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 13px; }
 .liquidity-tx-receipt code { color: var(--text-secondary); overflow-wrap: anywhere; }
 .permissionless-liquidity-error { color: var(--danger); }
+.liquidity-new-card .liquidity-deposit-form { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.liquidity-new-card .liquidity-switch-pair { width: 36px; height: 36px; justify-self: center; margin: -2px 0; }
 @media (min-width: 960px) { .liquidity-deposit-form { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 767px) {
   .liquidity-page { gap: 14px; }
+  .liquidity-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .liquidity-toolbar .liquidity-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; min-width: 0; }
+  .liquidity-toolbar .liquidity-tabs button { min-width: 0; padding-inline: 6px; font-size: 12px; }
+  .liquidity-toolbar > .action-button { min-height: 44px; padding-inline: 9px; font-size: 13px; }
   .liquidity-page-heading { align-items: flex-start; gap: 8px; }
   .liquidity-page-heading h1, .liquidity-new-heading h1 { font-size: 36px; letter-spacing: -1.2px; }
   .liquidity-page-heading > .action-button { min-width: 44px; min-height: 44px; padding-inline: 12px; }
@@ -110,7 +118,7 @@
   .liquidity-position-actions > .action-button { flex: 1 1 auto; }
   .liquidity-position-remove-options { grid-column: auto; }
   .liquidity-pair-selectors { grid-template-columns: minmax(0, 1fr); gap: 8px; }
-  .liquidity-switch-pair { justify-self: center; transform: rotate(90deg); }
+  .liquidity-switch-pair { justify-self: center; transform: none; }
   .liquidity-new-card { padding: 15px; }
   .liquidity-deposit-form { grid-template-columns: minmax(0, 1fr); }
 }
