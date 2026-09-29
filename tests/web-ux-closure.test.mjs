@@ -11,6 +11,9 @@ import { parseSlippageBps } from "../web/src/locus/swap/swapValidation.ts";
 test("routes support base-path candidate Liquidity while preserving direct pages", () => {
   assert.equal(pathForRoute("liquidity", "/candidate/"), "/candidate/liquidity");
   assert.equal(routeFromPath("/candidate/liquidity", "/candidate/"), "liquidity");
+  assert.equal(pathForRoute("liquidity-new", "/candidate/"), "/candidate/liquidity/new");
+  assert.equal(routeFromPath("/candidate/liquidity/new", "/candidate/"), "liquidity-new");
+  assert.equal(routeFromPath("/liquidity/new", "/"), "liquidity-new");
   assert.equal(pathForRoute("swap", "/"), "/swap");
   assert.equal(routeFromPath("/activity", "/"), "activity");
 });
