@@ -50,6 +50,18 @@ function friendlyError(cause: unknown): string {
   return normalized;
 }
 
+function preReceiptFailure(cause: unknown, transactionId: string): string | null {
+  if (!cause || typeof cause !== "object") return null;
+  const rpcError = cause as { code?: unknown; data?: unknown };
+  if (rpcError.code !== -32040 || !rpcError.data || typeof rpcError.data !== "object") return null;
+  const transaction = rpcError.data as { transactionId?: unknown; status?: unknown; error?: unknown };
+  if (transaction.status !== "failed" || typeof transaction.transactionId !== "string"
+    || transaction.transactionId.toLowerCase() !== transactionId.toLowerCase()) return null;
+  return typeof transaction.error === "string" && transaction.error.length > 0
+    ? transaction.error
+    : "The service rejected the transaction before producing an action receipt.";
+}
+
 export function LiquidityPage({ view, initialTab, initialPair, config, assets, pools, poolsError, poolsLoading, locus, networkId, serviceId, sessionOwner, connectionId, networkReady, isScopeCurrent, onPoolsRefreshed, onRefreshAssets, onConnect, onNewPosition, onTabChange, onActionSuccess, onRetryPools, getBalanceState }: {
   view: "home" | "new";
   initialTab: "pools" | "positions";
@@ -276,6 +288,26 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
     setPositionCursor(nextPositionCount > 50n ? 50n : nextPositionCount); await onRefreshAssets();
   }
 
+  async function clearPreReceiptFailure(id: string, cause: unknown, expectedScope: LiquidityScope): Promise<boolean> {
+    const reason = preReceiptFailure(cause, id);
+    if (!reason || !isScopeCurrent(expectedScope)) return false;
+    const saved = readPending(storageKey);
+    if (saved?.transactionId.toLowerCase() === id.toLowerCase()) window.localStorage.removeItem(storageKey);
+    setPending((current) => current?.transactionId.toLowerCase() === id.toLowerCase() ? null : current);
+    setTransactionId(id);
+    setTransactionOutcome("failed");
+    setActionMessage("");
+    setPairRefreshRevision((revision) => revision + 1);
+    let refreshed = false;
+    try { await refreshAfterApplied(expectedScope); refreshed = true; } catch { /* Keep the terminal failure visible if refresh is temporarily unavailable. */ }
+    if (!isScopeCurrent(expectedScope)) return true;
+    const followUp = reason.includes("jamscript_plan_v1")
+      ? "Pool creation on this deployed Service must be upgraded before retrying."
+      : "Review the current pool and balance state before another attempt.";
+    setError(`The transaction failed before an action receipt was created (${reason}). No liquidity action was applied. ${refreshed ? "Pool state and balances were refreshed." : "The automatic state refresh failed; refresh the page before continuing."} ${followUp}`);
+    return true;
+  }
+
   async function loadMorePositions() {
     if (!locus || !sessionOwner || positionsPageLoading || positionCursor >= positionIndexCount || !isScopeCurrent(scope)) return;
     setPositionsPageLoading(true); setPositionsPageError("");
@@ -299,8 +331,9 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
   }
 
   function clearFinalizedFailure(id: string, status: string, errorCode: number | null) {
-    window.localStorage.removeItem(storageKey);
-    setPending(null);
+    const saved = readPending(storageKey);
+    if (saved?.transactionId.toLowerCase() === id.toLowerCase()) window.localStorage.removeItem(storageKey);
+    setPending((current) => current?.transactionId.toLowerCase() === id.toLowerCase() ? null : current);
     setTransactionId(id);
     setTransactionOutcome("failed");
     setActionMessage("");
@@ -340,6 +373,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
       if (current.action !== "Remove liquidity") onActionSuccess(current.action === "Create pool" ? "Pool created" : "Liquidity added");
     } catch (cause) {
       if (!isScopeCurrent(expectedScope)) return;
+      if (await clearPreReceiptFailure(current.transactionId, cause, expectedScope)) return;
       setError(`${friendlyError(cause)} The transaction remains saved; check its status before signing anything else.`);
     } finally { if (isScopeCurrent(expectedScope)) setBusy(false); }
   }
@@ -387,6 +421,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
       onActionSuccess(review.operation === "create" ? "Pool created" : "Liquidity added");
     } catch (cause) {
       if (!isScopeCurrent(expectedScope)) return;
+      if (submittedId && await clearPreReceiptFailure(submittedId, cause, expectedScope)) return;
       if (!submittedId && /error 6002|POOL_ALREADY_EXISTS/i.test(normalizeActionError(cause, ""))) {
         setPairRefreshRevision((revision) => revision + 1);
       }
@@ -436,6 +471,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
       setPairRefreshRevision((revision) => revision + 1);
     } catch (cause) {
       if (!isScopeCurrent(expectedScope)) return;
+      if (submittedId && await clearPreReceiptFailure(submittedId, cause, expectedScope)) return;
       if (!submittedId && /error 6002|POOL_ALREADY_EXISTS/i.test(normalizeActionError(cause, ""))) {
         setPairRefreshRevision((revision) => revision + 1);
       }

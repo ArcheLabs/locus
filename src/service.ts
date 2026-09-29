@@ -191,15 +191,21 @@ function ceilDiv(value: u128, denominator: u128): u128 {
 }
 
 function integerSqrt(value: u128): u128 {
+  let zero: u128 = 0n;
   let one: u128 = 1n;
   let two: u128 = 2n;
   if (value < two) return value;
-  let low: u128 = one;
+  // Pool reserves are capped at u64, so their product's square root fits u64.
+  // Use the square of the midpoint instead of dividing by it. The previous
+  // `value / middle` comparison required a second full u128 division on each
+  // of 64 iterations, pushing createPool planning over the PVM gas limit.
+  let low: u128 = zero;
   let high: u128 = 18446744073709551615n;
-  let result: u128 = one;
+  let result: u128 = zero;
   while (low <= high) {
     const middle = low + (high - low) / two;
-    if (middle <= value / middle) {
+    const square = checkedMul(middle, middle);
+    if (square <= value) {
       result = middle;
       low = middle + one;
     } else {
