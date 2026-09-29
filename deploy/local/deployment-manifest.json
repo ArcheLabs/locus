@@ -2,15 +2,15 @@
   "format": 1,
   "network": "local",
   "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
-  "locusServiceId": 4183134351,
-  "locusCodeHash": "0x9bf181bf538bcfa2bd16203d8b75928d353c0002b6c78247d906e99225a1b720",
+  "locusServiceId": 2323996321,
+  "locusCodeHash": "0x579bfe33f2cf4316fceea4853922076691c770ca3378bc5cb49bd80e2f6f29e5",
   "deployment": {
     "finalized": true,
-    "blockNumber": 94,
-    "blockHash": "0x953d9df6e3de9d38b330654b4714a9f31bcc0cb949a9beba0b203c59620408ff",
-    "operationId": "0xe0581009caaa4b70d41d95589e78300fbaf7882f8db1611274cee46e5a068e84"
+    "blockNumber": 5805,
+    "blockHash": "0xf61238807c831d1082cd2e58726746200e01bcf44bd28b0e195c2713767d106d",
+    "operationId": "0x5b71a4d61f23d9fd5365ed9fc70855ef7af5144f6f00cfce174c0347f4abe8f6"
   },
-  "locusCommit": "7b63d03169f615424b569fede56d3db26fff7b56",
+  "locusCommit": "77f8a0bf0dea712b3fbdc24a8f292b719456e96b",
   "jamscriptRelease": "v0.1.0-rc.8",
   "backendRelease": "backend-v0.1.0-rc.8",
   "minijamRelease": "stage1-v0.2.0",
@@ -18,6 +18,6 @@
     "minijam": "sha256:9e08ccf5a0ce373860082ef79453c8f3d86c61d95af671bb0cfce19799ef3b00",
     "backend": "sha256:4fd6baf37c7a4ba539585f9b1a157dad053d0836f75ded49b97fb704179a6e25"
   },
-  "initializedAssetCount": 0,
+  "initializedAssetCount": 6,
   "initializedPoolCount": 0
 }
