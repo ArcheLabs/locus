@@ -196,15 +196,16 @@ function integerSqrt(value: u128): u128 {
   let two: u128 = 2n;
   if (value < two) return value;
   // Pool reserves are capped at u64, so their product's square root fits u64.
-  // Use the square of the midpoint instead of dividing by it. The previous
-  // `value / middle` comparison required a second full u128 division on each
-  // of 64 iterations, pushing createPool planning over the PVM gas limit.
+  // Every midpoint is bounded by u64::MAX, so its square always fits in u128.
+  // Keep this comparison division-free: checkedMul performs an overflow-check
+  // division internally, which made the previous optimization retain one full
+  // u128 division per iteration and still trap during createPool planning.
   let low: u128 = zero;
   let high: u128 = 18446744073709551615n;
   let result: u128 = zero;
   while (low <= high) {
     const middle = low + (high - low) / two;
-    const square = checkedMul(middle, middle);
+    const square = middle * middle;
     if (square <= value) {
       result = middle;
       low = middle + one;
