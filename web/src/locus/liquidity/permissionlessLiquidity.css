@@ -8,7 +8,7 @@
 .liquidity-status-messages:empty { display: none; }
 .liquidity-tabs { display: flex; width: fit-content; max-width: 100%; align-items: center; gap: 4px; padding: 4px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .liquidity-tabs button { min-height: 42px; padding: 8px 16px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; font-size: 14px; font-weight: 600; white-space: nowrap; }
-.liquidity-tabs button.active { background: var(--accent-soft); color: var(--accent); }
+.liquidity-tabs button.active { background: var(--accent); color: var(--accent-foreground); }
 .liquidity-tabs button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
 .liquidity-toolbar .liquidity-tabs { flex: 0 1 auto; }
 .liquidity-toolbar > .action-button { min-width: 0; }

@@ -16,6 +16,7 @@ html[data-theme="light"] {
   --border: #e6eaf0;
   --border-strong: #d8dee8;
   --accent: #4b69ff;
+  --accent-foreground: #ffffff;
   --accent-hover: #3d58ed;
   --accent-soft: #eef2ff;
   --accent-border: #b8c4ff;
@@ -55,6 +56,7 @@ html[data-theme="dark"] {
   --border: #272b33;
   --border-strong: #343a46;
   --accent: #4b69ff;
+  --accent-foreground: #ffffff;
   --accent-hover: #3d58ed;
   --accent-soft: #202b50;
   --accent-border: #566bc2;

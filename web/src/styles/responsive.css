@@ -372,8 +372,8 @@ textarea {
 .mobile-navigation-close { display: grid; place-items: center; width: 44px; height: 44px; padding: 0; border: 0; border-radius: 12px; background: transparent; color: var(--text-secondary); }
 .mobile-navigation-items { display: grid; align-content: start; gap: 4px; padding: 8px 0 22px; }
 .mobile-navigation-item { display: flex; align-items: center; gap: 14px; min-height: 52px; padding: 0 12px; border: 0; border-radius: 11px; background: transparent; color: var(--text); font: inherit; font-weight: 600; text-align: left; }
-.mobile-navigation-item[aria-current="page"] { color: var(--accent); }
-.mobile-navigation-item[aria-current="page"] svg { color: var(--accent); }
+.mobile-navigation-item[aria-current="page"] { background: var(--accent); color: var(--accent-foreground); }
+.mobile-navigation-item[aria-current="page"] svg { color: var(--accent-foreground); }
 .mobile-navigation-footer { display: flex; justify-content: space-around; gap: 8px; padding-top: 13px; border-top: 1px solid var(--border); }
 .mobile-navigation-footer a { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-width: 84px; min-height: 44px; padding: 6px 10px; border-radius: 9px; color: var(--text-secondary); font-size: 13px; text-decoration: none; }
 .mobile-navigation-footer a:hover { color: var(--text); background: var(--surface-hover); }
