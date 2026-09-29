@@ -81,6 +81,14 @@
 .liquidity-review-assets { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 .liquidity-review-assets .asset-identity { padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
 .liquidity-review-assets .asset-identity__amount { color: var(--text); }
+.modal--hidden-title .modal-header { padding: 8px 16px 0; border-bottom: 0; }
+.modal--hidden-title .modal-body { padding-top: 8px; padding-bottom: 14px; }
+.modal--hidden-title .modal-footer { padding-top: 0; }
+.liquidity-review--compact { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.liquidity-review--compact > .asset-identity { width: 100%; min-height: 64px; padding: 10px; overflow: hidden; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
+.liquidity-review--compact .asset-identity__copy { flex: 1 1 auto; }
+.liquidity-review--compact .asset-identity__amount { color: var(--text); }
+.liquidity-review-error { color: var(--danger-strong); }
 .liquidity-warning { padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--warning) 45%, var(--border)); border-radius: 9px; color: var(--warning); }
 .liquidity-tx-receipt { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); font-size: 13px; }
 .liquidity-tx-receipt code { color: var(--text-secondary); overflow-wrap: anywhere; }
@@ -114,3 +122,9 @@
   .liquidity-deposit-form { grid-template-columns: minmax(0, 1fr); }
 }
 @media (prefers-reduced-motion: reduce) { .liquidity-query-skeleton span { animation: none; } }
+@media (max-width: 520px) {
+  .liquidity-review--compact { grid-template-columns: minmax(0, 1fr); }
+  .modal--hidden-title .modal-body { padding-inline: 16px; }
+  .modal--hidden-title .modal-footer { padding-inline: 16px; }
+  .modal--hidden-title .modal-footer > .action-button { flex: 1 1 0; }
+}
