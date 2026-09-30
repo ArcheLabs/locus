@@ -1608,7 +1608,7 @@
     ]
   },
   "provenance": {
-    "locusCommit": "870fca7f4e9f77257460f9f9ea69e6bd939b0e15",
+    "locusCommit": "7322e4176d7ed51aed5e447a516759737bcb178c",
     "jamscriptVersion": "v0.1.0-dev+6f20644",
     "backendVersion": "backend-v0.1.0-rc.8",
     "minijamVersion": "stage1-v0.2.0"
