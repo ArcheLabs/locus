@@ -16,7 +16,7 @@ export type PolkadotBrowserAccount = {
 };
 
 export type PolkadotInjector = {
-  signer: { signRaw?: (input: { address: string; data: string; type: "bytes" }) => Promise<{ signature: string }> };
+  signer: { signRaw?: (input: { address: string; data: string; type: "bytes" | "payload" }) => Promise<{ signature: string }> };
 };
 
 export type BrowserAccountOption = {
@@ -148,7 +148,7 @@ function createPolkadotOwnershipSigner(
       return asOwnership(ownership);
     },
     async signJamScriptAction(request) {
-      const result = await signRaw({ address: account.address, data: bytesToHex(request.message), type: "bytes" });
+      const result = await signRaw({ address: account.address, data: bytesToHex(request.message), type: "payload" });
       let signature: Uint8Array;
       try {
         signature = hexToBytes(result.signature);
@@ -186,6 +186,9 @@ function createPolkadotOwnershipSigner(
       });
       if (!verified) {
         throw new Error(`The wallet signature (${account.type ?? "unknown scheme"}, ${signature.length} bytes) does not match this SS58 account. No transaction was submitted; reconnect the account or choose another wallet.`);
+      }
+      if (verified.messageMode !== "raw") {
+        throw new Error("The selected wallet wrapped the signed payload. This Local service requires a raw signature; no transaction was submitted.");
       }
       return authorizationProof!;
     },
