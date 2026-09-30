@@ -127,6 +127,8 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   const validation = amountValidation;
   const visibleValidation = amountTouched ? validation : null;
   const slippageInvalid = slippageBps === null;
+  const slippageMissing = !slippage.trim();
+  const visibleSlippageError = slippageInvalid && !slippageMissing;
   const feeLabel = formatBasisPoints(SWAP_FEE_BPS);
 
   function updatePair(input: string, output: string) {
@@ -299,8 +301,8 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       {impact !== null && impact >= 5 && <p className="swap-impact-warning" role="status">High price impact: {impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</p>}
       <details className="swap-advanced-details" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
         <summary>Transaction details</summary>
-        <FormField label="Slippage tolerance" htmlFor="swap-slippage" error={slippageInvalid ? "Enter a slippage value from 0.01% to 50%." : null} errorId="swap-slippage-error" className="swap-settings-field">
-          <div className="swap-slippage-input"><input id="swap-slippage" inputMode="decimal" disabled={busy} value={slippage} onChange={(event) => setSlippage(event.target.value)} aria-invalid={slippageInvalid} aria-describedby={slippageInvalid ? "swap-slippage-error" : undefined} /><span>%</span></div>
+        <FormField label="Slippage tolerance" htmlFor="swap-slippage" error={visibleSlippageError ? "Enter a slippage value from 0.01% to 50%." : null} errorId="swap-slippage-error" className="swap-settings-field">
+          <div className="swap-slippage-input"><input id="swap-slippage" inputMode="decimal" disabled={busy} value={slippage} onChange={(event) => setSlippage(event.target.value)} aria-invalid={visibleSlippageError} aria-describedby={visibleSlippageError ? "swap-slippage-error" : undefined} /><span>%</span></div>
         </FormField>
         {quote && assetOut && <dl className="swap-quote-details">
           <div><dt>Minimum received</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
@@ -310,7 +312,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       </details>
 
       {actionError && <p className="action-status action-status--error" role="alert">{actionError}</p>}
-      <ActionButton className="swap-review-action" variant="primary" icon={ArrowLeftRight} fullWidth disabled={busy || status !== "ready" || !quote || !assetIn || !assetOut || Boolean(validation) || submission === "applied"} onClick={openReview}>
+      <ActionButton className="swap-review-action" variant="primary" icon={ArrowLeftRight} fullWidth disabled={busy || status !== "ready" || !quote || !assetIn || !assetOut || Boolean(validation) || slippageMissing || submission === "applied"} onClick={openReview}>
         {submission === "awaiting-signature" ? "Approve in wallet…" : submission === "submitted" ? "Waiting for confirmation…" : submission === "applied" ? "Swap completed" : sessionOwner ? "Review swap" : "Connect to swap"}
       </ActionButton>
     </div>

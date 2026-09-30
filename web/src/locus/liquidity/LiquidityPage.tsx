@@ -100,6 +100,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   const [amountA, setAmountA] = useState("");
   const [amountB, setAmountB] = useState("");
   const [withdrawPercent, setWithdrawPercent] = useState(50);
+  const [withdrawPercentText, setWithdrawPercentText] = useState("50");
   const [customWithdraw, setCustomWithdraw] = useState(false);
   const [positions, setPositions] = useState<LiquidityPosition[]>([]);
   const [positionsLoading, setPositionsLoading] = useState(false);
@@ -289,6 +290,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
 
   function updateAmountA(value: string) {
     setAmountA(value);
+    setError("");
     if (!selectedPool || poolEmpty || !selectedA || !selectedB) return;
     try {
       const rawA = parseUnits(value, selectedA.decimals);
@@ -301,6 +303,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
 
   function updateAmountB(value: string) {
     setAmountB(value);
+    setError("");
     if (!selectedPool || poolEmpty || !selectedA || !selectedB) return;
     try {
       const rawB = parseUnits(value, selectedB.decimals);
@@ -448,6 +451,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }
 
   async function submitPreview() {
+    if (!amountA.trim() || !amountB.trim()) return;
     if (!selectedA || !selectedB || selectedA.assetIdHex === selectedB.assetIdHex) { setError("Choose two different assets."); return; }
     if (selectedPoolLoading || selectedPoolError) { setError(selectedPoolError || "Pool state is still loading."); return; }
     try {
@@ -681,14 +685,18 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   async function requestCustomRemoval(position: LiquidityPosition) {
     if (!sessionOwner || !locus || busyOrPending || !isScopeCurrent(scope)) return;
     setWithdrawPercent(50);
+    setWithdrawPercentText("50");
     setCustomWithdraw(true);
     setBusy(true);
     try { await prepareForReview({ operation: "remove", position, scope }, 50, true); }
     finally { setBusy(false); }
   }
 
-  function updateCustomWithdrawPercent(value: number) {
-    setWithdrawPercent(value);
+  function updateCustomWithdrawPercent(value: string) {
+    setWithdrawPercentText(value);
+    const trimmedValue = value.trim();
+    const percent = trimmedValue ? Number(trimmedValue) : 0;
+    setWithdrawPercent(percent);
     const currentReview = review;
     if (currentReview?.operation !== "remove") return;
     preparationGeneration.current += 1;
@@ -696,7 +704,11 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     preparationTimer.current = null;
     releasePreparedAction();
     setError("");
-    if (!Number.isInteger(value) || value < 1 || value > 100) {
+    if (!trimmedValue) {
+      setPreparingAction(false);
+      return;
+    }
+    if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
       setPreparingAction(false);
       setError("Choose a whole percentage from 1 to 100.");
       return;
@@ -704,11 +716,12 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     setPreparingAction(true);
     preparationTimer.current = window.setTimeout(() => {
       preparationTimer.current = null;
-      void prepareForReview(currentReview, value);
+      void prepareForReview(currentReview, percent);
     }, 250);
   }
 
   const removalQuote = review?.operation === "remove" && review.position && sessionOwner
+    && Number.isInteger(withdrawPercent) && withdrawPercent >= 1 && withdrawPercent <= 100
     ? (() => {
       const shares = withdrawPercent === 100 ? review.position.shares : review.position.shares * BigInt(withdrawPercent) / 100n;
       const last = shares === review.position.pool.totalShares;
@@ -732,6 +745,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         : null
     : null;
   const validAmounts = !!selectedAmounts && selectedAmounts.every((value) => value > 0n);
+  const requiredAmountMissing = !amountA.trim() || !amountB.trim();
   const balanceLabel = (asset: AssetView) => getBalanceState(asset) === "loading" ? "Loading…"
     : getBalanceState(asset) === "unavailable" ? "Unavailable"
       : formatUnits(asset.balance ?? 0n, asset.decimals);
@@ -745,7 +759,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
                 : busy ? "Preparing…"
                   : selectedA.balance === null || selectedB.balance === null ? [selectedA, selectedB].some(asset => getBalanceState(asset) === "loading") ? "Loading balances…" : "Balance unavailable"
                     : insufficientAsset ? `Insufficient ${insufficientAsset.symbol}`
-                      : !validAmounts ? "Enter an amount"
+                      : !validAmounts ? requiredAmountMissing ? "Provide liquidity" : "Enter an amount"
                         : !liquidityQuote ? "Amount outside pool limits"
                           : "Provide liquidity";
   const ctaDisabled = sessionOwner
@@ -889,12 +903,12 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       onClose={closeReview}
       footer={<><ActionButton variant="secondary" onClick={closeReview}>Cancel</ActionButton><ActionButton variant="primary" loading={busy || preparingAction} disabled={busyOrPending || preparingAction || !preparedAction || (removalPosition !== null && (!removalQuote || removalQuote.shares === 0n))} onClick={confirmAction}>Confirm</ActionButton></>}
     >
-      {removalPosition && removalQuote ? <div className="liquidity-review">
+      {removalPosition ? <div className="liquidity-review">
         {customWithdraw
-          ? <label className="liquidity-withdraw-field"><span>Remove (%)</span><input aria-label="Custom withdrawal percentage" type="number" min="1" max="100" step="1" value={withdrawPercent || ""} onChange={(event) => updateCustomWithdrawPercent(Number(event.target.value))} /></label>
+          ? <label className="liquidity-withdraw-field"><span>Remove (%)</span><input aria-label="Custom withdrawal percentage" type="number" min="1" max="100" step="1" value={withdrawPercentText} onChange={(event) => updateCustomWithdrawPercent(event.target.value)} /></label>
           : <span className="liquidity-review-caption">Remove {withdrawPercent}%</span>}
         {error && <p className="liquidity-review-error" role="alert">{error}</p>}
-        <ConfirmationAssetList items={removalAssetLines} />
+        {removalQuote && <ConfirmationAssetList items={removalAssetLines} />}
       </div>
         : review?.operation === "create" ? <ConfirmationAssetList items={[
           { asset: review.assetA, amount: review.amountA },

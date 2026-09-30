@@ -28,7 +28,7 @@ test("Matrix restore does not open verification UI for an authorization that is 
 });
 
 test("amount and recipient validators reject unsafe or incomplete input", () => {
-  assert.equal(validatePositiveAmount("", 6, 100_000n), "Enter an amount.");
+  assert.equal(validatePositiveAmount("", 6, 100_000n), null);
   assert.equal(validatePositiveAmount("0", 6, 100_000n), "Amount must be greater than 0.");
   assert.equal(validatePositiveAmount("1e3", 6, 100_000n), "Enter a positive decimal amount.");
   assert.equal(validatePositiveAmount("1.0000001", 6, 100_000_000n), "This asset supports up to 6 decimal places.");

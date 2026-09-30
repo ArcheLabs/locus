@@ -691,7 +691,7 @@ export function App() {
     ? recipientTextError ?? asyncRecipientError ?? (!resolvedRecipient.valid && recipient.trim() && !matrixResolutionPending ? resolvedRecipient.message : null)
     : null;
   const amountFieldError = amountTouched || sendAttempted
-    ? currentAsset ? validatePositiveAmount(amount, currentAsset.decimals, currentAsset.balance) : amount.trim() ? "Choose an asset first." : "Enter an amount."
+    ? currentAsset ? validatePositiveAmount(amount, currentAsset.decimals, currentAsset.balance) : amount.trim() ? "Choose an asset first." : null
     : null;
 
   useEffect(() => {
@@ -786,7 +786,7 @@ export function App() {
     setSendFormError("");
     const assetForSend = networkMode ? currentNetworkAsset : currentDemoAsset;
     if (!assetForSend) { setSendFormError("No asset is available on this network."); return; }
-    if (recipientTextError || validatePositiveAmount(amount, assetForSend.decimals, assetForSend.balance)) return;
+    if (!recipient.trim() || !amount.trim() || recipientTextError || validatePositiveAmount(amount, assetForSend.decimals, assetForSend.balance)) return;
     if (!networkMode) { notify(`Demo: send ${amount} ${currentDemoAsset.symbol} to ${recipient}`); return; }
     if (!("assetId" in assetForSend)) { setSendFormError("No network asset is selected."); return; }
     if (network.status !== "ready" || !locus) { setSendFormError("The selected network is unavailable. Retry the connection before sending."); return; }
@@ -998,7 +998,7 @@ function SendPage({ networkMode, status, asset, assets, assetSearch, assetPicker
       </div>
       <OwnershipInput type={recipientType} value={recipient} open={typeOpen} networkMode={networkMode} message={recipientMessage} valid={resolution.valid} error={recipientError} onBlur={onRecipientBlur} onType={onChooseType} onToggle={onToggleTypes} onChange={onRecipient} onClear={onClear} disabled={busy} />
       {formError && <p className="action-status action-status--error" role="alert">{formError}</p>}
-      <ActionButton variant="primary" icon={ArrowUpRight} fullWidth disabled={!asset || busy || sendState.status === "applied" || (networkMode && status !== "ready")} onClick={onContinue}>{sendLabel}</ActionButton>
+      <ActionButton variant="primary" icon={ArrowUpRight} fullWidth disabled={!asset || !amount.trim() || !recipient.trim() || busy || sendState.status === "applied" || (networkMode && status !== "ready")} onClick={onContinue}>{sendLabel}</ActionButton>
       {sendState.status === "failed" && !sendState.transactionId && <div className="transaction-error" role="alert">{sendState.error}</div>}
     </div>
   </section>;
