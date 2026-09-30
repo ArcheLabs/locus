@@ -111,20 +111,24 @@ sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-Caddy serves static files and forwards only `/rpc` to the backend. Compose
-publishes node, Formal RPC, Worker health, and backend ports on host loopback;
-never change those mappings to `0.0.0.0`. Keep the host firewall limited to SSH,
-HTTP, and HTTPS. Caddy obtains and renews the HTTPS certificate for
-`locus.minijam.xyz` after public DNS and inbound ports 80/443 reach this host.
-For Cloudflare, use Full (strict) once the origin certificate is ready.
+Caddy serves static files, forwards `/rpc` to the backend, and exposes the
+Matrix resolver at `/matrix-resolver`. The separate `matrix.minijam.xyz` host
+serves Matrix federation and signing keys only; client APIs stay private.
+Compose publishes node, Formal RPC, Worker health, backend, and resolver
+dependencies on host loopback; never change those mappings to `0.0.0.0`. Keep
+the host firewall limited to SSH, HTTP, and HTTPS. Caddy obtains and renews
+HTTPS certificates after public DNS and inbound ports 80/443 reach this host.
+For Cloudflare, use Full (strict) once the origin certificates are ready.
 
 ## Optional integrations and recovery
 
-Matrix recipient resolution stays unadvertised until the homeserver URL and
-restricted application-service token file are provisioned and the resolver is
-validated. Missing Matrix credentials skip Matrix SSO without affecting the
-core Local deployment. Asset or pool initialization that needs a Treasury
-signer is a separate operation; never generate or commit a substitute key.
+Matrix recipient resolution is enabled for the Local network after the
+homeserver identity, HTTPS federation, restricted application-service token,
+remote key query, independently verified account ownership, and resolver
+checks pass. Keep the homeserver database and resolver pin state on persistent
+storage. Missing Matrix credentials skip Matrix SSO without affecting the core
+Local deployment. Asset or pool initialization that needs a Treasury signer
+is a separate operation; never generate or commit a substitute key.
 
 `npm run test` uses empty on-chain state and does not seed demo data. Empty
 Assets, Swap, Liquidity, and Activity views are expected before authorized

@@ -2,6 +2,10 @@ locus.minijam.xyz {
 	encode zstd gzip
 	root * /var/www/locus
 
+	handle_path /matrix-resolver/* {
+		reverse_proxy 127.0.0.1:8787
+	}
+
 	@rpc path /rpc /rpc/*
 	handle @rpc {
 		rewrite * /
@@ -12,4 +16,24 @@ locus.minijam.xyz {
 		try_files {path} /index.html
 		file_server
 	}
+}
+
+matrix.minijam.xyz {
+	@server_well_known path /.well-known/matrix/server
+	handle @server_well_known {
+		header Content-Type application/json
+		respond `{"m.server":"matrix.minijam.xyz:443"}` 200
+	}
+
+	@federation path /_matrix/federation/*
+	handle @federation {
+		reverse_proxy 127.0.0.1:8008
+	}
+
+	@server_keys path /_matrix/key/*
+	handle @server_keys {
+		reverse_proxy 127.0.0.1:8008
+	}
+
+	respond 404
 }
