@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { resolveLocusMode, buildLocusMode } from "../web/src/network/mode.ts";
 import { parseThemePreference, resolveTheme, THEME_STORAGE_KEY } from "../web/src/theme/theme.ts";
 import { EvmSessionBridge } from "../web/src/session/EvmSessionBridge.ts";
+import { connectPolkadotAccount, polkadotAccountOptions, requirePolkadotAccount, switchPolkadotSession } from "../web/src/session/polkadotSession.ts";
 import { clearPersistedWalletSession, persistWalletSession, WALLET_SESSION_KEY } from "../web/src/session/sessionPersistence.ts";
 import { assetBalanceQueryKey, assetIdsQueryKey, assetMetadataQueryKey } from "../web/src/locus/assetQueries.ts";
 import { attachAssetBalances, keepAssetRowsForScope } from "../web/src/locus/assetCache.ts";
@@ -130,7 +131,7 @@ function fakeEvmProvider(initialAccounts = []) {
   };
 }
 
-function fakeSessionHarness() {
+function fakeSessionHarness(createSessionOverride) {
   const entries = new Map();
   const storage = {
     getItem: (key) => entries.get(key) ?? null,
@@ -140,12 +141,13 @@ function fakeSessionHarness() {
   let session = null;
   const commits = [];
   const clears = [];
+  const errors = [];
   const makeSession = async (provider, address) => ({
     kind: "evm",
     provider,
     owner: evmOwnership(address),
     controller: evmOwnership(address),
-    ownershipSession: {},
+    ownershipSession: { signer: { address } },
     label: `EVM ${address}`,
     address,
     connectionId: address,
@@ -162,9 +164,10 @@ function fakeSessionHarness() {
       session = null;
       clears.push(true);
     },
-    createSession: makeSession,
+    createSession: createSessionOverride ?? makeSession,
+    onError: (error) => errors.push(error),
   });
-  return { bridge, storage, commits, clears, get session() { return session; } };
+  return { bridge, storage, commits, clears, errors, get session() { return session; } };
 }
 
 const flushSessionBridge = async () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -250,7 +253,7 @@ test("EVM_EXPLICIT_DISCONNECT: explicit disconnect clears memory and persistence
   assert.equal(harness.storage.getItem(WALLET_SESSION_KEY), null);
 });
 
-test("EVM_ACCOUNT_CHANGED: confirmed account change invalidates the old signer", async () => {
+test("EVM_ACCOUNT_EVENT_SWITCH: confirmed account change replaces the complete EVM session", async () => {
   const harness = fakeSessionHarness();
   const oldAddress = "0x5555555555555555555555555555555555555555";
   const newAddress = "0x6666666666666666666666666666666666666666";
@@ -258,10 +261,187 @@ test("EVM_ACCOUNT_CHANGED: confirmed account change invalidates the old signer",
   harness.bridge.beginConnection();
   harness.bridge.updateAppKit(provider, oldAddress);
   await flushSessionBridge();
+  const previous = harness.session;
   provider.accounts = [newAddress];
   provider.emit("accountsChanged", provider.accounts);
+  await harness.bridge.reconcile();
+  assert.equal(harness.session?.address, newAddress);
+  assert.notEqual(harness.session, previous);
+  assert.notEqual(harness.session?.ownershipSession.signer, previous?.ownershipSession.signer);
+  assert.notDeepEqual(harness.session?.owner, previous?.owner);
+  assert.notDeepEqual(harness.session?.controller, previous?.controller);
+  assert.equal(JSON.parse(harness.storage.getItem(WALLET_SESSION_KEY)).address, newAddress);
+});
+
+test("EVM_APPKIT_ACCOUNT_SWITCH: AppKit hint is confirmed against eth_accounts before commit", async () => {
+  const harness = fakeSessionHarness();
+  const oldAddress = "0x1010101010101010101010101010101010101010";
+  const newAddress = "0x2020202020202020202020202020202020202020";
+  const provider = fakeEvmProvider([oldAddress, newAddress]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, oldAddress);
+  await harness.bridge.reconcile();
+  assert.equal(harness.session?.address, oldAddress);
+  harness.bridge.updateAppKit(provider, newAddress);
+  await harness.bridge.reconcile();
+  assert.equal(harness.session?.address, newAddress);
+});
+
+test("EVM_CANCEL_PRESERVES_SESSION: leaving AppKit account selection unchanged keeps the current signer", async () => {
+  const harness = fakeSessionHarness();
+  const accountA = "0x2424242424242424242424242424242424242424";
+  const provider = fakeEvmProvider([accountA]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, accountA);
+  await harness.bridge.reconcile();
+  const current = harness.session;
+  // Closing AppKit without an account event is a cancellation; no session replacement is requested.
+  await harness.bridge.reconcile();
+  assert.equal(harness.session, current);
+  assert.equal(harness.commits.length, 1);
+  assert.equal(JSON.parse(harness.storage.getItem(WALLET_SESSION_KEY)).address, accountA);
+});
+
+test("EVM_AMBIGUOUS_ACCOUNTS_KEEP_CURRENT: [A, B] without a new selection keeps A", async () => {
+  const harness = fakeSessionHarness();
+  const accountA = "0x2121212121212121212121212121212121212121";
+  const accountB = "0x2323232323232323232323232323232323232323";
+  const provider = fakeEvmProvider([accountA]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, accountA);
+  await harness.bridge.reconcile();
+  const current = harness.session;
+  provider.accounts = [accountA, accountB];
+  harness.bridge.updateAppKit(provider, undefined);
+  await harness.bridge.reconcile();
+  assert.equal(harness.session, current);
+  assert.equal(harness.session?.address, accountA);
+});
+
+test("EVM_MISSING_CURRENT_WITH_AMBIGUOUS_ACCOUNTS: an unselected replacement list fails closed", async () => {
+  const harness = fakeSessionHarness();
+  const oldAddress = "0x3030303030303030303030303030303030303030";
+  const accountB = "0x4040404040404040404040404040404040404040";
+  const accountC = "0x5050505050505050505050505050505050505050";
+  const provider = fakeEvmProvider([oldAddress]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, oldAddress);
+  await harness.bridge.reconcile();
+  provider.accounts = [accountB, accountC];
+  harness.bridge.updateAppKit(provider, undefined);
+  await harness.bridge.reconcile();
+  assert.equal(harness.session, null);
+  assert.equal(harness.clears.length, 1);
+});
+
+test("EVM_SWITCH_FAILURE_PRESERVES_CURRENT: failed signer creation keeps the current session", async () => {
+  const oldAddress = "0x6060606060606060606060606060606060606060";
+  const newAddress = "0x7070707070707070707070707070707070707070";
+  const harness = fakeSessionHarness(async (provider, address) => {
+    if (address === newAddress) throw new Error("signer setup failed");
+    return {
+      kind: "evm", provider, owner: evmOwnership(address), controller: evmOwnership(address),
+      ownershipSession: { signer: { address } }, label: `EVM ${address}`, address, connectionId: address,
+    };
+  });
+  const provider = fakeEvmProvider([oldAddress]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, oldAddress);
+  await harness.bridge.reconcile();
+  const current = harness.session;
+  provider.accounts = [newAddress];
+  provider.emit("accountsChanged", provider.accounts);
+  await harness.bridge.reconcile();
+  assert.equal(harness.session, current);
+  assert.equal(harness.clears.length, 0);
+  assert.match(harness.errors.at(-1)?.message ?? "", /Could not switch account/);
+});
+
+test("EVM_SWITCH_RACE_GUARD: a late B signer is discarded when the wallet switches to C", async () => {
+  const oldAddress = "0x8080808080808080808080808080808080808080";
+  const accountB = "0x9090909090909090909090909090909090909090";
+  const accountC = `0x${"c3".repeat(20)}`;
+  let resolveB;
+  let startedB;
+  const bStarted = new Promise((resolve) => { startedB = resolve; });
+  const harness = fakeSessionHarness(async (provider, address) => {
+    if (address === accountB) {
+      startedB();
+      await new Promise((resolve) => { resolveB = resolve; });
+    }
+    return {
+      kind: "evm", provider, owner: evmOwnership(address), controller: evmOwnership(address),
+      ownershipSession: { signer: { address } }, label: `EVM ${address}`, address, connectionId: address,
+    };
+  });
+  const provider = fakeEvmProvider([oldAddress]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, oldAddress);
+  await harness.bridge.reconcile();
+  provider.accounts = [accountB];
+  provider.emit("accountsChanged", provider.accounts);
+  const switching = harness.bridge.reconcile();
+  await bStarted;
+  provider.accounts = [accountC];
+  provider.emit("accountsChanged", provider.accounts);
+  resolveB();
+  await switching;
+  assert.equal(harness.session?.address, accountC);
+  assert.deepEqual(harness.commits.map((entry) => entry.address), [oldAddress, accountC]);
+});
+
+test("EVM_WALLET_DISCONNECT: explicit empty account event clears the Locus session", async () => {
+  const harness = fakeSessionHarness();
+  const address = "0xb0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0";
+  const provider = fakeEvmProvider([address]);
+  harness.bridge.beginConnection();
+  harness.bridge.updateAppKit(provider, address);
+  await harness.bridge.reconcile();
+  provider.accounts = [];
+  provider.emit("accountsChanged", []);
   assert.equal(harness.session, null);
   assert.equal(harness.storage.getItem(WALLET_SESSION_KEY), null);
+});
+
+test("POLKADOT_ACCOUNT_LIST and POLKADOT_SWITCH_A_TO_B create a fresh selected Ownership signer", async () => {
+  const publicKeyA = new Uint8Array(32).fill(21);
+  const publicKeyB = new Uint8Array(32).fill(22);
+  const accountA = { address: encodeAddress(publicKeyA), publicKey: publicKeyA, type: "sr25519", meta: { name: "Alice", source: "polkadot-js" } };
+  const accountB = { address: encodeAddress(publicKeyB), publicKey: publicKeyB, type: "sr25519", meta: { name: "Bob", source: "polkadot-js" } };
+  const options = polkadotAccountOptions([accountA, accountB]);
+  assert.deepEqual(options.map(({ label }) => label), ["Alice", "Bob"]);
+  assert.equal(requirePolkadotAccount([accountA, accountB], accountB.address), accountB);
+  assert.throws(() => requirePolkadotAccount([accountA], accountB.address), /no longer available/);
+  const injector = { signer: { signRaw: async () => ({ signature: `0x${"11".repeat(64)}` }) } };
+  const sessionA = await connectPolkadotAccount(accountA, injector);
+  const sessionB = await connectPolkadotAccount(accountB, injector);
+  assert.equal(sessionB.address, accountB.address);
+  assert.equal(sessionB.connectionId, accountB.address);
+  assert.notEqual(sessionA.ownershipSession.signer, sessionB.ownershipSession.signer);
+  assert.notDeepEqual(sessionA.owner, sessionB.owner);
+  let activeSession = sessionA;
+  let prepareCalled = false;
+  await switchPolkadotSession(sessionA, accountA.address, () => activeSession, async () => {
+    prepareCalled = true;
+    return sessionA;
+  }, (next) => { activeSession = next; });
+  assert.equal(prepareCalled, false, "selecting the current account is a no-op");
+  await switchPolkadotSession(sessionA, accountB.address, () => activeSession, async (address) => {
+    assert.equal(address, accountB.address);
+    return sessionB;
+  }, (next) => { activeSession = next; });
+  assert.equal(activeSession, sessionB);
+  assert.equal(activeSession.ownershipSession.signer, sessionB.ownershipSession.signer);
+  let failedCommit = false;
+  await assert.rejects(switchPolkadotSession(sessionB, accountA.address, () => activeSession, async () => {
+    throw new Error("selected extension account disappeared");
+  }, () => { failedCommit = true; }), /disappeared/);
+  assert.equal(failedCommit, false);
+  assert.equal(activeSession, sessionB, "a failed account replacement preserves the current Polkadot session");
+  const storage = new Map();
+  persistWalletSession({ setItem: (key, value) => storage.set(key, value), removeItem: (key) => storage.delete(key) }, sessionB);
+  assert.equal(JSON.parse(storage.get(WALLET_SESSION_KEY)).address, accountB.address);
+  assert.equal(requirePolkadotAccount([accountA, accountB], JSON.parse(storage.get(WALLET_SESSION_KEY)).address), accountB);
 });
 
 test("EVM_REFRESH_RESTORE: refresh restores the exact session already persisted at commit", async () => {

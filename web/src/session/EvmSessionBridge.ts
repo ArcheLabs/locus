@@ -7,6 +7,7 @@ type EvmEventProvider = Eip1193Provider & {
 };
 
 type EventSource = Pick<EventTarget, "addEventListener" | "removeEventListener">;
+type AccountHint = { address: string; revision: number };
 const ACCOUNT_QUERY_TIMEOUT_MS = 2_500;
 const EXISTING_ACCOUNT_FAST_PATH_MS = 650;
 
@@ -36,7 +37,10 @@ export class EvmSessionBridge {
   private provider: EvmEventProvider | null = null;
   private committedProvider: EvmEventProvider | null = null;
   private verifiedAddress: string | null = null;
-  private addressHint: string | null = null;
+  private appKitHint: AccountHint | null = null;
+  private providerHint: AccountHint | null = null;
+  private hintRevision = 0;
+  private selectionRevision = 0;
   private expectedAddress: string | null = null;
   private pending = false;
   private disposed = false;
@@ -72,7 +76,12 @@ export class EvmSessionBridge {
   updateAppKit(provider: Eip1193Provider | undefined, address: string | undefined): void {
     const nextProvider = provider as EvmEventProvider | undefined;
     if (nextProvider !== this.provider) this.bindProvider(nextProvider ?? null);
-    this.addressHint = address ?? null;
+    const nextAddress = isAddress(address) ? address : null;
+    const previousAddress = this.appKitHint?.address ?? null;
+    if (nextAddress?.toLowerCase() !== previousAddress?.toLowerCase()) {
+      this.selectionRevision += 1;
+      this.appKitHint = nextAddress ? { address: nextAddress, revision: ++this.hintRevision } : null;
+    }
     void this.reconcile();
   }
 
@@ -82,7 +91,7 @@ export class EvmSessionBridge {
     this.verifiedAddress = null;
     const commitsBefore = this.successfulCommits;
     let timeout: ReturnType<typeof setTimeout> | undefined;
-    const fastPathMs = this.addressHint ? ACCOUNT_QUERY_TIMEOUT_MS + 150 : EXISTING_ACCOUNT_FAST_PATH_MS;
+    const fastPathMs = this.appKitHint ? ACCOUNT_QUERY_TIMEOUT_MS + 150 : EXISTING_ACCOUNT_FAST_PATH_MS;
     await Promise.race([
       this.reconcile(),
       new Promise<void>((resolve) => { timeout = setTimeout(resolve, fastPathMs); }),
@@ -102,12 +111,15 @@ export class EvmSessionBridge {
   cancelConnection(): void {
     this.pending = false;
     this.expectedAddress = null;
+    this.selectionRevision += 1;
   }
 
   explicitDisconnect(): void {
     this.pending = false;
     this.expectedAddress = null;
     this.committedProvider = null;
+    this.verifiedAddress = null;
+    this.selectionRevision += 1;
     this.options.clearSession();
   }
 
@@ -129,81 +141,157 @@ export class EvmSessionBridge {
   private async reconcileOnce(): Promise<void> {
     const provider = this.provider;
     if (!provider) return;
-    let accounts: unknown;
+    const revision = this.selectionRevision;
+    const baseline = this.options.getSession();
+    let exposed: string[];
     try {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      let result: { timedOut: false; value: unknown } | { timedOut: true };
-      try {
-        result = await Promise.race([
-          provider.request({ method: "eth_accounts" }).then((value) => ({ timedOut: false as const, value })),
-          new Promise<{ timedOut: true }>((resolve) => {
-            timeout = setTimeout(() => resolve({ timedOut: true }), ACCOUNT_QUERY_TIMEOUT_MS);
-          }),
-        ]);
-      } finally {
-        if (timeout !== undefined) clearTimeout(timeout);
-      }
-      if (result.timedOut) {
-        if (this.pending && this.expectedAddress) this.options.onError?.(new Error("The EVM wallet did not respond while restoring this account. Reconnect it, then try again."));
-        return;
-      }
-      accounts = result.value;
+      exposed = await this.readExposedAccounts(provider);
     } catch (cause) {
-      if (this.pending && this.expectedAddress) this.options.onError?.(cause instanceof Error ? cause : new Error("Could not read accounts from the connected EVM wallet."));
+      if (provider !== this.provider || this.disposed || revision !== this.selectionRevision) return;
+      const current = this.options.getSession();
+      if (this.pending && this.expectedAddress) {
+        this.options.onError?.(cause instanceof Error ? cause : new Error("Could not read accounts from the connected EVM wallet."));
+      } else if (current?.kind === "evm" && this.hasDifferentHint(current.address)) {
+        this.options.onError?.(new Error(`Could not switch account. ${cause instanceof Error ? cause.message : "The wallet did not return its accounts."}`));
+      }
       return;
     }
     if (provider !== this.provider || this.disposed) return;
-    const exposed = Array.isArray(accounts) ? accounts.filter(isAddress) : [];
+    if (revision !== this.selectionRevision) {
+      this.reconcileAgain = true;
+      return;
+    }
+
     const current = this.options.getSession();
     if (current?.kind === "evm") {
-      // AppKit may publish an account hint before the provider has refreshed
-      // its account list after returning from a wallet app. The provider's
-      // eth_accounts result is authoritative; a transient hook mismatch alone
-      // must not invalidate the signer.
-      const hintedAccountIsExposed = !!this.addressHint && exposed.some((address) => address.toLowerCase() === this.addressHint!.toLowerCase());
-      if ((hintedAccountIsExposed && this.addressHint!.toLowerCase() !== current.address.toLowerCase())
-        || (exposed.length > 0 && !exposed.some((address) => address.toLowerCase() === current.address.toLowerCase()))) {
-        this.invalidateConfirmedSession();
-      } else if (exposed.some((address) => address.toLowerCase() === current.address.toLowerCase())) {
+      const target = this.targetAddress(exposed, current.address);
+      if (target && target.toLowerCase() !== current.address.toLowerCase()) {
+        if (!exposed.some((address) => address.toLowerCase() === target.toLowerCase())) return;
+        await this.commitConfirmedAddress(provider, target, revision, current);
+        return;
+      }
+      if (exposed.some((address) => address.toLowerCase() === current.address.toLowerCase())) {
         if (this.committedProvider === provider) {
           this.verifiedAddress = current.address;
           return;
         }
-        try {
-          const refreshed = await this.options.createSession(provider, current.address);
-          if (this.disposed || provider !== this.provider || this.options.getSession()?.address?.toLowerCase() !== current.address.toLowerCase()) return;
-          this.options.commitSession(refreshed);
-          this.committedProvider = provider;
-          this.verifiedAddress = current.address;
-          this.successfulCommits += 1;
-        } catch (cause) {
-          this.options.onError?.(cause instanceof Error ? cause : new Error("Could not refresh the EVM wallet session."));
-        }
-      }
-      return;
-    }
-    if (!this.pending) return;
-    if (this.expectedAddress && exposed.length > 0 && !exposed.some((address) => address.toLowerCase() === this.expectedAddress!.toLowerCase())) {
-      this.invalidateConfirmedSession();
-      return;
-    }
-    const address = selectExposedEvmAccount(exposed, this.addressHint, this.expectedAddress);
-    if (!address) return;
-    try {
-      const session = await this.options.createSession(provider, address);
-      if (this.disposed || provider !== this.provider || !this.pending) {
-        try { session.cleanup?.(); } catch { /* The abandoned connection must not stay active in memory. */ }
+        await this.commitConfirmedAddress(provider, current.address, revision, current);
         return;
       }
-      this.options.commitSession(session);
-      this.committedProvider = provider;
-      this.verifiedAddress = address;
-      this.successfulCommits += 1;
-      this.pending = false;
-      this.expectedAddress = null;
-    } catch (cause) {
-      if (this.pending) this.options.onError?.(cause instanceof Error ? cause : new Error("EVM wallet connection failed."));
+      if (target && target.toLowerCase() !== current.address.toLowerCase()) return;
+      if (exposed.length > 0) this.invalidateConfirmedSession();
+      return;
     }
+
+    if (!this.pending) return;
+    if (this.expectedAddress) {
+      if (exposed.length > 0 && !exposed.some((address) => address.toLowerCase() === this.expectedAddress!.toLowerCase())) {
+        this.invalidateConfirmedSession();
+        return;
+      }
+      const address = selectExposedEvmAccount(exposed, this.latestHint()?.address, this.expectedAddress);
+      if (address) await this.commitConfirmedAddress(provider, address, revision, baseline);
+      return;
+    }
+    const address = selectExposedEvmAccount(exposed, this.latestHint()?.address);
+    if (address) await this.commitConfirmedAddress(provider, address, revision, baseline);
+  }
+
+  private async commitConfirmedAddress(provider: EvmEventProvider, address: string, revision: number, baseline: LocusWebSession | null): Promise<void> {
+    let next: LocusWebSession;
+    try {
+      next = await this.options.createSession(provider, address);
+    } catch (cause) {
+      if (this.isCommitCurrent(provider, revision, baseline)) {
+        const detail = cause instanceof Error ? cause.message : "The wallet session could not be created.";
+        const current = this.options.getSession();
+        this.options.onError?.(current?.kind === "evm" && current.address.toLowerCase() !== address.toLowerCase()
+          ? new Error(`Could not switch account. ${detail}`)
+          : cause instanceof Error ? cause : new Error("EVM wallet connection failed."));
+      }
+      return;
+    }
+
+    if (!this.isCommitCurrent(provider, revision, baseline)) {
+      try { next.cleanup?.(); } catch { /* Discard stale signer sessions. */ }
+      if (provider === this.provider && !this.disposed && revision !== this.selectionRevision) this.reconcileAgain = true;
+      return;
+    }
+
+    let confirmed: string[];
+    try {
+      confirmed = await this.readExposedAccounts(provider);
+    } catch (cause) {
+      try { next.cleanup?.(); } catch { /* Keep the existing session if confirmation failed. */ }
+      if (this.isCommitCurrent(provider, revision, baseline)) {
+        const detail = cause instanceof Error ? cause.message : "The wallet did not return its accounts.";
+        const current = this.options.getSession();
+        this.options.onError?.(current?.kind === "evm" && current.address.toLowerCase() !== address.toLowerCase()
+          ? new Error(`Could not switch account. ${detail}`)
+          : cause instanceof Error ? cause : new Error("The EVM wallet account could not be confirmed."));
+      }
+      return;
+    }
+    if (!this.isCommitCurrent(provider, revision, baseline)) {
+      try { next.cleanup?.(); } catch { /* Discard stale signer sessions. */ }
+      if (provider === this.provider && !this.disposed && revision !== this.selectionRevision) this.reconcileAgain = true;
+      return;
+    }
+    if (!confirmed.some((candidate) => candidate.toLowerCase() === address.toLowerCase())) {
+      try { next.cleanup?.(); } catch { /* The wallet changed during session creation. */ }
+      this.reconcileAgain = true;
+      return;
+    }
+
+    this.options.commitSession(next);
+    this.committedProvider = provider;
+    this.verifiedAddress = address;
+    this.successfulCommits += 1;
+    this.pending = false;
+    this.expectedAddress = null;
+  }
+
+  private async readExposedAccounts(provider: EvmEventProvider): Promise<string[]> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    let result: { timedOut: false; value: unknown } | { timedOut: true };
+    try {
+      result = await Promise.race([
+        provider.request({ method: "eth_accounts" }).then((value) => ({ timedOut: false as const, value })),
+        new Promise<{ timedOut: true }>((resolve) => {
+          timeout = setTimeout(() => resolve({ timedOut: true }), ACCOUNT_QUERY_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+    }
+    if (result.timedOut) throw new Error("The EVM wallet did not respond while checking its accounts.");
+    return Array.isArray(result.value) ? result.value.filter(isAddress) : [];
+  }
+
+  private isCommitCurrent(provider: EvmEventProvider, revision: number, baseline: LocusWebSession | null): boolean {
+    return !this.disposed && provider === this.provider && revision === this.selectionRevision && this.options.getSession() === baseline;
+  }
+
+  private targetAddress(exposed: readonly string[], currentAddress: string): string | null {
+    const hints = [this.appKitHint, this.providerHint].filter((hint): hint is AccountHint => hint !== null);
+    const matching = hints.filter((hint) => exposed.some((address) => address.toLowerCase() === hint.address.toLowerCase()));
+    const alternatives = matching.filter((hint) => hint.address.toLowerCase() !== currentAddress.toLowerCase());
+    if (alternatives.length > 0) return alternatives.sort((a, b) => b.revision - a.revision)[0].address;
+    if (exposed.some((address) => address.toLowerCase() === currentAddress.toLowerCase())) return currentAddress;
+
+    const pendingAlternatives = hints.filter((hint) => hint.address.toLowerCase() !== currentAddress.toLowerCase());
+    if (pendingAlternatives.length > 0) return pendingAlternatives.sort((a, b) => b.revision - a.revision)[0].address;
+    return null;
+  }
+
+  private latestHint(): AccountHint | null {
+    if (!this.appKitHint) return this.providerHint;
+    if (!this.providerHint) return this.appKitHint;
+    return this.appKitHint.revision > this.providerHint.revision ? this.appKitHint : this.providerHint;
+  }
+
+  private hasDifferentHint(address: string): boolean {
+    return [this.appKitHint, this.providerHint].some((hint) => hint && hint.address.toLowerCase() !== address.toLowerCase());
   }
 
   private invalidateConfirmedSession(): void {
@@ -233,26 +321,32 @@ export class EvmSessionBridge {
       for (const [event, listener] of this.providerListeners) this.provider.removeListener?.(event, listener);
     }
     this.provider = provider;
+    this.providerHint = null;
     this.verifiedAddress = null;
+    this.selectionRevision += 1;
     this.providerListeners = [];
     if (!provider?.on) return;
     const accountsChanged = (...args: unknown[]) => {
+      if (provider !== this.provider || this.disposed) return;
       const accounts = Array.isArray(args[0]) ? args[0].filter(isAddress) : [];
-      const current = this.options.getSession();
-      // accountsChanged is an explicit provider signal, so an empty list or a
-      // different selected account invalidates the old signer immediately.
-      if (current?.kind === "evm" && accounts[0]?.toLowerCase() !== current.address.toLowerCase()) {
+      this.selectionRevision += 1;
+      this.providerHint = accounts[0] ? { address: accounts[0], revision: ++this.hintRevision } : null;
+      if (accounts.length === 0) {
         this.invalidateConfirmedSession();
-      } else if (this.pending && this.expectedAddress && accounts.length > 0
-        && !accounts.some((address) => address.toLowerCase() === this.expectedAddress!.toLowerCase())) {
-        this.invalidateConfirmedSession();
-      } else {
-        void this.reconcile();
+        return;
       }
+      void this.reconcile();
     };
-    const connected = () => { void this.reconcile(); };
+    const connected = () => { if (provider === this.provider && !this.disposed) void this.reconcile(); };
+    const disconnected = () => {
+      if (provider !== this.provider || this.disposed) return;
+      this.selectionRevision += 1;
+      this.providerHint = null;
+      this.invalidateConfirmedSession();
+    };
     provider.on("accountsChanged", accountsChanged);
     provider.on("connect", connected);
-    this.providerListeners.push(["accountsChanged", accountsChanged], ["connect", connected]);
+    provider.on("disconnect", disconnected);
+    this.providerListeners.push(["accountsChanged", accountsChanged], ["connect", connected], ["disconnect", disconnected]);
   }
 }

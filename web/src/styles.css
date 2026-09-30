@@ -374,6 +374,19 @@ button:disabled { cursor: not-allowed; }
 .account-center-footer { display: grid; gap: 8px; padding-top: 2px; }
 .account-center-footer > .action-button { width: 100%; }
 .account-center-footer > small { color: var(--text-secondary); font-size: 12px; text-align: center; }
+.account-switch-status { display: flex; align-items: center; gap: 9px; padding: 12px 2px; color: var(--text-secondary); font-size: 13px; }
+.account-switch-empty { margin: 0; color: var(--text-secondary); font-size: 13px; }
+.account-switch-list { display: grid; gap: 8px; max-height: min(56dvh, 520px); overflow-y: auto; }
+.account-switch-option { display: flex; min-width: 0; align-items: center; gap: 12px; padding: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle); color: var(--text); text-align: left; }
+.account-switch-option:hover:not(:disabled), .account-switch-option:focus-visible { border-color: var(--accent); background: var(--surface-hover); outline: none; }
+.account-switch-option:disabled { cursor: wait; opacity: .7; }
+.account-switch-option__icon { display: grid; flex: 0 0 36px; width: 36px; height: 36px; place-items: center; border-radius: 50%; background: var(--surface-hover); color: var(--accent); }
+.account-switch-option__text { display: grid; min-width: 0; flex: 1; gap: 3px; }
+.account-switch-option__text strong, .account-switch-option__text small, .account-switch-option__text code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.account-switch-option__text small { color: var(--text-secondary); font-size: 12px; }
+.account-switch-option__text code { color: var(--text-muted); font-size: 11px; }
+.account-switch-option__selected { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 12px; }
+.account-switch-footer { display: flex; justify-content: flex-end; padding-top: 6px; }
 .asset-row-info > strong { font-weight: 500; }
 .asset-row-info > small, .asset-row-balance > small { color: var(--text-muted); font-size: 12px; }
 .asset-row-balance { display: grid; justify-items: end; gap: 3px; font-weight: 400; }

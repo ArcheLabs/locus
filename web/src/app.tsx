@@ -17,10 +17,12 @@ import { attachAssetBalances, keepAssetRowsForScope } from "./locus/assetCache.j
 import { resolveRecipient, detectRecipientType, type RecipientType } from "./locus/recipients.js";
 import { transferAndWait, type SendState } from "./locus/transaction.js";
 import { useSession } from "./session/SessionProvider.js";
-import { connectEvmProvider, restoreBrowserSession, watchBrowserSession } from "./session/connectors.js";
+import { connectBrowserSession, connectEvmProvider, restoreBrowserSession, watchBrowserSession } from "./session/connectors.js";
 import { activeSessionKind, markSessionDisconnected, setActiveSessionKind } from "./session/sessionPersistence.js";
 import { EvmSessionBridge } from "./session/EvmSessionBridge.js";
 import { ConnectDialog } from "./session/ConnectDialog.js";
+import { PolkadotAccountSwitchDialog } from "./session/PolkadotAccountSwitchDialog.js";
+import { switchPolkadotSession } from "./session/polkadotSession.js";
 import { CreateAssetDialog, ReceiveDialog, ReviewDialog } from "./locus/dialogs.js";
 import { AssetPicker } from "./locus/AssetPicker.js";
 import { Modal } from "./components/Modal.js";
@@ -38,7 +40,7 @@ import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSessio
 import { matrixStateRequiresUserInteraction } from "./matrix/MatrixInteraction.js";
 import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
 import { completeMatrixAuthCallback, hasMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
-import { useAppKitAccount, useAppKitProvider, useDisconnect } from "@reown/appkit/react";
+import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from "@reown/appkit/react";
 import type { Eip1193Provider } from "@jamscript/client";
 import type { SessionKind } from "./session/types.js";
 import { OwnershipInput } from "./locus/OwnershipInput.js";
@@ -138,6 +140,8 @@ export function App() {
   const [sendFormError, setSendFormError] = useState("");
   const [sessionActivity, setSessionActivity] = useState<ActivityItem[]>([]);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [polkadotSwitchOpen, setPolkadotSwitchOpen] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const [walletConnectPending, setWalletConnectPending] = useState<SessionKind | null>(null);
   const [evmConnectError, setEvmConnectError] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -156,6 +160,7 @@ export function App() {
   const matrixAuthAbort = useRef<AbortController | null>(null);
   const { address: appKitAddress, isConnected: appKitEvmConnected } = useAppKitAccount({ namespace: "eip155" });
   const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
+  const { open: openAppKit } = useAppKit();
   const { disconnect: disconnectAppKit } = useDisconnect();
   const sessionRef = useRef(session);
   const lifecycleRef = useRef(lifecycle);
@@ -176,6 +181,7 @@ export function App() {
       onError: (error) => {
         setWalletConnectPending(null);
         setEvmConnectError(error.message);
+        if (sessionRef.current?.kind === "evm" && error.message.startsWith("Could not switch account.")) notify(error.message);
         if (lifecycleRef.current === "restoring") {
           evmBridgeRef.current?.cancelConnection();
           finishRestore(`Could not restore the EVM session. It remains saved so you can retry. ${error.message}`);
@@ -375,6 +381,34 @@ export function App() {
 
   function openConnect() {
     setConnectOpen(true);
+  }
+
+  function openAccountSwitch() {
+    const current = sessionRef.current;
+    if (current?.kind === "evm") {
+      void openAppKit({ view: "Account", namespace: "eip155" }).catch((cause: unknown) => {
+        notify(cause instanceof Error ? cause.message : "Could not open the wallet account menu.");
+      });
+    } else if (current?.kind === "polkadot") {
+      setPolkadotSwitchOpen(true);
+    }
+  }
+
+  async function switchPolkadotAccount(address: string) {
+    const previous = sessionRef.current;
+    if (previous?.kind !== "polkadot") throw new Error("The Polkadot session changed. Reopen Account to switch accounts.");
+    setSwitchingAccount(true);
+    try {
+      await switchPolkadotSession(
+        previous,
+        address,
+        () => sessionRef.current,
+        (selectedAddress) => connectBrowserSession("polkadot", selectedAddress),
+        setSession,
+      );
+    } finally {
+      setSwitchingAccount(false);
+    }
   }
 
   useEffect(() => {
@@ -580,10 +614,22 @@ export function App() {
     setAmount("");
     setAmountTouched(false);
     setRecipient("");
+    setRecipientType("matrix");
+    setMatrixRecipientState({ status: "idle" });
     setRecipientTouched(false);
     setSendAttempted(false);
     setSendFormError("");
     setSendState({ status: "idle" });
+    setSelectedAssetId(null);
+    setAssetSearch("");
+    setAssetPickerOpen(false);
+    setTypeOpen(false);
+    setReviewOpen(false);
+    setReceiveAsset(null);
+    setCreateAssetOpen(false);
+    setDetailAsset(null);
+    setPolkadotSwitchOpen(false);
+    setToast("");
   }, [session?.connectionId, session?.kind, session?.address]);
 
   useEffect(() => {
@@ -815,13 +861,13 @@ export function App() {
             {networkMode
               ? <NetworkSwitcher compact />
               : <span className="mobile-demo-indicator"><span className="status-dot ready" aria-hidden="true" />Demo</span>}
-            <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} pendingKind={walletConnectPending} onConnect={openConnect} onDisconnect={disconnectSession} onRemoveMatrixDevice={() => signOutMatrix()} />
+            <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} pendingKind={walletConnectPending} onConnect={openConnect} onSwitchAccount={openAccountSwitch} switchingAccount={switchingAccount} onDisconnect={disconnectSession} onRemoveMatrixDevice={() => signOutMatrix()} />
       </MobileNavigation>
 
       <main className="main">
         <header className="topbar">
           <ThemeControl />
-          <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} pendingKind={walletConnectPending} onConnect={openConnect} onDisconnect={disconnectSession} onRemoveMatrixDevice={() => signOutMatrix()} />
+          <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} pendingKind={walletConnectPending} onConnect={openConnect} onSwitchAccount={openAccountSwitch} switchingAccount={switchingAccount} onDisconnect={disconnectSession} onRemoveMatrixDevice={() => signOutMatrix()} />
         </header>
 
         {networkMode && network.status !== "ready" && (
@@ -855,6 +901,7 @@ export function App() {
         }
         return reconnected;
       }} onEvmConnectCancelled={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); }} evmError={evmConnectError} evmAccountAvailable={Boolean(walletProvider && appKitAddress)} locus={network.locus} initialMatrixConnection={connectOpen ? pendingMatrixConnection : null} />
+      <PolkadotAccountSwitchDialog open={polkadotSwitchOpen} currentAccount={session?.kind === "polkadot" ? session.address : ""} onClose={() => setPolkadotSwitchOpen(false)} onSelect={switchPolkadotAccount} />
       {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={resolvedRecipient} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
       <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
       <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} networkId={network.networkId} serviceId={network.deployment?.serviceId ?? null} onClose={() => setCreateAssetOpen(false)} onCreated={() => void refreshAssets()} />

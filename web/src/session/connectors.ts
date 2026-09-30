@@ -2,34 +2,21 @@ import { web3Accounts, web3AccountsSubscribe, web3Enable, web3FromAddress } from
 import { getWallets } from "@wallet-standard/app";
 import {
   EvmOwnershipSigner,
-  PolkadotOwnershipSigner,
   SolanaOwnershipSigner,
-  decodePolkadotAccountId,
   type Ownership,
   type Eip1193Provider,
 } from "@jamscript/client";
 import { SolanaSignMessage, type SolanaSignMessageFeature } from "@solana/wallet-standard-features";
 import type { Wallet, WalletAccount } from "@wallet-standard/base";
 import type { LocusWebSession, SessionKind } from "./types.js";
-
-type PolkadotAccount = {
-  address: string;
-  publicKey?: Uint8Array;
-  type?: string;
-  name?: string;
-  meta?: { name?: string; source?: string };
-};
+import { connectPolkadotAccount, polkadotAccountOptions, requirePolkadotAccount, type BrowserAccountOption, type PolkadotBrowserAccount } from "./polkadotSession.js";
+export { connectPolkadotAccount, polkadotAccountOptions, requirePolkadotAccount } from "./polkadotSession.js";
+export type { BrowserAccountOption, PolkadotBrowserAccount } from "./polkadotSession.js";
 
 type WindowWithEthereum = Window & { ethereum?: Eip1193Provider };
 
 type StandardConnectFeature = {
   connect(options?: { silent?: boolean }): Promise<{ accounts: readonly WalletAccount[] }>;
-};
-
-export type BrowserAccountOption = {
-  id: string;
-  label: string;
-  description: string;
 };
 
 type EventProvider = Eip1193Provider & {
@@ -78,17 +65,14 @@ async function evmAccounts(): Promise<BrowserAccountOption[]> {
   return accounts.map((address) => ({ id: address, label: shortAddress(address), description: address }));
 }
 
-async function polkadotAccounts(): Promise<{ account: PolkadotAccount; option: BrowserAccountOption }[]> {
+async function polkadotAccounts(): Promise<{ account: PolkadotBrowserAccount; option: BrowserAccountOption }[]> {
   const extensions = await web3Enable("Locus");
   if (extensions.length === 0) throw new Error("No Polkadot extension was detected in this browser.");
-  const accounts = await web3Accounts() as PolkadotAccount[];
+  const accounts = await web3Accounts() as PolkadotBrowserAccount[];
+  const options = polkadotAccountOptions(accounts);
   return accounts.map((account) => ({
     account,
-    option: {
-      id: account.address,
-      label: account.meta?.name ?? account.name ?? shortAddress(account.address),
-      description: `${account.meta?.source ?? "Polkadot extension"} · ${account.type ?? "scheme unavailable"}`,
-    },
+    option: options.find((option) => option.id === account.address)!,
   }));
 }
 
@@ -160,33 +144,10 @@ export async function connectEvmProvider(provider: Eip1193Provider, address: str
   };
 }
 
-function polkadotScheme(account: PolkadotAccount): "ed25519" | "sr25519" | "ecdsa" {
-  if (account.type === "ed25519" || account.type === "sr25519" || account.type === "ecdsa") return account.type;
-  throw new Error("The Polkadot extension did not provide a supported signature scheme for this account.");
-}
-
 async function connectPolkadot(selectedId: string): Promise<LocusWebSession> {
-  const selected = (await polkadotAccounts()).find(({ account }) => account.address === selectedId);
-  if (!selected) throw new Error("The selected Polkadot account is no longer available.");
-  const { account } = selected;
-  const injector = await web3FromAddress(account.address);
-  if (!injector.signer.signRaw) throw new Error("The selected Polkadot extension cannot sign raw messages.");
-  const accountId = account.publicKey ? Uint8Array.from(account.publicKey) : decodePolkadotAccountId(account.address);
-  const signer = new PolkadotOwnershipSigner({
-    accountId,
-    address: account.address,
-    scheme: polkadotScheme(account),
-    signer: { signRaw: (input) => injector.signer.signRaw!(input) },
-  });
-  return {
-    kind: "polkadot",
-    owner: asOwnership(await signer.getController()),
-    controller: asOwnership(await signer.getController()),
-    ownershipSession: { signer, subject: asOwnership(await signer.getController()) },
-    label: `Polkadot ${shortAddress(account.address)}`,
-    address: account.address,
-    connectionId: account.address,
-  };
+  const accounts = await polkadotAccounts();
+  const account = requirePolkadotAccount(accounts.map(({ account }) => account), selectedId);
+  return connectPolkadotAccount(account, await web3FromAddress(account.address));
 }
 
 async function connectSolana(selectedId: string): Promise<LocusWebSession> {
@@ -235,15 +196,11 @@ export async function restoreBrowserSession(kind: Exclude<SessionKind, "matrix">
     return connectEvmProvider(provider, address);
   }
   if (kind === "polkadot") {
-    const selected = (await polkadotAccounts()).find(({ account }) => account.address === selectedId);
-    if (!selected) throw new Error("The saved Polkadot account is not enabled for this site.");
-    const { account } = selected;
-    const injector = await web3FromAddress(account.address);
-    if (!injector.signer.signRaw) throw new Error("The selected Polkadot extension cannot sign raw messages.");
-    const accountId = account.publicKey ? Uint8Array.from(account.publicKey) : decodePolkadotAccountId(account.address);
-    const signer = new PolkadotOwnershipSigner({ accountId, address: account.address, scheme: polkadotScheme(account), signer: { signRaw: (input) => injector.signer.signRaw!(input) } });
-    const controller = asOwnership(await signer.getController());
-    return { kind: "polkadot", owner: controller, controller, ownershipSession: { signer, subject: controller }, label: `Polkadot ${shortAddress(account.address)}`, address: account.address, connectionId: account.address };
+    const accounts = await polkadotAccounts();
+    let account: PolkadotBrowserAccount;
+    try { account = requirePolkadotAccount(accounts.map(({ account }) => account), selectedId); }
+    catch { throw new Error("The saved Polkadot account is not enabled for this site."); }
+    return connectPolkadotAccount(account, await web3FromAddress(account.address));
   }
   const separator = selectedId.indexOf("::");
   const walletName = separator < 0 ? selectedId : selectedId.slice(0, separator);
@@ -274,7 +231,7 @@ export function watchBrowserSession(session: LocusWebSession, onAccountChanged: 
     let unsubscribe: (() => void) | undefined;
     void web3Enable("Locus").then(() => web3AccountsSubscribe((accounts) => {
       if (stopped) return;
-      const selected = (accounts as PolkadotAccount[]).some((account) => account.address === session.address);
+      const selected = (accounts as PolkadotBrowserAccount[]).some((account) => account.address === session.address);
       onAccountChanged(selected ? session.address : null);
     })).then((off) => {
       if (stopped) off();
