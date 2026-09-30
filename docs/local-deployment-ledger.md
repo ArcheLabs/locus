@@ -1,25 +1,31 @@
 # MiniJAM Local deployment ledger
 
 The production web app targets **MiniJAM Local / Development**. Its active
-immutable Locus Service is `4209643396`, finalized at block `9631`, with code
+immutable Locus Service is `3389972726`, finalized at block `14673`, with code
 hash
-`0x0e272d0bb5ddc33d53c49f2c5f2f8743be3a59c36ebfa6a4f6c13d60687dc71a`.
-It was built with published `jams v0.1.0-rc.8` and the verified canonical rc.8
-toolchain (SHA-256
-`f804235bdae7239e57d9a7eb0d4413df65d1f785c05aa0cb4af5a28297548d03`) from
-commit `5e04c4c`. Pool creation, add liquidity, remove liquidity, and swap
-passed disposable-chain action and state verification before deployment.
+`0x8cbeae6e641143a69ad950168620f007f3bff4a3288b67f540aba222716b4402`.
+It was built from Locus commit `7cbd34a` with JamScript CLI `v0.1.0-rc.8`
+from source commit `b2031db`. Its local ScriptC toolchain bundle SHA-256 is
+`364827c28cfcf29335d9481c80370c28e0a9b8a2a7a4a4a652a0e07e0c03d91e`; the
+service profile uses release optimization (`-O2`) under the existing 5M PVM
+action budget. This fixes the prior planner trap caused by unoptimized service
+code.
 
-The HTTPS `/` deployment and Local catalog both target Service `4209643396`.
+The HTTPS `/` deployment and Local catalog both target Service `3389972726`.
 Its state was initialized from scratch: six curated assets have their complete
-initial supply at Treasury, and `poolCount=0`. No state was migrated from an
-older Service. Former production Service `4062826813` remains immutable with
-its prior state; its rollback descriptor and catalog are preserved at
+initial supply at Treasury, and `poolCount=0`. No state or balances were
+migrated. Former production Service `4209643396` remains immutable with its
+prior state; its rollback descriptor and catalog are preserved at
+`web/public/deployments/local-rollback-4209643396.json` and
+`web/public/catalogs/local-4209643396.json`. Former Service `4062826813` also
+remains immutable with its rollback descriptor and catalog preserved at
 `web/public/deployments/local-rollback-4062826813.json` and
 `web/public/catalogs/local-4062826813.json`. `2323996321`, `797069104`,
 `3083943385`, and `3302613027` are older historical deployments.
 
 The HTTPS `/rpc` route validated the new descriptor and Backend service state.
+All six curated asset creation actions finalized, and their full initial
+supplies were verified at Treasury on the new Service.
 The on-chain Matrix adapter bootstrap, controller grant, authorized action, and
 client reconstruction/restore check passed using the adapter's valid local
 proof fixture. This was not a real Matrix OAuth/SAS session; interactive

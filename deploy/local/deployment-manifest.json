@@ -2,15 +2,15 @@
   "format": 1,
   "network": "local",
   "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
-  "locusServiceId": 4209643396,
-  "locusCodeHash": "0x0e272d0bb5ddc33d53c49f2c5f2f8743be3a59c36ebfa6a4f6c13d60687dc71a",
+  "locusServiceId": 3389972726,
+  "locusCodeHash": "0x8cbeae6e641143a69ad950168620f007f3bff4a3288b67f540aba222716b4402",
   "deployment": {
     "finalized": true,
-    "blockNumber": 9631,
-    "blockHash": "0xb172a5d88b9351728c08c9d29839f00c131ef00a22453a0a249f40fa3659d3f3",
-    "operationId": "0xba0cc783c549089cfb6c785d976550ad6509f4aa1da08e1509edb0ff9786f189"
+    "blockNumber": 14673,
+    "blockHash": "0x6bb212f33bf69d18e6dcef058535c5b5f5e761408af44faebcdcccbd2dada865",
+    "operationId": "0xf87777524de7937eae76e66a964d244f5c5f545e2b6eb3ff41ce8bf4da35182f"
   },
-  "locusCommit": "5e04c4c4b9e21aa437ecdcd01c0166d5a1c7fc44",
+  "locusCommit": "7cbd34add10bfed9a0aa7e3db15c77badf575c08",
   "jamscriptRelease": "v0.1.0-rc.8",
   "backendRelease": "backend-v0.1.0-rc.8",
   "minijamRelease": "stage1-v0.2.0",
@@ -19,5 +19,8 @@
     "backend": "sha256:4fd6baf37c7a4ba539585f9b1a157dad053d0836f75ded49b97fb704179a6e25"
   },
   "initializedAssetCount": 6,
-  "initializedPoolCount": 0
+  "initializedPoolCount": 0,
+  "jamscriptSourceCommit": "b2031db",
+  "jamscriptToolchainSha256": "364827c28cfcf29335d9481c80370c28e0a9b8a2a7a4a4a652a0e07e0c03d91e",
+  "scriptcOptimization": "release"
 }
