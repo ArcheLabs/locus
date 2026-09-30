@@ -140,7 +140,7 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
               setOpen(false);
               window.setTimeout(onSwitchAccount, 0);
             }}>{switchingAccount ? "Switching account…" : "Switch account"}</ActionButton>}
-            <ActionButton variant="secondary" icon={Unplug} onClick={() => { setOpen(false); onDisconnect(); }}>Disconnect from Locus</ActionButton>
+            <ActionButton variant="danger" icon={Unplug} onClick={() => { setOpen(false); onDisconnect(); }}>Disconnect</ActionButton>
             <small>{session.kind === "matrix" ? "Your Matrix device and crypto store will be kept." : session.kind === "evm" || session.kind === "polkadot" ? "Disconnecting only ends the Locus session. Wallet authorization is kept." : "Only the Locus session is disconnected."}</small>
           </footer>
         </div>
