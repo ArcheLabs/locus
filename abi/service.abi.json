@@ -232,6 +232,24 @@
           }
         },
         {
+          "name": "amountAUsed",
+          "type": {
+            "kind": "u128"
+          }
+        },
+        {
+          "name": "amountBUsed",
+          "type": {
+            "kind": "u128"
+          }
+        },
+        {
+          "name": "sharesMinted",
+          "type": {
+            "kind": "u128"
+          }
+        },
+        {
           "name": "minShares",
           "type": {
             "kind": "u128"
@@ -278,6 +296,18 @@
         },
         {
           "name": "shares",
+          "type": {
+            "kind": "u128"
+          }
+        },
+        {
+          "name": "amountAOut",
+          "type": {
+            "kind": "u128"
+          }
+        },
+        {
+          "name": "amountBOut",
           "type": {
             "kind": "u128"
           }

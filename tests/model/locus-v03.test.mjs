@@ -326,8 +326,31 @@ test("SDK quote, pool read and slippage helper use exact integer rules", async (
     "subject", "assetA", "assetB", "amountA", "amountB", "initialShares",
   ]);
   assert.deepEqual(abi.actions.find((action) => action.name === "addPoolLiquidity").input.map((field) => field.name), [
-    "subject", "assetA", "assetB", "maxAmountA", "maxAmountB", "minShares", "initialShares",
+    "subject", "assetA", "assetB", "maxAmountA", "maxAmountB", "amountAUsed", "amountBUsed", "sharesMinted", "minShares", "initialShares",
   ]);
+  assert.deepEqual(abi.actions.find((action) => action.name === "removePoolLiquidity").input.map((field) => field.name), [
+    "subject", "assetA", "assetB", "shares", "amountAOut", "amountBOut", "minAmountA", "minAmountB",
+  ]);
+});
+
+test("SDK supplies a quoted withdrawal for the division-free service action", async () => {
+  const model = fundedModel();
+  model.createPoolAs(alice, alice, assetA, assetB, 100_000n, 200_000n);
+  const calls = [];
+  const signer = { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } };
+  const adapter = {
+    async submitOwnershipAction(actionName, input) {
+      calls.push({ actionName, input, payload: encodeActionPayload(abi, actionName, input) });
+      return { transactionId: "0xremove", status: "queued", actionHash: "0xaction" };
+    },
+    async queryLatest(name, queryKey) { return { value: model.query(name, queryKey) }; },
+  };
+  const locus = new LocusClient(adapter, { signer, subject: alice });
+  await locus.removePoolLiquidity(assetB, assetA, 250n, 0n, 0n);
+  assert.equal(calls[0].actionName, "removePoolLiquidity");
+  assert.equal(calls[0].input.amountAOut, 353n);
+  assert.equal(calls[0].input.amountBOut, 176n);
+  assert.ok(calls[0].payload instanceof Uint8Array && calls[0].payload.length > 0);
 });
 
 test("SDK supplies client-computed initial shares in create and empty-pool initialize actions", async () => {
@@ -349,6 +372,9 @@ test("SDK supplies client-computed initial shares in create and empty-pool initi
   assert.equal(calls[0].input.initialShares, 316n);
   assert.equal(calls[1].actionName, "addPoolLiquidity");
   assert.equal(calls[1].input.initialShares, 316n);
+  assert.equal(calls[1].input.amountAUsed, 100n);
+  assert.equal(calls[1].input.amountBUsed, 1_000n);
+  assert.equal(calls[1].input.sharesMinted, 316n);
   assert.ok(calls.every((call) => call.payload instanceof Uint8Array && call.payload.length > 0));
 });
 

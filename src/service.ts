@@ -209,6 +209,7 @@ function requireInitialShares(amountA: u128, amountB: u128, shares: u128): void 
 
 function requirePoolInvariant(totalShares: u128, reserve0: u128, reserve1: u128): void {
   let zero: u128 = 0n;
+  requirePoolReserve(totalShares);
   const empty = reserve0 === zero && reserve1 === zero;
   if (totalShares === zero) {
     if (!empty) abort(9001);
@@ -412,27 +413,34 @@ export const createPool = action({
 
     const key = canonicalPoolKey(input.assetA, input.assetB);
     if (pools.has(key)) abort(6002);
+    const ownerId = ownerKey(input.subject);
+    const balanceAKey = { assetId: input.assetA, ownerKey: ownerId };
+    const balanceBKey = { assetId: input.assetB, ownerKey: ownerId };
+    const shareKey = { asset0: key.asset0, asset1: key.asset1, ownerKey: ownerId };
     let amount0: u128 = input.amountA;
     let amount1: u128 = input.amountB;
     if (compareAssetIds(input.assetA, key.asset0) !== 0) {
       amount0 = input.amountB;
       amount1 = input.amountA;
     }
-    const balanceAKey = balanceKey(input.assetA, input.subject);
-    const balanceBKey = balanceKey(input.assetB, input.subject);
     const balanceA = balances.get(balanceAKey) ?? 0n;
     const balanceB = balances.get(balanceBKey) ?? 0n;
     if (balanceA < input.amountA || balanceB < input.amountB) abort(3002);
     requireInitialShares(input.amountA, input.amountB, input.initialShares);
+    const existingShares = liquidityShares.has(shareKey);
+    const positionCount = liquidityPositionCount.get(ownerId) ?? 0n;
+    if (!existingShares && positionCount === 18446744073709551615n) abort(3003);
+    const count = poolCount.get() ?? 0n;
+    if (count === 18446744073709551615n) abort(3003);
 
     balances.set(balanceAKey, checkedSub(balanceA, input.amountA));
     balances.set(balanceBKey, checkedSub(balanceB, input.amountB));
     pools.set(key, { version: 2, reserve0: amount0, reserve1: amount1, totalShares: input.initialShares });
-    const shareKey = liquidityShareKey(key.asset0, key.asset1, input.subject);
-    ensureLiquidityPositionIndexed(key, input.subject);
+    if (!existingShares) {
+      liquidityPositionByIndex.set({ ownerKey: ownerId, index: positionCount }, key);
+      liquidityPositionCount.set(ownerId, positionCount + 1n);
+    }
     liquidityShares.set(shareKey, input.initialShares);
-    const count = poolCount.get() ?? 0n;
-    if (count === 18446744073709551615n) abort(3003);
     poolByIndex.set(count, key);
     poolCount.set(count + 1n);
   },
@@ -446,6 +454,9 @@ export const addPoolLiquidity = action({
     assetB: AssetId,
     maxAmountA: u128,
     maxAmountB: u128,
+    amountAUsed: u128,
+    amountBUsed: u128,
+    sharesMinted: u128,
     minShares: u128,
     initialShares: u128,
   },
@@ -455,30 +466,33 @@ export const addPoolLiquidity = action({
     const pool = pools.get(key);
     if (!pool) abort(6001);
     requirePoolInvariant(pool.totalShares, pool.reserve0, pool.reserve1);
-    if (input.maxAmountA === 0n || input.maxAmountB === 0n) abort(6009);
+    if (input.maxAmountA === 0n || input.maxAmountB === 0n
+      || input.amountAUsed === 0n || input.amountBUsed === 0n
+      || input.sharesMinted === 0n) abort(6009);
     requirePoolReserve(input.maxAmountA);
     requirePoolReserve(input.maxAmountB);
+    requirePoolReserve(input.amountAUsed);
+    requirePoolReserve(input.amountBUsed);
+    requirePoolReserve(input.sharesMinted);
     const reserveA = poolValueForAsset(input.assetA, key.asset0, pool.reserve0, pool.reserve1);
     const reserveB = poolValueForAsset(input.assetB, key.asset0, pool.reserve0, pool.reserve1);
-    let usedA: u128 = 0n;
-    let usedB: u128 = 0n;
-    let mintedShares: u128 = 0n;
+    const usedA = input.amountAUsed;
+    const usedB = input.amountBUsed;
+    const mintedShares = input.sharesMinted;
     if (pool.totalShares === 0n) {
-      usedA = input.maxAmountA;
-      usedB = input.maxAmountB;
-      requireInitialShares(usedA, usedB, input.initialShares);
-      mintedShares = input.initialShares;
+      requireInitialShares(input.maxAmountA, input.maxAmountB, input.initialShares);
+      if (usedA !== input.maxAmountA || usedB !== input.maxAmountB
+        || mintedShares !== input.initialShares) abort(6009);
     } else {
       if (input.initialShares !== 0n) abort(9001);
-      const sharesA = checkedMul(input.maxAmountA, pool.totalShares) / reserveA;
-      const sharesB = checkedMul(input.maxAmountB, pool.totalShares) / reserveB;
-      mintedShares = sharesA;
-      if (sharesB < mintedShares) mintedShares = sharesB;
-      if (mintedShares === 0n) abort(6009);
-      usedA = ceilDiv(checkedMul(mintedShares, reserveA), pool.totalShares);
-      usedB = ceilDiv(checkedMul(mintedShares, reserveB), pool.totalShares);
+      const maxSharesProductA = input.maxAmountA * pool.totalShares;
+      const maxSharesProductB = input.maxAmountB * pool.totalShares;
+      const mintedReserveA = mintedShares * reserveA;
+      const mintedReserveB = mintedShares * reserveB;
+      if (mintedReserveA > maxSharesProductA || mintedReserveB > maxSharesProductB) abort(6011);
+      if (usedA * pool.totalShares < mintedReserveA
+        || usedB * pool.totalShares < mintedReserveB) abort(6011);
     }
-    if (mintedShares === 0n) abort(6009);
     if (mintedShares < input.minShares) abort(6011);
     if (usedA > input.maxAmountA || usedB > input.maxAmountB) abort(9001);
     const nextA = checkedAdd(reserveA, usedA);
@@ -486,21 +500,32 @@ export const addPoolLiquidity = action({
     requirePoolReserve(nextA);
     requirePoolReserve(nextB);
     const nextTotalShares = checkedAdd(pool.totalShares, mintedShares);
-    const balanceAKey = balanceKey(input.assetA, input.subject);
-    const balanceBKey = balanceKey(input.assetB, input.subject);
+    const ownerId = ownerKey(input.subject);
+    const balanceAKey = { assetId: input.assetA, ownerKey: ownerId };
+    const balanceBKey = { assetId: input.assetB, ownerKey: ownerId };
     const balanceA = balances.get(balanceAKey) ?? 0n;
     const balanceB = balances.get(balanceBKey) ?? 0n;
     if (balanceA < usedA || balanceB < usedB) abort(3002);
-    const shareKey = liquidityShareKey(key.asset0, key.asset1, input.subject);
-    const ownerShares = liquidityShares.get(shareKey) ?? 0n;
+    const shareKey = { asset0: key.asset0, asset1: key.asset1, ownerKey: ownerId };
+    const hasPosition = liquidityShares.has(shareKey);
+    let ownerShares: u128 = 0n;
+    if (hasPosition) ownerShares = liquidityShares.get(shareKey) ?? 0n;
     const nextOwnerShares = checkedAdd(ownerShares, mintedShares);
+    let positionCount: u64 = 0n;
+    if (!hasPosition) {
+      positionCount = liquidityPositionCount.get(ownerId) ?? 0n;
+      if (positionCount === 18446744073709551615n) abort(3003);
+    }
 
     balances.set(balanceAKey, checkedSub(balanceA, usedA));
     balances.set(balanceBKey, checkedSub(balanceB, usedB));
     pools.set(key, compareAssetIds(input.assetA, key.asset0) === 0
       ? { version: 2, reserve0: nextA, reserve1: nextB, totalShares: nextTotalShares }
       : { version: 2, reserve0: nextB, reserve1: nextA, totalShares: nextTotalShares });
-    ensureLiquidityPositionIndexed(key, input.subject);
+    if (!hasPosition) {
+      liquidityPositionByIndex.set({ ownerKey: ownerId, index: positionCount }, key);
+      liquidityPositionCount.set(ownerId, positionCount + 1n);
+    }
     liquidityShares.set(shareKey, nextOwnerShares);
   },
 });
@@ -512,6 +537,8 @@ export const removePoolLiquidity = action({
     assetA: AssetId,
     assetB: AssetId,
     shares: u128,
+    amountAOut: u128,
+    amountBOut: u128,
     minAmountA: u128,
     minAmountB: u128,
   },
@@ -522,24 +549,25 @@ export const removePoolLiquidity = action({
     if (!pool) abort(6001);
     requirePoolInvariant(pool.totalShares, pool.reserve0, pool.reserve1);
     if (input.shares === 0n) abort(6009);
-    const shareKey = liquidityShareKey(key.asset0, key.asset1, input.subject);
+    const ownerId = ownerKey(input.subject);
+    const shareKey = { asset0: key.asset0, asset1: key.asset1, ownerKey: ownerId };
     const ownerShares = liquidityShares.get(shareKey) ?? 0n;
     if (input.shares > ownerShares || input.shares > pool.totalShares) abort(6010);
     const assetAIs0 = compareAssetIds(input.assetA, key.asset0) === 0;
     const reserveA = poolValueForAsset(input.assetA, key.asset0, pool.reserve0, pool.reserve1);
     const reserveB = poolValueForAsset(input.assetB, key.asset0, pool.reserve0, pool.reserve1);
-    let amountA: u128 = 0n;
-    let amountB: u128 = 0n;
-    if (input.shares === pool.totalShares) {
-      amountA = reserveA;
-      amountB = reserveB;
-    } else {
-      amountA = checkedMul(input.shares, reserveA) / pool.totalShares;
-      amountB = checkedMul(input.shares, reserveB) / pool.totalShares;
-    }
+    const amountA = input.amountAOut;
+    const amountB = input.amountBOut;
+    requirePoolReserve(amountA);
+    requirePoolReserve(amountB);
+    // The SDK computes floor(shares * reserve / totalShares). These
+    // multiplication-only bounds ensure the signed quote never overpays,
+    // while avoiding u128 division in the service execution plan.
+    if (amountA * pool.totalShares > input.shares * reserveA
+      || amountB * pool.totalShares > input.shares * reserveB) abort(6011);
     if (amountA < input.minAmountA || amountB < input.minAmountB) abort(6011);
-    const balanceAKey = balanceKey(input.assetA, input.subject);
-    const balanceBKey = balanceKey(input.assetB, input.subject);
+    const balanceAKey = { assetId: input.assetA, ownerKey: ownerId };
+    const balanceBKey = { assetId: input.assetB, ownerKey: ownerId };
     const balanceA = balances.get(balanceAKey) ?? 0n;
     const balanceB = balances.get(balanceBKey) ?? 0n;
     const nextBalanceA = checkedAdd(balanceA, amountA);

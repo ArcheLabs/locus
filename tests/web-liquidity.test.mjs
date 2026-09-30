@@ -65,8 +65,13 @@ test("Liquidity is visible to all users and positions/pools come from Service qu
   assert.match(pageSource, /actionName = "createPool"/);
   assert.match(pageSource, /initialShares: quote\.sharesMinted/);
   assert.match(pageSource, /actionName = "addPoolLiquidity"/);
+  assert.match(pageSource, /amountAUsed: usedA/);
+  assert.match(pageSource, /amountBUsed: usedB/);
+  assert.match(pageSource, /sharesMinted: quote\.sharesMinted/);
   assert.match(pageSource, /initialShares: currentPool\.totalShares === 0n \? quote\.sharesMinted : 0n/);
   assert.match(pageSource, /actionName = "removePoolLiquidity"/);
+  assert.match(pageSource, /amountAOut: quote\.amount0/);
+  assert.match(pageSource, /amountBOut: quote\.amount1/);
   assert.match(pageSource, /locus\.listPools\(\{ offset: BigInt\(pools\.length \+ additionalPools\.length\), limit: 50 \}\)/);
   assert.match(pageSource, /Load more pools/);
   assert.match(pageSource, /locus\.getPool\(assetA\.assetId, assetB\.assetId\)/);

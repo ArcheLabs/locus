@@ -331,6 +331,8 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
         assetA: position.pool.asset0,
         assetB: position.pool.asset1,
         shares,
+        amountAOut: quote.amount0,
+        amountBOut: quote.amount1,
         minAmountA: minimumLiquidityAmount(quote.amount0, SLIPPAGE_BPS),
         minAmountB: minimumLiquidityAmount(quote.amount1, SLIPPAGE_BPS),
       };
@@ -380,6 +382,9 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
           assetB: assetB.assetId,
           maxAmountA: rawA,
           maxAmountB: rawB,
+          amountAUsed: usedA,
+          amountBUsed: usedB,
+          sharesMinted: quote.sharesMinted,
           minShares: minimumLiquidityAmount(quote.sharesMinted, SLIPPAGE_BPS),
           initialShares: currentPool.totalShares === 0n ? quote.sharesMinted : 0n,
         };
