@@ -254,7 +254,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
 
   return (
     <>
-    <Modal open={open} title="Connect" onClose={closeConnectDialog}>
+    <Modal open={open} title="Connect" onClose={closeConnectDialog} preventOutsideDismiss={waitingForEvm}>
       <p className="modal-lead">Choose an Ownership signer. This does not select an execution network.</p>
       <div className="connect-options">
         {displayOptions.map((entry) => (

@@ -35,6 +35,7 @@ export function selectExposedEvmAccount(accounts: readonly unknown[], hint?: str
 export class EvmSessionBridge {
   private provider: EvmEventProvider | null = null;
   private committedProvider: EvmEventProvider | null = null;
+  private verifiedAddress: string | null = null;
   private addressHint: string | null = null;
   private expectedAddress: string | null = null;
   private pending = false;
@@ -78,6 +79,7 @@ export class EvmSessionBridge {
   async beginConnection(): Promise<boolean> {
     this.pending = true;
     this.expectedAddress = null;
+    this.verifiedAddress = null;
     const commitsBefore = this.successfulCommits;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     const fastPathMs = this.addressHint ? ACCOUNT_QUERY_TIMEOUT_MS + 150 : EXISTING_ACCOUNT_FAST_PATH_MS;
@@ -86,7 +88,9 @@ export class EvmSessionBridge {
       new Promise<void>((resolve) => { timeout = setTimeout(resolve, fastPathMs); }),
     ]);
     if (timeout !== undefined) clearTimeout(timeout);
-    return this.options.getSession()?.kind === "evm" || this.successfulCommits > commitsBefore;
+    const current = this.options.getSession();
+    return this.successfulCommits > commitsBefore
+      || (current?.kind === "evm" && this.hasVerifiedAddress(current.address));
   }
 
   beginRestore(address: string): void {
@@ -160,12 +164,17 @@ export class EvmSessionBridge {
       if ((hintedAccountIsExposed && this.addressHint!.toLowerCase() !== current.address.toLowerCase())
         || (exposed.length > 0 && !exposed.some((address) => address.toLowerCase() === current.address.toLowerCase()))) {
         this.invalidateConfirmedSession();
-      } else if (exposed.some((address) => address.toLowerCase() === current.address.toLowerCase()) && this.committedProvider !== provider) {
+      } else if (exposed.some((address) => address.toLowerCase() === current.address.toLowerCase())) {
+        if (this.committedProvider === provider) {
+          this.verifiedAddress = current.address;
+          return;
+        }
         try {
           const refreshed = await this.options.createSession(provider, current.address);
           if (this.disposed || provider !== this.provider || this.options.getSession()?.address?.toLowerCase() !== current.address.toLowerCase()) return;
           this.options.commitSession(refreshed);
           this.committedProvider = provider;
+          this.verifiedAddress = current.address;
           this.successfulCommits += 1;
         } catch (cause) {
           this.options.onError?.(cause instanceof Error ? cause : new Error("Could not refresh the EVM wallet session."));
@@ -188,6 +197,7 @@ export class EvmSessionBridge {
       }
       this.options.commitSession(session);
       this.committedProvider = provider;
+      this.verifiedAddress = address;
       this.successfulCommits += 1;
       this.pending = false;
       this.expectedAddress = null;
@@ -202,7 +212,12 @@ export class EvmSessionBridge {
     this.pending = false;
     this.expectedAddress = null;
     this.committedProvider = null;
+    this.verifiedAddress = null;
     if (hadSession || restoringSavedSession) this.options.clearSession();
+  }
+
+  private hasVerifiedAddress(address: string): boolean {
+    return this.verifiedAddress?.toLowerCase() === address.toLowerCase();
   }
 
   private readonly onForeground = (): void => {
@@ -218,6 +233,7 @@ export class EvmSessionBridge {
       for (const [event, listener] of this.providerListeners) this.provider.removeListener?.(event, listener);
     }
     this.provider = provider;
+    this.verifiedAddress = null;
     this.providerListeners = [];
     if (!provider?.on) return;
     const accountsChanged = (...args: unknown[]) => {
