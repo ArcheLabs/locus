@@ -12,6 +12,7 @@
     "@matrix-org/matrix-sdk-crypto-wasm": "18.8.0",
     "@polkadot/extension-dapp": "0.63.1",
     "@polkadot/networks": "14.0.3",
+    "@polkadot/util-crypto": "14.0.3",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-dropdown-menu": "^2.1.24",
     "@radix-ui/react-popover": "^1.1.23",
