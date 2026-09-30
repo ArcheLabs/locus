@@ -305,6 +305,7 @@ button:disabled { cursor: not-allowed; }
 .asset-icon--dot { color: #fff; background: #e6007a; }
 .asset-icon--usdt { color: #fff; background: #26a17b; }
 .asset-icon--mini { color: #fff; background: #4730a8; }
+.asset-icon--mini > img { width: 68%; height: 68%; object-fit: contain; }
 .asset-icon--equity { border: 1px solid var(--border-strong); border-radius: 11px; background: var(--surface-muted); color: var(--text); font-size: 12px; letter-spacing: -.4px; }
 .asset-icon--custom { background: hsl(var(--asset-hue) 56% 42%); color: #fff; }
 .asset-icon--custom > span { font-size: 16px; }

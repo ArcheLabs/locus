@@ -1,6 +1,7 @@
 import { CircleDollarSign } from "lucide-react";
 import { SiPolkadot, SiTether } from "react-icons/si";
 import type { CSSProperties } from "react";
+import minijamMark from "../assets/brands/minijam-w.svg";
 import type { AssetView } from "../locus/assets.js";
 
 export function AssetIcon({ asset, size = 40 }: { asset: AssetView; size?: number }) {
@@ -18,7 +19,7 @@ export function AssetIcon({ asset, size = 40 }: { asset: AssetView; size?: numbe
     return <span className="asset-icon asset-icon--usdt" style={{ width: safeSize, height: safeSize }} aria-label="Tether test asset"><SiTether size={Math.round(safeSize * 0.58)} aria-hidden="true" /></span>;
   }
   if (presentation.curated && presentation.iconKey === "mini") {
-    return <span className="asset-icon asset-icon--mini" style={{ width: safeSize, height: safeSize }} aria-label="MINI test asset"><span>M</span></span>;
+    return <span className="asset-icon asset-icon--mini" style={{ width: safeSize, height: safeSize }} aria-label="MINI test asset"><img src={minijamMark} alt="" aria-hidden="true" /></span>;
   }
   let hash = 0;
   for (const char of asset.assetIdHex) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
