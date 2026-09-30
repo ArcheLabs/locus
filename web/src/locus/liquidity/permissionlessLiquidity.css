@@ -30,9 +30,10 @@
 .liquidity-query-skeleton span:last-child { width: 82%; }
 @keyframes liquidity-pulse { to { opacity: .5; } }
 .liquidity-explore-card { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, .9fr) auto; align-items: center; gap: 16px; min-width: 0; padding: 15px 16px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle); }
-.liquidity-explore-card > div { display: grid; gap: 6px; min-width: 0; }
-.liquidity-explore-card > div > span, .liquidity-explore-rate { color: var(--text-secondary); font-size: 12px; }
-.liquidity-explore-rate { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.liquidity-explore-card > div { min-width: 0; }
+.liquidity-explore-balances { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; min-width: 0; color: var(--text-secondary); font-size: 13px; font-variant-numeric: tabular-nums; }
+.liquidity-explore-balances span { overflow-wrap: anywhere; }
+.liquidity-explore-balances strong { color: var(--text); font-weight: 650; }
 .liquidity-asset-pair { display: flex; min-width: 0; align-items: center; flex-wrap: wrap; gap: 8px; }
 .liquidity-asset-pair .asset-identity { min-width: 0; }
 .liquidity-asset-pair .asset-identity__copy { max-width: 145px; }
@@ -54,14 +55,10 @@
 .liquidity-asset-selector .asset-identity { flex: 1 1 auto; min-width: 0; }
 .liquidity-asset-selector .asset-identity__copy { max-width: 220px; }
 .liquidity-asset-selector .asset-identity__copy small { max-width: 200px; }
-.liquidity-select-hint { margin: 0; color: var(--text-secondary); font-size: 13px; }
-.liquidity-pool-state { display: flex; align-items: center; gap: 8px; min-height: 38px; padding: 8px 11px; border: 1px solid var(--accent-border); border-radius: 9px; background: var(--accent-soft); color: var(--accent); font-size: 13px; font-weight: 700; }
-.liquidity-pool-state--existing { border-color: var(--success-border); background: var(--success-soft); color: var(--success); }
-.liquidity-disclosure { margin: -7px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
+.liquidity-disclosure { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 .liquidity-current-rate { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); }
 .liquidity-current-rate > span { color: var(--text-secondary); font-size: 12px; }
 .liquidity-current-rate > strong { font-size: 14px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
-.liquidity-current-rate > small { font-size: 12px; }
 .liquidity-deposit-form { display: grid; gap: 13px; }
 .liquidity-amount-field { display: grid; min-width: 0; gap: 6px; }
 .liquidity-amount-label { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-width: 0; }
@@ -97,7 +94,7 @@
   .liquidity-compact-empty, .liquidity-query-error { align-items: flex-start; flex-direction: column; }
   .liquidity-compact-empty .action-button, .liquidity-query-error .action-button { width: 100%; }
   .liquidity-explore-card { grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 11px; }
-  .liquidity-explore-rate { white-space: normal; }
+  .liquidity-explore-balances { gap: 4px 12px; }
   .liquidity-explore-card > .action-button { width: 100%; min-width: 0; }
   .liquidity-position-card { grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: 10px; }
   .liquidity-position-card > .liquidity-position-actions { justify-content: flex-start; }

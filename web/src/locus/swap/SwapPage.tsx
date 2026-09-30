@@ -303,7 +303,6 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
           <div className="swap-slippage-input"><input id="swap-slippage" inputMode="decimal" disabled={busy} value={slippage} onChange={(event) => setSlippage(event.target.value)} aria-invalid={slippageInvalid} aria-describedby={slippageInvalid ? "swap-slippage-error" : undefined} /><span>%</span></div>
         </FormField>
         {quote && assetOut && <dl className="swap-quote-details">
-          {price !== null && assetIn && <div><dt>Rate</dt><dd>1 {assetIn.symbol} ≈ {price.toLocaleString(undefined, { maximumFractionDigits: 8 })} {assetOut.symbol}</dd></div>}
           <div><dt>Minimum received</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
           <div><dt>Fee</dt><dd>{feeLabel}</dd></div>
           {impact !== null && <div><dt>Price impact</dt><dd>{impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</dd></div>}
