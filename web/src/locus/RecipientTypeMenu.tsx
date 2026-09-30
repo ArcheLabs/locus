@@ -4,7 +4,7 @@ import { RecipientIcon } from "./RecipientIcon.js";
 import { IdentityOption } from "../components/IdentityOption.js";
 import { recipientHints, recipientLabels, type RecipientType } from "./recipients.js";
 
-export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkMode, value, onChange, onClear, error, onBlur }: {
+export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkMode, value, onChange, onClear, error, onBlur, disabled = false }: {
   type: RecipientType;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -15,6 +15,7 @@ export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkM
   onClear: () => void;
   error?: string | null;
   onBlur?: () => void;
+  disabled?: boolean;
 }) {
   const types: RecipientType[] = ["matrix", "telegram", "email", "github", "evm", "polkadot", "solana", "locus"];
   const configured = (entry: RecipientType) => !networkMode || entry === "evm" || entry === "polkadot" || entry === "solana" || entry === "locus" || entry === "matrix";
@@ -22,9 +23,9 @@ export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkM
   return <div className="field-group recipient-field">
     <label>To</label>
     <div className="recipient-control">
-      <DropdownMenu.Root open={open} onOpenChange={onOpenChange}>
+      <DropdownMenu.Root open={open && !disabled} onOpenChange={(next) => { if (!disabled) onOpenChange(next); }}>
         <DropdownMenu.Trigger asChild>
-          <button type="button" className="type-button" aria-label="Recipient type">
+          <button type="button" className="type-button" aria-label="Recipient type" disabled={disabled}>
             <span className="identity-icon-slot"><RecipientIcon type={type} size={28} /></span>
             <ChevronDown size={16} className="muted" aria-hidden="true" />
           </button>
@@ -54,8 +55,8 @@ export function RecipientTypeMenu({ type, open, onOpenChange, onChoose, networkM
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
-      <input value={value} placeholder={recipientHints[type]} onChange={(event) => onChange(event.target.value)} onBlur={onBlur} aria-invalid={Boolean(error)} aria-describedby={error ? "send-recipient-error" : undefined} />
-      {value && <button type="button" className="clear" aria-label="Clear recipient" onClick={onClear}><X size={16} aria-hidden="true" /></button>}
+      <input value={value} placeholder={recipientHints[type]} disabled={disabled} onChange={(event) => onChange(event.target.value)} onBlur={onBlur} aria-invalid={Boolean(error)} aria-describedby={error ? "send-recipient-error" : undefined} />
+      {value && <button type="button" className="clear" aria-label="Clear recipient" disabled={disabled} onClick={onClear}><X size={16} aria-hidden="true" /></button>}
     </div>
   </div>;
 }

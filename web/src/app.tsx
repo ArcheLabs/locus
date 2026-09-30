@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
@@ -8,7 +8,6 @@ import { useNetwork } from "./network/NetworkProvider.js";
 import { NetworkSwitcher } from "./network/NetworkSwitcher.js";
 import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, formatAssetListAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
 import { type LiquidityScope } from "./locus/liquidity/liquidityTypes.js";
-import { loadPermissionlessLiquidityConfig } from "./locus/liquidity/liquidityConfig.js";
 import { LiquidityPage } from "./locus/liquidity/LiquidityPage.js";
 import { SwapPage } from "./locus/swap/SwapPage.js";
 import { poolListError, poolListQueryKey } from "./locus/pools/poolQueries.js";
@@ -29,6 +28,7 @@ import { Modal } from "./components/Modal.js";
 import { AccountMenu } from "./components/AccountMenu.js";
 import { MobileNavigation } from "./components/MobileNavigation.js";
 import { ActionButton } from "./components/ActionButton.js";
+import { GlobalNotifications, type GlobalTransactionNotice } from "./components/GlobalNotifications.js";
 import { FieldMessage } from "./forms/FieldMessage.js";
 import { ResponsiveSelect } from "./components/ResponsiveSelect.js";
 import { SegmentedControl } from "./components/SegmentedControl.js";
@@ -133,6 +133,13 @@ export function App() {
   const [filter, setFilter] = useState<"all" | "sent" | "swap">("all");
   const [assetFilter, setAssetFilter] = useState<"all" | "crypto" | "equities" | "custom">("all");
   const [toast, setToast] = useState("");
+  const [transactionNotices, setTransactionNotices] = useState<GlobalTransactionNotice[]>([]);
+  const publishTransactionNotice = useCallback((notice: GlobalTransactionNotice) => {
+    setTransactionNotices((current) => [...current.filter((item) => item.id !== notice.id), notice]);
+  }, []);
+  const clearTransactionNotice = useCallback((id: string) => {
+    setTransactionNotices((current) => current.filter((item) => item.id !== id));
+  }, []);
   const [sendState, setSendState] = useState<SendState>({ status: "idle" });
   const [sendAttempted, setSendAttempted] = useState(false);
   const [recipientTouched, setRecipientTouched] = useState(false);
@@ -277,13 +284,6 @@ export function App() {
     && catalogQuery.data.serviceId === serviceId
     && network.deployment?.genesisHash !== undefined
     && catalogQuery.data.genesisHash.toLowerCase() === network.deployment.genesisHash.toLowerCase();
-  const liquidityConfigQuery = useQuery({
-    queryKey: ["locus", "liquidity-config", network.networkId, serviceId, import.meta.env.BASE_URL],
-    queryFn: () => loadPermissionlessLiquidityConfig(network.networkId as "local" | "testnet", catalogQuery.data?.assets.map((asset) => asset.key) ?? [], import.meta.env.BASE_URL),
-    enabled: networkMode && catalogMatchesDeployment,
-    staleTime: 60_000,
-    retry: false,
-  });
   const poolsQuery = useQuery({
     queryKey: poolListQueryKey(network.networkId, serviceId),
     queryFn: () => network.locus!.listPools(),
@@ -754,6 +754,10 @@ export function App() {
   }
 
   function chooseNetworkAsset(asset: AssetView) {
+    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") {
+      navigateToPage("send");
+      return;
+    }
     setSelectedAssetId(asset.assetIdHex);
     setAmount("");
     setAmountTouched(false);
@@ -764,12 +768,14 @@ export function App() {
   }
 
   function updateRecipient(value: string) {
+    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") return;
     changeRecipient(value);
     setSendState({ status: "idle" });
     setSendFormError("");
   }
 
   function updateAmount(value: string) {
+    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") return;
     setAmount(value);
     setSendState({ status: "idle" });
     setSendFormError("");
@@ -806,11 +812,21 @@ export function App() {
       ownerKey: toHex(ownershipKey(session.owner)).toLowerCase(),
     };
     setReviewOpen(false);
+    let submittedTransactionId = "";
     try {
       setSendState({ status: "awaiting-signature" });
       const applied = await transferAndWait(locus, assetForSend.assetId, destinationOwner, parsedAmount, submittedNetwork, (submitted) => {
+        submittedTransactionId = submitted.transactionId;
+        publishTransactionNotice({
+          id: "send-transaction",
+          title: "Transfer pending",
+          message: "Waiting for confirmation.",
+          transactionId: submitted.transactionId,
+          busy: true,
+        });
         if (isLiquidityScopeCurrent(expectedScope)) setSendState({ status: "submitted", transactionId: submitted.transactionId, actionHash: submitted.actionHash, networkId: submittedNetwork });
       });
+      clearTransactionNotice("send-transaction");
       if (!isLiquidityScopeCurrent(expectedScope)) return;
       setSendState(applied);
       const nextActivity = [{ direction: "sent" as const, asset: assetForSend.symbol, recipient, amount: formatUnits(parsedAmount, assetForSend.decimals), transactionId: applied.transactionId }, ...sessionActivity];
@@ -819,8 +835,18 @@ export function App() {
       void refreshAssets();
       notify("Sent");
     } catch (error) {
+      if (submittedTransactionId) {
+        publishTransactionNotice({
+          id: "send-transaction",
+          title: "Transfer failed",
+          message: normalizeActionError(error, "The transfer could not be completed."),
+          transactionId: submittedTransactionId,
+          tone: "error",
+          dismissible: true,
+        });
+      } else clearTransactionNotice("send-transaction");
       if (isLiquidityScopeCurrent(expectedScope)) {
-        setSendState({ status: "failed", error: normalizeActionError(error, "Transaction failed."), networkId: submittedNetwork });
+        setSendState({ status: "failed", error: normalizeActionError(error, "Transaction failed."), networkId: submittedNetwork, ...(submittedTransactionId ? { transactionId: submittedTransactionId } : {}) });
       }
     }
   }
@@ -880,12 +906,12 @@ export function App() {
         {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} recipientError={recipientFieldError} recipientMessage={recipient.trim() && (resolvedRecipient.valid || matrixResolutionPending) ? resolvedRecipient.message : ""} amount={amount} amountError={amountFieldError} formError={sendFormError} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={(value) => { updateRecipient(value); setRecipientTouched(false); }} onRecipientBlur={() => setRecipientTouched(true)} onAmount={updateAmount} onAmountBlur={() => setAmountTouched(true)} onMax={() => { updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : ""); setAmountTouched(true); }} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
         {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} getBalanceState={getAssetBalanceState} onRetry={() => void refreshAssets()} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} />}
         {page === "swap" && <>
-          <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} />
+          <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onTransactionNotice={publishTransactionNotice} onClearTransactionNotice={clearTransactionNotice} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} />
         </>}
-        {(page === "liquidity" || page === "liquidity-new") && <LiquidityPage key={page} view={page === "liquidity-new" ? "new" : "home"} initialTab={liquidityTab} initialPair={{ assetA: new URLSearchParams(window.location.search).get("assetA") ?? "", assetB: new URLSearchParams(window.location.search).get("assetB") ?? "" }} config={liquidityConfigQuery.data ?? null} assets={assets} pools={pools} poolsError={poolsError} poolsLoading={poolsQuery.isLoading} locus={locus} networkId={network.networkId} serviceId={serviceId} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} networkReady={networkMode && network.status === "ready"} isScopeCurrent={isLiquidityScopeCurrent} onPoolsRefreshed={(next) => queryClient.setQueryData(poolListQueryKey(network.networkId, serviceId), next)} onRefreshAssets={refreshAssets} onConnect={openConnect} onNewPosition={navigateToLiquidityNew} onTabChange={updateLiquidityTab} onActionSuccess={(message) => notify(message)} onRetryPools={() => void refreshPools()} getBalanceState={getAssetBalanceState} />}
+        {(page === "liquidity" || page === "liquidity-new") && <LiquidityPage key={page} view={page === "liquidity-new" ? "new" : "home"} initialTab={liquidityTab} initialPair={{ assetA: new URLSearchParams(window.location.search).get("assetA") ?? "", assetB: new URLSearchParams(window.location.search).get("assetB") ?? "" }} assets={assets} pools={pools} poolsError={poolsError} poolsLoading={poolsQuery.isLoading} locus={locus} networkId={network.networkId} serviceId={serviceId} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} networkReady={networkMode && network.status === "ready"} isScopeCurrent={isLiquidityScopeCurrent} onPoolsRefreshed={(next) => queryClient.setQueryData(poolListQueryKey(network.networkId, serviceId), next)} onRefreshAssets={refreshAssets} onConnect={openConnect} onNewPosition={navigateToLiquidityNew} onTabChange={updateLiquidityTab} onActionSuccess={(message) => notify(message)} onTransactionNotice={publishTransactionNotice} onClearTransactionNotice={clearTransactionNotice} onRetryPools={() => void refreshPools()} getBalanceState={getAssetBalanceState} />}
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>
-      {toast && <div className="toast" role="status">{toast}</div>}
+      <GlobalNotifications toast={toast} notices={transactionNotices} onDismiss={clearTransactionNotice} />
       <ConnectDialog open={connectOpen} onClose={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); setConnectOpen(false); }} onCancelMatrix={cancelMatrixSignIn} onMatrixSelected={() => setActiveSessionKind(window.localStorage, "matrix")} onConnected={(next) => { setWalletConnectPending(null); setSession(next); if (next.kind === "matrix") setPendingMatrixConnection(null); }} onConnectionPendingChange={setWalletConnectPending} onEvmConnectRequested={async () => {
         setActiveSessionKind(window.localStorage, "evm");
         setWalletConnectPending("evm");
@@ -958,6 +984,7 @@ function SendPage({ networkMode, status, asset, assets, assetSearch, assetPicker
           balance={balance === null ? "Balance unavailable" : `Balance: ${displayAmount(balance, decimals)} ${asset?.symbol ?? ""}`.trim()}
           id="send-amount"
           amount={amount}
+          disabled={busy}
           onAmountChange={onAmount}
           onAmountBlur={onAmountBlur}
           onMax={onMax}
@@ -969,18 +996,12 @@ function SendPage({ networkMode, status, asset, assets, assetSearch, assetPicker
         />
         <FieldMessage id="send-amount-error" error={amountError} />
       </div>
-      <OwnershipInput type={recipientType} value={recipient} open={typeOpen} networkMode={networkMode} message={recipientMessage} valid={resolution.valid} error={recipientError} onBlur={onRecipientBlur} onType={onChooseType} onToggle={onToggleTypes} onChange={onRecipient} onClear={onClear} />
+      <OwnershipInput type={recipientType} value={recipient} open={typeOpen} networkMode={networkMode} message={recipientMessage} valid={resolution.valid} error={recipientError} onBlur={onRecipientBlur} onType={onChooseType} onToggle={onToggleTypes} onChange={onRecipient} onClear={onClear} disabled={busy} />
       {formError && <p className="action-status action-status--error" role="alert">{formError}</p>}
       <ActionButton variant="primary" icon={ArrowUpRight} fullWidth disabled={!asset || busy || sendState.status === "applied" || (networkMode && status !== "ready")} onClick={onContinue}>{sendLabel}</ActionButton>
-      {sendState.status === "failed" && <div className="transaction-error" role="alert">{sendState.error}</div>}
-      {sendState.status === "submitted" && <Receipt state={sendState} />}
-      {sendState.status === "applied" && <Receipt state={sendState} />}
+      {sendState.status === "failed" && !sendState.transactionId && <div className="transaction-error" role="alert">{sendState.error}</div>}
     </div>
   </section>;
-}
-
-function Receipt({ state }: { state: Extract<SendState, { status: "submitted" | "applied" }> }) {
-  return <div className="receipt"><strong>{state.status === "applied" ? "Transaction applied" : "Transaction submitted"}</strong><span>Network: {state.networkId}</span><span>Status: {state.status}</span><CopyableValue label="Transaction" value={state.transactionId} />{state.actionHash && <CopyableValue label="Action" value={state.actionHash} />}</div>;
 }
 
 function AssetsPage({ networkMode, loading, error, assets, featuredAssets, search, setSearch, filter, setFilter, getBalanceState, onRetry, onOpenDetail, onCreate }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; featuredAssets: AssetView[]; search: string; setSearch: (value: string) => void; filter: "all" | "crypto" | "equities" | "custom"; setFilter: (value: "all" | "crypto" | "equities" | "custom") => void; getBalanceState: (asset: AssetView) => "known" | "loading" | "unavailable"; onRetry: () => void; onOpenDetail: (asset: AssetView | DemoAsset) => void; onCreate: () => void }) {

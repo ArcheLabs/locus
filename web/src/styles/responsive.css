@@ -135,7 +135,6 @@ textarea {
   cursor: pointer;
 }
 
-.toast { background: var(--text); }
 .modal { max-height: min(720px, calc(100dvh - 40px)); }
 .type-menu,
 .network-menu,
@@ -150,7 +149,6 @@ textarea {
 .coin { color: #fff; }
 .asset-row,
 .activity-row,
-.receipt,
 .detail-modal,
 .connection-card,
 .network-trigger,
@@ -166,8 +164,7 @@ textarea {
 .activity-row span,
 .activity-row small,
 .page code,
-.page p,
-.receipt code { overflow-wrap: anywhere; }
+.page p { overflow-wrap: anywhere; }
 
 @media (min-width: 768px) and (max-width: 1024px) {
   .app-shell { grid-template-columns: 220px minmax(0, 1fr); }
@@ -356,7 +353,10 @@ textarea {
   .asset-menu > input { min-height: 44px; font-size: 16px; }
   .account-menu { width: min(320px, calc(100vw - 24px)); }
   .mobile-header .session-restore-alert { position: fixed; top: calc(74px + env(safe-area-inset-top)); right: 12px; }
-  .toast { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); left: 12px; text-align: center; overflow-wrap: anywhere; }
+  .global-notifications { right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); left: 12px; width: auto; max-height: min(65dvh, 560px); }
+  .global-notification { gap: 9px; padding: 12px; }
+  .global-notification__transaction .copyable-value__row code { max-width: min(52vw, 240px); }
+  .global-toast { justify-self: stretch; text-align: center; }
   .detail-modal dl div { gap: 10px; }
   .detail-modal dd { max-width: 65%; }
   .detail-modal dd code { overflow-wrap: anywhere; }

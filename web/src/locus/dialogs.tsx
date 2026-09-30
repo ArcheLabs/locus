@@ -3,12 +3,12 @@ import { formatLocusId, parseUnits, randomAssetId, type LocusClient, type Owners
 import { Modal } from "../components/Modal.js";
 import { ActionButton } from "../components/ActionButton.js";
 import { CopyableValue } from "../components/CopyableValue.js";
-import { Check, CirclePlus, ClipboardCopy, RefreshCw, SearchCheck, X } from "lucide-react";
+import { CirclePlus, ClipboardCopy, RefreshCw, SearchCheck, X } from "lucide-react";
 import type { LocusWebSession } from "../session/types.js";
 import type { AssetView } from "./assets.js";
 import type { RecipientResolution } from "./recipients.js";
 import { IdentityIcon } from "../components/IdentityIcon.js";
-import { AssetIcon } from "../components/AssetIcon.js";
+import { ConfirmationAssetList } from "../components/ConfirmationAssetList.js";
 import {
   createAssetPendingKey,
   OperationTimeoutError,
@@ -45,20 +45,14 @@ export function ReviewDialog({
   return (
     <Modal
       open={open}
-      title="Review transfer"
+      title="Confirm transfer"
       onClose={onClose}
-      footer={<><ActionButton variant="secondary" icon={X} onClick={onClose}>Cancel</ActionButton><ActionButton variant="primary" icon={Check} disabled={!resolution.valid} onClick={onConfirm}>Confirm</ActionButton></>}
+      footer={<><ActionButton variant="secondary" onClick={onClose}>Cancel</ActionButton><ActionButton variant="primary" disabled={!resolution.valid} onClick={onConfirm}>Confirm</ActionButton></>}
     >
-      <div className="review-summary">
-        <AssetIcon asset={asset} />
-        <strong>{amount} {asset.presentation.unit === "shares" ? "shares" : asset.symbol}</strong>
-      </div>
-      <dl className="review-list">
+      <ConfirmationAssetList items={[{ asset, amount }]} />
+      <dl className="review-list confirmation-details">
         <div><dt>To</dt><dd>{recipient}</dd></div>
-        <div><dt>Ownership type</dt><dd>{resolution.detectedType ?? "recipient"}</dd></div>
-        <div><dt>Destination chain</dt><dd>Not applicable</dd></div>
       </dl>
-      <p className="modal-note">The action will be signed by your connected Ownership controller.</p>
     </Modal>
   );
 }
