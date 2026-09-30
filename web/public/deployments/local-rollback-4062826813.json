@@ -4,9 +4,9 @@
   "backendUrl": "/rpc",
   "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
   "networkDomain": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
-  "serviceId": 4209643396,
-  "serviceKey": "0x0636bba8ace06a8299d3901870579bfe962a63e247760a3589daff870bd80d93",
-  "codeHash": "0x0e272d0bb5ddc33d53c49f2c5f2f8743be3a59c36ebfa6a4f6c13d60687dc71a",
+  "serviceId": 4062826813,
+  "serviceKey": "0x159550666cb1a9656323f67cd84990175ae63883cdc1d0e8c498e1d317950d1f",
+  "codeHash": "0x5cebd9fef97033c3f20fc7e1cd35475914ba8ce8513af65e97ae7b3edde819d3",
   "abiVersion": 1,
   "abi": {
     "abiVersion": 1,
@@ -189,12 +189,6 @@
             "type": {
               "kind": "u128"
             }
-          },
-          {
-            "name": "initialShares",
-            "type": {
-              "kind": "u128"
-            }
           }
         ],
         "executeOutput": {
@@ -242,31 +236,7 @@
             }
           },
           {
-            "name": "amountAUsed",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "amountBUsed",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "sharesMinted",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
             "name": "minShares",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "initialShares",
             "type": {
               "kind": "u128"
             }
@@ -306,18 +276,6 @@
           },
           {
             "name": "shares",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "amountAOut",
-            "type": {
-              "kind": "u128"
-            }
-          },
-          {
-            "name": "amountBOut",
             "type": {
               "kind": "u128"
             }
@@ -1608,7 +1566,7 @@
     ]
   },
   "provenance": {
-    "locusCommit": "5e04c4c4b9e21aa437ecdcd01c0166d5a1c7fc44",
+    "locusCommit": "ff828ed",
     "jamscriptVersion": "v0.1.0-rc.8",
     "backendVersion": "backend-v0.1.0-rc.8",
     "minijamVersion": "stage1-v0.2.0"

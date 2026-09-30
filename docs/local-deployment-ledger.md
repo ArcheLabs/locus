@@ -1,20 +1,22 @@
 # MiniJAM Local deployment ledger
 
 The production web app targets **MiniJAM Local / Development**. Its active
-immutable Locus Service is `4062826813`, finalized at block `6382`, with code
+immutable Locus Service is `4209643396`, finalized at block `9631`, with code
 hash
-`0x5cebd9fef97033c3f20fc7e1cd35475914ba8ce8513af65e97ae7b3edde819d3`.
+`0x0e272d0bb5ddc33d53c49f2c5f2f8743be3a59c36ebfa6a4f6c13d60687dc71a`.
 It was built with published `jams v0.1.0-rc.8` and the verified canonical rc.8
 toolchain (SHA-256
 `f804235bdae7239e57d9a7eb0d4413df65d1f785c05aa0cb4af5a28297548d03`) from
-commit `ff828ed`. Pool-share square root planning now uses a bounded,
-division-free comparison to avoid the PVM trap seen on the prior Service.
+commit `5e04c4c`. Pool creation, add liquidity, remove liquidity, and swap
+passed disposable-chain action and state verification before deployment.
 
-The HTTPS `/` deployment and Local catalog both target Service `4062826813`.
+The HTTPS `/` deployment and Local catalog both target Service `4209643396`.
 Its state was initialized from scratch: six curated assets have their complete
-initial supply at Treasury, and `poolCount=0`. No state was migrated from the
-previous Service `2323996321`; that immutable Service remains registered with
-its old state and must not be used by the production catalog. `797069104`,
+initial supply at Treasury, and `poolCount=0`. No state was migrated from an
+older Service. Former production Service `4062826813` remains immutable with
+its prior state; its rollback descriptor and catalog are preserved at
+`web/public/deployments/local-rollback-4062826813.json` and
+`web/public/catalogs/local-4062826813.json`. `2323996321`, `797069104`,
 `3083943385`, and `3302613027` are older historical deployments.
 
 The HTTPS `/rpc` route validated the new descriptor and Backend service state.
