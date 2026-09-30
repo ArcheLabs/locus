@@ -101,8 +101,8 @@ handle_path /matrix-resolver/* {
 
 ## Activation gates
 
-Do not add `matrixResolverUrl` to `web/public/locus-networks.json` until every
-live gate below passes:
+Add `matrixResolverUrl` to a network configuration only after every live gate
+below passes:
 
 1. `matrix.minijam.xyz` resolves to the intended host.
 2. `https://matrix.minijam.xyz/.well-known/matrix/server` returns
@@ -125,7 +125,11 @@ After the AS registration exists, the protected live probe is
 `MATRIX_TEST_MXID` set to a controlled remote account. It prints only pass/fail
 markers and never prints the token or returned key.
 
-If the DNS, protected token file, or real remote Matrix test account is missing,
+The Local deployment has passed these gates for
+`@libingjiang:matrix.org`: its independently authenticated Locus ID matched
+the Ownership derived from the federated master key. The endpoint is enabled
+only on Local; TestNet remains unconfigured. If the DNS, protected token file,
+or controlled remote Matrix test account is missing in another environment,
 leave `matrixResolverUrl` unset and do not deploy a frontend that advertises
 Matrix recipient resolution. No ordinary Matrix access token is an acceptable
 fallback.

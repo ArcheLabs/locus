@@ -372,7 +372,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(legacyCapabilities.sso ? "legacy-options" : returnStage); setPassword(""); setError(""); }}>Back</ActionButton>
         </div>}
       </>}
-      {error && <div className="transaction-error" role="alert">{error}</div>}
+      {error && !(stage === "custom-server" && !customServer.trim()) && !(stage === "password" && (!passwordUser.trim() || !password)) && <div className="transaction-error" role="alert">{error}</div>}
       <p className="modal-note">Locus never stores your Matrix password. Device verification is required before Matrix can authorize an identity.</p>
     </Modal>
   );

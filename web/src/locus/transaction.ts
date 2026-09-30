@@ -7,7 +7,7 @@ export type SendState =
   | { status: "submitting" }
   | { status: "submitted"; transactionId: string; actionHash?: string; networkId: string }
   | { status: "applied"; transactionId: string; actionHash?: string; networkId: string }
-  | { status: "failed"; error: string; networkId?: string };
+  | { status: "failed"; error: string; networkId?: string; transactionId?: string };
 
 export async function transferAndWait(
   locus: LocusClient,

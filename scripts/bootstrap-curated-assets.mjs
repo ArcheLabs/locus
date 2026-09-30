@@ -7,7 +7,6 @@ import { toHex } from "../dist/sdk/index.js";
 const root = path.resolve(new URL("..", import.meta.url).pathname);
 const { descriptor, protocolClient, locus, subject } = await createCuratedRuntime("LOCUS_CURATED_ISSUER_SIGNER_MODULE");
 const issuerKey = catalogIdentityKey(subject);
-const treasuryKey = catalogIdentityKey(curatedTreasuryOwnership);
 const entries = [];
 
 for (const item of CURATED_ASSETS) {
@@ -66,7 +65,6 @@ await fs.mkdir(path.dirname(output), { recursive: true });
 const temporary = `${output}.${process.pid}.tmp`;
 await fs.writeFile(temporary, `${JSON.stringify(catalog, null, 2)}\n`, { mode: 0o644 });
 await fs.rename(temporary, output);
-console.log(`CURATED_TREASURY_KEY=${treasuryKey}`);
 console.log(`CURATED_CATALOG=${output}`);
 console.log("TREASURY_INITIAL_DISTRIBUTION=PASS");
 console.log("CURATED_ASSET_BOOTSTRAP=PASS");

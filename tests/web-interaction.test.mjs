@@ -26,6 +26,7 @@ const matrixConnectorSource = readFileSync(new URL("../web/src/matrix/MatrixConn
 const matrixDialogSource = readFileSync(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
 const accountMenuSource = readFileSync(new URL("../web/src/components/AccountMenu.tsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../web/src/app.tsx", import.meta.url), "utf8");
+const polkadotSwitchDialogSource = readFileSync(new URL("../web/src/session/PolkadotAccountSwitchDialog.tsx", import.meta.url), "utf8");
 
 const actionRequest = {
   version: 2,
@@ -98,6 +99,30 @@ test("Matrix restore UI follows current controller authorization states", () => 
     assert.ok(appSource.includes(state), `app.tsx must handle ${state}`);
   }
   assert.match(appSource, /previously revoked\. Sign in as a new Matrix device/);
+});
+
+test("Account Center offers wallet switching only for EVM and Polkadot and preserves local disconnect semantics", () => {
+  assert.match(accountMenuSource, /session\.kind === "evm" \|\| session\.kind === "polkadot"[\s\S]*?Switch account/);
+  assert.match(accountMenuSource, /onSwitchAccount: \(\) => void/);
+  assert.match(appSource, /openAppKit\(\{ view: "Account", namespace: "eip155" \}\)/);
+  assert.match(appSource, /setPolkadotSwitchOpen\(true\)/);
+  assert.match(polkadotSwitchDialogSource, /listBrowserAccounts\("polkadot"\)/);
+  assert.match(polkadotSwitchDialogSource, /if \(address === currentAccount\) \{\s*onClose\(\);\s*return;/);
+  assert.match(polkadotSwitchDialogSource, /await onSelect\(address\)/);
+  assert.match(appSource, /switchPolkadotSession\([\s\S]*?\(selectedAddress\) => connectBrowserSession\("polkadot", selectedAddress\)[\s\S]*?setSession/);
+  assert.match(polkadotSwitchDialogSource + readFileSync(new URL("../web/src/session/polkadotSession.ts", import.meta.url), "utf8"), /getCurrent\(\) !== current[\s\S]*?existing session was kept/);
+  const sessionReset = appSource.match(/useEffect\(\(\) => \{\s*setAmount\(""\);[\s\S]*?setDetailAsset\(null\);[\s\S]*?\}, \[session\?\.connectionId, session\?\.kind, session\?\.address\]\);/)?.[0] ?? "";
+  assert.match(sessionReset, /setRecipient\(""\)/);
+  assert.match(sessionReset, /setSendState\(\{ status: "idle" \}\)/);
+  assert.match(sessionReset, /setReviewOpen\(false\)/);
+  assert.match(sessionReset, /setReceiveAsset\(null\)/);
+  assert.match(sessionReset, /setCreateAssetOpen\(false\)/);
+  assert.match(sessionReset, /setDetailAsset\(null\)/);
+  const disconnectHandler = appSource.match(/function disconnectSession\(\) \{[\s\S]*?\n  \}/)?.[0] ?? "";
+  assert.match(disconnectHandler, /markSessionDisconnected/);
+  assert.match(disconnectHandler, /evmBridge\.explicitDisconnect\(\)/);
+  assert.doesNotMatch(disconnectHandler, /disconnectAppKit/);
+  assert.match(accountMenuSource, /session\.kind === "matrix" \? "Your Matrix device and crypto store will be kept\."/);
 });
 
 test("network configuration stays under the Vite base path for subpath deployments", () => {

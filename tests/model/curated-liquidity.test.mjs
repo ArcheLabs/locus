@@ -96,8 +96,8 @@ test("Swap uses direct pool quotes and curated demo equities disclose their limi
   const assetSource = await fs.readFile(new URL("../../web/src/locus/assets.ts", import.meta.url), "utf8");
   assert.match(swapSource, /directPoolForPair\(pools, assetIn\.assetIdHex, assetOut\.assetIdHex\)/);
   assert.match(swapSource, /This pair is not available for swapping yet\./);
-  assert.match(swapSource, /Quotes use on-chain pool reserves/);
-  assert.match(swapSource, /No market oracle is used/);
+  assert.doesNotMatch(swapSource, /Quotes use on-chain pool reserves/);
+  assert.doesNotMatch(swapSource, /No market oracle is used/);
   assert.match(assetSource, /disclosure: "Demo representation only\./);
   assert.match(assetSource, /does not represent equity ownership, voting rights, dividends, custody, or redemption rights/);
   assert.doesNotMatch(swapSource, /Market data/);

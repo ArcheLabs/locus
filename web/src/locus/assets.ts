@@ -188,6 +188,18 @@ export function displayAmount(value: bigint | null, decimals: number): string {
   return formatUnits(value ?? 0n, decimals);
 }
 
+export function formatAssetListAmount(value: bigint, decimals: number): string {
+  const cents = decimals <= 2
+    ? value * 10n ** BigInt(2 - decimals)
+    : (() => {
+      const divisor = 10n ** BigInt(decimals - 2);
+      return (value + divisor / 2n) / divisor;
+    })();
+  const whole = cents / 100n;
+  const fraction = (cents % 100n).toString().padStart(2, "0");
+  return `${whole.toLocaleString("en-US")}.${fraction}`;
+}
+
 export function displayAssetAmount(asset: Pick<AssetView, "balance" | "decimals" | "symbol" | "presentation">, value = asset.balance): string {
   const amount = formatUnits(value ?? 0n, asset.decimals);
   return asset.presentation.unit === "shares" ? `${amount} shares` : `${amount} ${asset.symbol}`;

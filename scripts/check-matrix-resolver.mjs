@@ -9,7 +9,7 @@ const [server, client, clientRequest, app, networkConfig, compose, caddy] = awai
   read("../web/src/app.tsx"),
   read("../web/public/locus-networks.json"),
   read("../ops/matrix/docker-compose.example.yml"),
-  read("../ops/matrix/Caddyfile.example"),
+  read("../deploy/local/Caddyfile"),
 ]);
 
 assert.match(server, /TUWUNEL_ORIGIN\s*=\s*"http:\/\/127\.0\.0\.1:8008"/);
@@ -41,9 +41,12 @@ assert.match(app, /status === "key-changed"/);
 assert.match(app, /network\.network\?\.matrixResolverUrl/);
 assert.match(compose, /127\.0\.0\.1:8008:8008/);
 assert.match(compose, /@sha256:[a-f0-9]{64}/);
+assert.match(caddy, /handle_path \/matrix-resolver\/\*\s*\{\s*reverse_proxy 127\.0\.0\.1:8787/s);
+assert.match(caddy, /matrix\.minijam\.xyz\s*\{/);
 assert.doesNotMatch(caddy, /\/_matrix\/client/);
 
 console.log("MATRIX_RESOLVER_STATIC_BOUNDARY=PASS");
 console.log("RECIPIENT_CONTROLLED_HTTP_TARGET=false");
 console.log("CANONICAL_OWNERSHIP_ENCODING=PASS");
-console.log("FRONTEND_MATRIX_RESOLVER_LIVE_CONFIG=PASS");
+console.log("FRONTEND_MATRIX_RESOLVER_LOCAL_ENABLED=PASS");
+console.log("TESTNET_MATRIX_RESOLVER_UNCONFIGURED=PASS");

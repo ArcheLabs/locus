@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
@@ -6,9 +6,8 @@ import { formatLocusId, formatUnits, ownershipKey, parseUnits, toHex, type Locus
 import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CirclePlus, Coins, Droplets, History, List, ListFilter, RefreshCw, Search, Send, Shapes, TrendingUp, X } from "lucide-react";
 import { useNetwork } from "./network/NetworkProvider.js";
 import { NetworkSwitcher } from "./network/NetworkSwitcher.js";
-import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
+import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, formatAssetListAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
 import { type LiquidityScope } from "./locus/liquidity/liquidityTypes.js";
-import { loadPermissionlessLiquidityConfig } from "./locus/liquidity/liquidityConfig.js";
 import { LiquidityPage } from "./locus/liquidity/LiquidityPage.js";
 import { SwapPage } from "./locus/swap/SwapPage.js";
 import { poolListError, poolListQueryKey } from "./locus/pools/poolQueries.js";
@@ -17,26 +16,31 @@ import { attachAssetBalances, keepAssetRowsForScope } from "./locus/assetCache.j
 import { resolveRecipient, detectRecipientType, type RecipientType } from "./locus/recipients.js";
 import { transferAndWait, type SendState } from "./locus/transaction.js";
 import { useSession } from "./session/SessionProvider.js";
-import { connectEvmProvider, restoreBrowserSession, watchBrowserSession } from "./session/connectors.js";
+import { connectBrowserSession, connectEvmProvider, restoreBrowserSession, watchBrowserSession } from "./session/connectors.js";
 import { activeSessionKind, markSessionDisconnected, setActiveSessionKind } from "./session/sessionPersistence.js";
 import { EvmSessionBridge } from "./session/EvmSessionBridge.js";
 import { ConnectDialog } from "./session/ConnectDialog.js";
+import { PolkadotAccountSwitchDialog } from "./session/PolkadotAccountSwitchDialog.js";
+import { switchPolkadotSession } from "./session/polkadotSession.js";
 import { CreateAssetDialog, ReceiveDialog, ReviewDialog } from "./locus/dialogs.js";
 import { AssetPicker } from "./locus/AssetPicker.js";
 import { Modal } from "./components/Modal.js";
 import { AccountMenu } from "./components/AccountMenu.js";
+import { MobileNavigation } from "./components/MobileNavigation.js";
 import { ActionButton } from "./components/ActionButton.js";
+import { GlobalNotifications, type GlobalTransactionNotice } from "./components/GlobalNotifications.js";
 import { FieldMessage } from "./forms/FieldMessage.js";
 import { ResponsiveSelect } from "./components/ResponsiveSelect.js";
 import { SegmentedControl } from "./components/SegmentedControl.js";
 import { AssetIcon } from "./components/AssetIcon.js";
+import { AssetAmountInput } from "./components/AssetAmountInput.js";
 import { CopyableValue } from "./components/CopyableValue.js";
 import { pathForRoute, routeFromPath, type AppRoute } from "./navigation/routes.js";
 import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, signOutMatrixSession, type MatrixConnected } from "./matrix/MatrixConnector.js";
 import { matrixStateRequiresUserInteraction } from "./matrix/MatrixInteraction.js";
 import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
 import { completeMatrixAuthCallback, hasMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
-import { useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
+import { useAppKit, useAppKitAccount, useAppKitProvider, useDisconnect } from "@reown/appkit/react";
 import type { Eip1193Provider } from "@jamscript/client";
 import type { SessionKind } from "./session/types.js";
 import { OwnershipInput } from "./locus/OwnershipInput.js";
@@ -47,8 +51,10 @@ import { activityFilters, BROWSER_LOCAL_ACTIVITY_CAPABILITIES, includeActivityIt
 
 type Page = AppRoute;
 type DemoAsset = { symbol: string; name: string; balance: bigint; decimals: number; value: string; color: string };
-type ActivityItem = { kind?: "transfer"; direction: "sent" | "received"; asset: string; recipient: string; amount: string; date: string; transactionId?: string }
-  | { kind: "swap"; assetIn: string; assetOut: string; amountIn: string; amountOut: string; date: string; transactionId?: string };
+type ActivityItem = { transactionId?: string } & (
+  | { kind?: "transfer"; direction: "sent" | "received"; asset: string; recipient: string; amount: string }
+  | { kind: "swap"; assetIn: string; assetOut: string; amountIn: string; amountOut: string }
+);
 type MatrixRecipientState =
   | { status: "idle" }
   | { status: "resolving"; userId: string; scope: string }
@@ -75,6 +81,12 @@ const demoAssets: DemoAsset[] = [
 
 function sessionActivityKey(networkId: string, owner: string): string {
   return `locus.activity.v1.${networkId}.${owner}`;
+}
+
+function activityAmount(amount: string, asset: string): string {
+  const value = amount.trim();
+  const unit = ` ${asset}`;
+  return value.toLowerCase().endsWith(unit.toLowerCase()) ? value.slice(0, -unit.length).trimEnd() : value;
 }
 
 function matrixRestoreMessage(connected: MatrixConnected): string {
@@ -106,6 +118,7 @@ export function App() {
   const { session, setSession, clearSession, lifecycle, restoreError, finishRestore } = useSession();
   const networkMode = network.mode === "network";
   const [page, setPage] = useState<Page>(() => routeFromPath(window.location.pathname, import.meta.env.BASE_URL));
+  const [liquidityTab, setLiquidityTab] = useState<"pools" | "positions">(() => new URLSearchParams(window.location.search).get("tab") === "positions" ? "positions" : "pools");
   const [demoAssetIndex, setDemoAssetIndex] = useState(0);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [detailAsset, setDetailAsset] = useState<AssetView | DemoAsset | null>(null);
@@ -120,6 +133,13 @@ export function App() {
   const [filter, setFilter] = useState<"all" | "sent" | "swap">("all");
   const [assetFilter, setAssetFilter] = useState<"all" | "crypto" | "equities" | "custom">("all");
   const [toast, setToast] = useState("");
+  const [transactionNotices, setTransactionNotices] = useState<GlobalTransactionNotice[]>([]);
+  const publishTransactionNotice = useCallback((notice: GlobalTransactionNotice) => {
+    setTransactionNotices((current) => [...current.filter((item) => item.id !== notice.id), notice]);
+  }, []);
+  const clearTransactionNotice = useCallback((id: string) => {
+    setTransactionNotices((current) => current.filter((item) => item.id !== id));
+  }, []);
   const [sendState, setSendState] = useState<SendState>({ status: "idle" });
   const [sendAttempted, setSendAttempted] = useState(false);
   const [recipientTouched, setRecipientTouched] = useState(false);
@@ -127,6 +147,8 @@ export function App() {
   const [sendFormError, setSendFormError] = useState("");
   const [sessionActivity, setSessionActivity] = useState<ActivityItem[]>([]);
   const [connectOpen, setConnectOpen] = useState(false);
+  const [polkadotSwitchOpen, setPolkadotSwitchOpen] = useState(false);
+  const [switchingAccount, setSwitchingAccount] = useState(false);
   const [walletConnectPending, setWalletConnectPending] = useState<SessionKind | null>(null);
   const [evmConnectError, setEvmConnectError] = useState("");
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -143,8 +165,10 @@ export function App() {
   const oauthCallbackAttempted = useRef(false);
   const provisionalMatrixAuth = useRef<MatrixOAuthSession | null>(null);
   const matrixAuthAbort = useRef<AbortController | null>(null);
-  const { address: appKitAddress } = useAppKitAccount({ namespace: "eip155" });
+  const { address: appKitAddress, isConnected: appKitEvmConnected } = useAppKitAccount({ namespace: "eip155" });
   const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
+  const { open: openAppKit } = useAppKit();
+  const { disconnect: disconnectAppKit } = useDisconnect();
   const sessionRef = useRef(session);
   const lifecycleRef = useRef(lifecycle);
   const evmBridgeRef = useRef<EvmSessionBridge | null>(null);
@@ -164,6 +188,7 @@ export function App() {
       onError: (error) => {
         setWalletConnectPending(null);
         setEvmConnectError(error.message);
+        if (sessionRef.current?.kind === "evm" && error.message.startsWith("Could not switch account.")) notify(error.message);
         if (lifecycleRef.current === "restoring") {
           evmBridgeRef.current?.cancelConnection();
           finishRestore(`Could not restore the EVM session. It remains saved so you can retry. ${error.message}`);
@@ -175,17 +200,46 @@ export function App() {
   networkIdRef.current = network.networkId;
 
   function navigateToPage(next: Page) {
-    const nextPath = pathForRoute(next, import.meta.env.BASE_URL);
-    if (window.location.pathname !== nextPath) {
-      const url = new URL(window.location.href);
-      url.pathname = nextPath;
+    const url = new URL(window.location.href);
+    url.pathname = pathForRoute(next, import.meta.env.BASE_URL);
+    url.search = "";
+    if (window.location.pathname !== url.pathname || window.location.search !== "") {
       window.history.pushState({ locusRoute: next }, "", url);
     }
     setPage(next);
+    if (next === "liquidity") setLiquidityTab("pools");
+  }
+
+  function navigateToLiquidityNew(assetA?: string, assetB?: string) {
+    const url = new URL(window.location.href);
+    url.pathname = pathForRoute("liquidity-new", import.meta.env.BASE_URL);
+    url.search = "";
+    if (assetA && assetB) {
+      url.searchParams.set("assetA", assetA);
+      url.searchParams.set("assetB", assetB);
+    }
+    window.history.pushState({ locusRoute: "liquidity-new" }, "", url);
+    setPage("liquidity-new");
+  }
+
+  function updateLiquidityTab(next: "pools" | "positions") {
+    const url = new URL(window.location.href);
+    url.pathname = pathForRoute("liquidity", import.meta.env.BASE_URL);
+    if (next === "positions") url.searchParams.set("tab", "positions");
+    else url.searchParams.delete("tab");
+    if (url.pathname !== window.location.pathname || url.search !== window.location.search) {
+      window.history.pushState({ locusRoute: "liquidity", liquidityTab: next }, "", url);
+    }
+    setPage("liquidity");
+    setLiquidityTab(next);
   }
 
   useEffect(() => {
-    const syncRoute = () => setPage(routeFromPath(window.location.pathname, import.meta.env.BASE_URL));
+    const syncRoute = () => {
+      const nextPage = routeFromPath(window.location.pathname, import.meta.env.BASE_URL);
+      setPage(nextPage);
+      setLiquidityTab(new URLSearchParams(window.location.search).get("tab") === "positions" ? "positions" : "pools");
+    };
     window.addEventListener("popstate", syncRoute);
     return () => window.removeEventListener("popstate", syncRoute);
   }, []);
@@ -230,13 +284,6 @@ export function App() {
     && catalogQuery.data.serviceId === serviceId
     && network.deployment?.genesisHash !== undefined
     && catalogQuery.data.genesisHash.toLowerCase() === network.deployment.genesisHash.toLowerCase();
-  const liquidityConfigQuery = useQuery({
-    queryKey: ["locus", "liquidity-config", network.networkId, serviceId, import.meta.env.BASE_URL],
-    queryFn: () => loadPermissionlessLiquidityConfig(network.networkId as "local" | "testnet", catalogQuery.data?.assets.map((asset) => asset.key) ?? [], import.meta.env.BASE_URL),
-    enabled: networkMode && catalogMatchesDeployment,
-    staleTime: 60_000,
-    retry: false,
-  });
   const poolsQuery = useQuery({
     queryKey: poolListQueryKey(network.networkId, serviceId),
     queryFn: () => network.locus!.listPools(),
@@ -334,6 +381,34 @@ export function App() {
 
   function openConnect() {
     setConnectOpen(true);
+  }
+
+  function openAccountSwitch() {
+    const current = sessionRef.current;
+    if (current?.kind === "evm") {
+      void openAppKit({ view: "Account", namespace: "eip155" }).catch((cause: unknown) => {
+        notify(cause instanceof Error ? cause.message : "Could not open the wallet account menu.");
+      });
+    } else if (current?.kind === "polkadot") {
+      setPolkadotSwitchOpen(true);
+    }
+  }
+
+  async function switchPolkadotAccount(address: string) {
+    const previous = sessionRef.current;
+    if (previous?.kind !== "polkadot") throw new Error("The Polkadot session changed. Reopen Account to switch accounts.");
+    setSwitchingAccount(true);
+    try {
+      await switchPolkadotSession(
+        previous,
+        address,
+        () => sessionRef.current,
+        (selectedAddress) => connectBrowserSession("polkadot", selectedAddress),
+        setSession,
+      );
+    } finally {
+      setSwitchingAccount(false);
+    }
   }
 
   useEffect(() => {
@@ -539,10 +614,22 @@ export function App() {
     setAmount("");
     setAmountTouched(false);
     setRecipient("");
+    setRecipientType("matrix");
+    setMatrixRecipientState({ status: "idle" });
     setRecipientTouched(false);
     setSendAttempted(false);
     setSendFormError("");
     setSendState({ status: "idle" });
+    setSelectedAssetId(null);
+    setAssetSearch("");
+    setAssetPickerOpen(false);
+    setTypeOpen(false);
+    setReviewOpen(false);
+    setReceiveAsset(null);
+    setCreateAssetOpen(false);
+    setDetailAsset(null);
+    setPolkadotSwitchOpen(false);
+    setToast("");
   }, [session?.connectionId, session?.kind, session?.address]);
 
   useEffect(() => {
@@ -604,7 +691,7 @@ export function App() {
     ? recipientTextError ?? asyncRecipientError ?? (!resolvedRecipient.valid && recipient.trim() && !matrixResolutionPending ? resolvedRecipient.message : null)
     : null;
   const amountFieldError = amountTouched || sendAttempted
-    ? currentAsset ? validatePositiveAmount(amount, currentAsset.decimals, currentAsset.balance) : amount.trim() ? "Choose an asset first." : "Enter an amount."
+    ? currentAsset ? validatePositiveAmount(amount, currentAsset.decimals, currentAsset.balance) : amount.trim() ? "Choose an asset first." : null
     : null;
 
   useEffect(() => {
@@ -667,6 +754,10 @@ export function App() {
   }
 
   function chooseNetworkAsset(asset: AssetView) {
+    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") {
+      navigateToPage("send");
+      return;
+    }
     setSelectedAssetId(asset.assetIdHex);
     setAmount("");
     setAmountTouched(false);
@@ -677,12 +768,14 @@ export function App() {
   }
 
   function updateRecipient(value: string) {
+    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") return;
     changeRecipient(value);
     setSendState({ status: "idle" });
     setSendFormError("");
   }
 
   function updateAmount(value: string) {
+    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") return;
     setAmount(value);
     setSendState({ status: "idle" });
     setSendFormError("");
@@ -693,7 +786,7 @@ export function App() {
     setSendFormError("");
     const assetForSend = networkMode ? currentNetworkAsset : currentDemoAsset;
     if (!assetForSend) { setSendFormError("No asset is available on this network."); return; }
-    if (recipientTextError || validatePositiveAmount(amount, assetForSend.decimals, assetForSend.balance)) return;
+    if (!recipient.trim() || !amount.trim() || recipientTextError || validatePositiveAmount(amount, assetForSend.decimals, assetForSend.balance)) return;
     if (!networkMode) { notify(`Demo: send ${amount} ${currentDemoAsset.symbol} to ${recipient}`); return; }
     if (!("assetId" in assetForSend)) { setSendFormError("No network asset is selected."); return; }
     if (network.status !== "ready" || !locus) { setSendFormError("The selected network is unavailable. Retry the connection before sending."); return; }
@@ -719,21 +812,41 @@ export function App() {
       ownerKey: toHex(ownershipKey(session.owner)).toLowerCase(),
     };
     setReviewOpen(false);
+    let submittedTransactionId = "";
     try {
       setSendState({ status: "awaiting-signature" });
       const applied = await transferAndWait(locus, assetForSend.assetId, destinationOwner, parsedAmount, submittedNetwork, (submitted) => {
+        submittedTransactionId = submitted.transactionId;
+        publishTransactionNotice({
+          id: "send-transaction",
+          title: "Transfer pending",
+          message: "Waiting for confirmation.",
+          transactionId: submitted.transactionId,
+          busy: true,
+        });
         if (isLiquidityScopeCurrent(expectedScope)) setSendState({ status: "submitted", transactionId: submitted.transactionId, actionHash: submitted.actionHash, networkId: submittedNetwork });
       });
+      clearTransactionNotice("send-transaction");
       if (!isLiquidityScopeCurrent(expectedScope)) return;
       setSendState(applied);
-      const nextActivity = [{ direction: "sent" as const, asset: assetForSend.symbol, recipient, amount: `${formatUnits(parsedAmount, assetForSend.decimals)} ${assetForSend.symbol}`, date: "Just now", transactionId: applied.transactionId }, ...sessionActivity];
+      const nextActivity = [{ direction: "sent" as const, asset: assetForSend.symbol, recipient, amount: formatUnits(parsedAmount, assetForSend.decimals), transactionId: applied.transactionId }, ...sessionActivity];
       setSessionActivity(nextActivity);
       try { window.localStorage.setItem(sessionActivityKey(submittedNetwork, formatLocusId(session.owner)), JSON.stringify(nextActivity)); } catch { /* A local activity write cannot change transaction finality. */ }
       void refreshAssets();
       notify("Sent");
     } catch (error) {
+      if (submittedTransactionId) {
+        publishTransactionNotice({
+          id: "send-transaction",
+          title: "Transfer failed",
+          message: normalizeActionError(error, "The transfer could not be completed."),
+          transactionId: submittedTransactionId,
+          tone: "error",
+          dismissible: true,
+        });
+      } else clearTransactionNotice("send-transaction");
       if (isLiquidityScopeCurrent(expectedScope)) {
-        setSendState({ status: "failed", error: normalizeActionError(error, "Transaction failed."), networkId: submittedNetwork });
+        setSendState({ status: "failed", error: normalizeActionError(error, "Transaction failed."), networkId: submittedNetwork, ...(submittedTransactionId ? { transactionId: submittedTransactionId } : {}) });
       }
     }
   }
@@ -746,11 +859,10 @@ export function App() {
       assetOut: item.assetOut,
       amountIn: item.amountIn,
       amountOut: item.amountOut,
-      date: "Just now",
       transactionId: item.transactionId,
     }, ...sessionActivity];
     setSessionActivity(nextActivity);
-    window.localStorage.setItem(sessionActivityKey(item.networkId, formatLocusId(session.owner)), JSON.stringify(nextActivity));
+    try { window.localStorage.setItem(sessionActivityKey(item.networkId, formatLocusId(session.owner)), JSON.stringify(nextActivity)); } catch { /* A local activity write cannot change transaction finality. */ }
     void refreshAssets();
   }
 
@@ -760,7 +872,7 @@ export function App() {
         <div className="brand">locus</div>
         <nav aria-label="Primary">
           {visibleRoutes.map((entry) => (
-            <button type="button" className={page === entry ? "nav-item active" : "nav-item"} key={entry} aria-current={page === entry ? "page" : undefined} onClick={() => navigateToPage(entry)}>
+            <button type="button" className={page === entry || (entry === "liquidity" && page === "liquidity-new") ? "nav-item active" : "nav-item"} key={entry} aria-current={page === entry || (entry === "liquidity" && page === "liquidity-new") ? "page" : undefined} onClick={() => navigateToPage(entry)}>
               <span className="nav-icon" aria-hidden="true">{entry === "send" ? <Send size={17} /> : entry === "assets" ? <Coins size={17} /> : entry === "swap" ? <ArrowLeftRight size={17} /> : entry === "liquidity" ? <Droplets size={17} /> : <History size={17} />}</span><span className="nav-label">{entry[0].toUpperCase() + entry.slice(1)}</span>
             </button>
           ))}
@@ -770,23 +882,18 @@ export function App() {
         </div>
       </aside>
 
-      <header className="mobile-header">
-        <div className="mobile-header-row">
-          <div className="brand">locus</div>
-          <div className="mobile-header-actions">
+      <MobileNavigation route={page} onNavigate={navigateToPage}>
             <ThemeControl />
             {networkMode
               ? <NetworkSwitcher compact />
               : <span className="mobile-demo-indicator"><span className="status-dot ready" aria-hidden="true" />Demo</span>}
-            <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} pendingKind={walletConnectPending} onConnect={openConnect} onDisconnect={disconnectSession} onRemoveMatrixDevice={() => signOutMatrix()} />
-          </div>
-        </div>
-      </header>
+            <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} pendingKind={walletConnectPending} onConnect={openConnect} onSwitchAccount={openAccountSwitch} switchingAccount={switchingAccount} onDisconnect={disconnectSession} onRemoveMatrixDevice={() => signOutMatrix()} />
+      </MobileNavigation>
 
       <main className="main">
         <header className="topbar">
           <ThemeControl />
-          <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} pendingKind={walletConnectPending} onConnect={openConnect} onDisconnect={disconnectSession} onRemoveMatrixDevice={() => signOutMatrix()} />
+          <AccountMenu session={session} lifecycle={lifecycle} restoreError={restoreError} pendingKind={walletConnectPending} onConnect={openConnect} onSwitchAccount={openAccountSwitch} switchingAccount={switchingAccount} onDisconnect={disconnectSession} onRemoveMatrixDevice={() => signOutMatrix()} />
         </header>
 
         {networkMode && network.status !== "ready" && (
@@ -799,21 +906,28 @@ export function App() {
         {page === "send" && <SendPage networkMode={networkMode} status={network.status} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} recipientError={recipientFieldError} recipientMessage={recipient.trim() && (resolvedRecipient.valid || matrixResolutionPending) ? resolvedRecipient.message : ""} amount={amount} amountError={amountFieldError} formError={sendFormError} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={(value) => { updateRecipient(value); setRecipientTouched(false); }} onRecipientBlur={() => setRecipientTouched(true)} onAmount={updateAmount} onAmountBlur={() => setAmountTouched(true)} onMax={() => { updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : ""); setAmountTouched(true); }} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
         {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} getBalanceState={getAssetBalanceState} onRetry={() => void refreshAssets()} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} />}
         {page === "swap" && <>
-          <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} />
+          <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onTransactionNotice={publishTransactionNotice} onClearTransactionNotice={clearTransactionNotice} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} />
         </>}
-        {page === "liquidity" && <LiquidityPage config={liquidityConfigQuery.data ?? null} assets={assets} pools={pools} poolsError={poolsError} poolsLoading={poolsQuery.isLoading} locus={locus} networkId={network.networkId} serviceId={serviceId} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} networkReady={networkMode && network.status === "ready"} isScopeCurrent={isLiquidityScopeCurrent} onPoolsRefreshed={(next) => queryClient.setQueryData(poolListQueryKey(network.networkId, serviceId), next)} onRefreshAssets={refreshAssets} onConnect={openConnect} />}
+        {(page === "liquidity" || page === "liquidity-new") && <LiquidityPage key={page} view={page === "liquidity-new" ? "new" : "home"} initialTab={liquidityTab} initialPair={{ assetA: new URLSearchParams(window.location.search).get("assetA") ?? "", assetB: new URLSearchParams(window.location.search).get("assetB") ?? "" }} assets={assets} pools={pools} poolsError={poolsError} poolsLoading={poolsQuery.isLoading} locus={locus} networkId={network.networkId} serviceId={serviceId} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} networkReady={networkMode && network.status === "ready"} isScopeCurrent={isLiquidityScopeCurrent} onPoolsRefreshed={(next) => queryClient.setQueryData(poolListQueryKey(network.networkId, serviceId), next)} onRefreshAssets={refreshAssets} onConnect={openConnect} onNewPosition={navigateToLiquidityNew} onTabChange={updateLiquidityTab} onActionSuccess={(message) => notify(message)} onTransactionNotice={publishTransactionNotice} onClearTransactionNotice={clearTransactionNotice} onRetryPools={() => void refreshPools()} getBalanceState={getAssetBalanceState} />}
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>
-      <nav className="mobile-bottom-nav" aria-label="Primary">
-        {visibleRoutes.map((entry) => (
-          <button type="button" className={page === entry ? "mobile-nav-item active" : "mobile-nav-item"} key={entry} aria-current={page === entry ? "page" : undefined} onClick={() => navigateToPage(entry)}>
-            {entry === "send" ? <Send size={20} aria-hidden="true" /> : entry === "assets" ? <Coins size={20} aria-hidden="true" /> : entry === "swap" ? <ArrowLeftRight size={20} aria-hidden="true" /> : entry === "liquidity" ? <Droplets size={20} aria-hidden="true" /> : <History size={20} aria-hidden="true" />}
-            <span>{entry[0].toUpperCase() + entry.slice(1)}</span>
-          </button>
-        ))}
-      </nav>
-      {toast && <div className="toast" role="status">{toast}</div>}
-      <ConnectDialog open={connectOpen} onClose={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); setConnectOpen(false); }} onCancelMatrix={cancelMatrixSignIn} onMatrixSelected={() => setActiveSessionKind(window.localStorage, "matrix")} onConnected={(next) => { setWalletConnectPending(null); setSession(next); if (next.kind === "matrix") setPendingMatrixConnection(null); }} onConnectionPendingChange={setWalletConnectPending} onEvmConnectRequested={() => { setActiveSessionKind(window.localStorage, "evm"); setWalletConnectPending("evm"); setEvmConnectError(""); return evmBridge.beginConnection(); }} onEvmConnectCancelled={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); }} evmError={evmConnectError} evmAccountAvailable={Boolean(walletProvider && appKitAddress)} locus={network.locus} initialMatrixConnection={connectOpen ? pendingMatrixConnection : null} />
+      <GlobalNotifications toast={toast} notices={transactionNotices} onDismiss={clearTransactionNotice} />
+      <ConnectDialog open={connectOpen} onClose={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); setConnectOpen(false); }} onCancelMatrix={cancelMatrixSignIn} onMatrixSelected={() => setActiveSessionKind(window.localStorage, "matrix")} onConnected={(next) => { setWalletConnectPending(null); setSession(next); if (next.kind === "matrix") setPendingMatrixConnection(null); }} onConnectionPendingChange={setWalletConnectPending} onEvmConnectRequested={async () => {
+        setActiveSessionKind(window.localStorage, "evm");
+        setWalletConnectPending("evm");
+        setEvmConnectError("");
+        const reconnected = await evmBridge.beginConnection();
+        // AppKit can restore a connection marker from browser storage before
+        // its EIP-1193 provider is usable. Its modal then refuses to open as
+        // "already connected". Clear only that stale EVM adapter connection
+        // so the user can select MetaMask and authorize it again.
+        if (!reconnected && appKitEvmConnected) {
+          evmBridge.cancelConnection();
+          await disconnectAppKit({ namespace: "eip155" });
+        }
+        return reconnected;
+      }} onEvmConnectCancelled={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); }} evmError={evmConnectError} evmAccountAvailable={Boolean(walletProvider && appKitAddress)} locus={network.locus} initialMatrixConnection={connectOpen ? pendingMatrixConnection : null} />
+      <PolkadotAccountSwitchDialog open={polkadotSwitchOpen} currentAccount={session?.kind === "polkadot" ? session.address : ""} onClose={() => setPolkadotSwitchOpen(false)} onSelect={switchPolkadotAccount} />
       {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={resolvedRecipient} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
       <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
       <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} networkId={network.networkId} serviceId={network.deployment?.serviceId ?? null} onClose={() => setCreateAssetOpen(false)} onCreated={() => void refreshAssets()} />
@@ -863,44 +977,49 @@ function SendPage({ networkMode, status, asset, assets, assetSearch, assetPicker
   return <section className="page send-page">
     <div className="card send-card">
       <div className="send-amount-field">
-        <label className="sr-only" htmlFor="send-amount">Amount</label>
-        <div className="send-amount-control">
-          <AssetPicker networkMode={networkMode} asset={asset} assets={assets} search={assetSearch} open={assetPickerOpen} onOpenChange={onToggleAssets} onSearch={onSearchAssets} onSelect={onSelectAsset} onCycleDemo={onCycleDemo} variant="compact" />
-          <div className="send-amount-entry"><input id="send-amount" value={amount} inputMode="decimal" placeholder="0" onBlur={onAmountBlur} onChange={(event) => onAmount(event.target.value)} aria-label="Amount to send" aria-invalid={Boolean(amountError)} aria-describedby={amountError ? "send-amount-error" : undefined} />
-            <button type="button" className="send-max-button" disabled={!asset || asset.balance === null} onClick={onMax}>Max</button>
-          </div>
-          <div className="send-amount-balance"><span>Balance</span><strong>{displayAmount(balance, decimals)}</strong></div>
-        </div>
+        <AssetAmountInput
+          className="send-asset-amount"
+          selector={<AssetPicker networkMode={networkMode} asset={asset} assets={assets} search={assetSearch} open={assetPickerOpen} onOpenChange={onToggleAssets} onSearch={onSearchAssets} onSelect={onSelectAsset} onCycleDemo={onCycleDemo} variant="compact" />}
+          label="Amount to send"
+          balance={balance === null ? "Balance unavailable" : `Balance: ${displayAmount(balance, decimals)} ${asset?.symbol ?? ""}`.trim()}
+          id="send-amount"
+          amount={amount}
+          disabled={busy}
+          onAmountChange={onAmount}
+          onAmountBlur={onAmountBlur}
+          onMax={onMax}
+          maxDisabled={!asset || asset.balance === null}
+          placeholder="0"
+          ariaLabel="Amount to send"
+          ariaInvalid={Boolean(amountError)}
+          ariaDescribedBy={amountError ? "send-amount-error" : undefined}
+        />
         <FieldMessage id="send-amount-error" error={amountError} />
       </div>
-      <OwnershipInput type={recipientType} value={recipient} open={typeOpen} networkMode={networkMode} message={recipientMessage} valid={resolution.valid} error={recipientError} onBlur={onRecipientBlur} onType={onChooseType} onToggle={onToggleTypes} onChange={onRecipient} onClear={onClear} />
+      <OwnershipInput type={recipientType} value={recipient} open={typeOpen} networkMode={networkMode} message={recipientMessage} valid={resolution.valid} error={recipientError} onBlur={onRecipientBlur} onType={onChooseType} onToggle={onToggleTypes} onChange={onRecipient} onClear={onClear} disabled={busy} />
       {formError && <p className="action-status action-status--error" role="alert">{formError}</p>}
-      <ActionButton variant="primary" icon={ArrowUpRight} fullWidth disabled={!asset || busy || sendState.status === "applied" || (networkMode && status !== "ready")} onClick={onContinue}>{sendLabel}</ActionButton>
-      {sendState.status === "failed" && <div className="transaction-error" role="alert">{sendState.error}</div>}
-      {sendState.status === "submitted" && <Receipt state={sendState} />}
-      {sendState.status === "applied" && <Receipt state={sendState} />}
+      <ActionButton variant="primary" icon={ArrowUpRight} fullWidth disabled={!asset || !amount.trim() || !recipient.trim() || busy || sendState.status === "applied" || (networkMode && status !== "ready")} onClick={onContinue}>{sendLabel}</ActionButton>
+      {sendState.status === "failed" && !sendState.transactionId && <div className="transaction-error" role="alert">{sendState.error}</div>}
     </div>
   </section>;
 }
 
-function Receipt({ state }: { state: Extract<SendState, { status: "submitted" | "applied" }> }) {
-  return <div className="receipt"><strong>{state.status === "applied" ? "Transaction applied" : "Transaction submitted"}</strong><span>Network: {state.networkId}</span><span>Status: {state.status}</span><CopyableValue label="Transaction" value={state.transactionId} />{state.actionHash && <CopyableValue label="Action" value={state.actionHash} />}</div>;
-}
-
 function AssetsPage({ networkMode, loading, error, assets, featuredAssets, search, setSearch, filter, setFilter, getBalanceState, onRetry, onOpenDetail, onCreate }: { networkMode: boolean; loading: boolean; error: string; assets: (AssetView | DemoAsset)[]; featuredAssets: AssetView[]; search: string; setSearch: (value: string) => void; filter: "all" | "crypto" | "equities" | "custom"; setFilter: (value: "all" | "crypto" | "equities" | "custom") => void; getBalanceState: (asset: AssetView) => "known" | "loading" | "unavailable"; onRetry: () => void; onOpenDetail: (asset: AssetView | DemoAsset) => void; onCreate: () => void }) {
   const filters = [
-    { id: "all", label: <><List size={16} aria-hidden="true" /><span>All</span></>, textValue: "All" },
-    { id: "crypto", label: <><Coins size={16} aria-hidden="true" /><span>Crypto</span></>, textValue: "Crypto" },
-    { id: "equities", label: <><TrendingUp size={16} aria-hidden="true" /><span>Equities</span></>, textValue: "Equities" },
-    { id: "custom", label: <><Shapes size={16} aria-hidden="true" /><span>Custom</span></>, textValue: "Custom" },
+    { id: "all", label: <span className="asset-filter-option"><List size={16} aria-hidden="true" /><span>All</span></span>, textValue: "All" },
+    { id: "crypto", label: <span className="asset-filter-option"><Coins size={16} aria-hidden="true" /><span>Crypto</span></span>, textValue: "Crypto" },
+    { id: "equities", label: <span className="asset-filter-option"><TrendingUp size={16} aria-hidden="true" /><span>Equities</span></span>, textValue: "Equities" },
+    { id: "custom", label: <span className="asset-filter-option"><Shapes size={16} aria-hidden="true" /><span>Custom</span></span>, textValue: "Custom" },
   ] as const;
   return <section className="page">
-    {networkMode && <div className="assets-create-row"><span /><ActionButton className="assets-create-action" variant="secondary" icon={CirclePlus} onClick={onCreate}>Create asset</ActionButton></div>}
-    <div className="assets-layout"><div>
-      <div className="assets-toolbar">
+    <div className={`assets-toolbar${networkMode ? " assets-toolbar--network" : ""}`}>
+      <div className="assets-toolbar-controls">
         {networkMode && <ResponsiveSelect id="asset-filter" ariaLabel="Filter assets" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters.map((entry) => ({ value: entry.id, label: entry.label, textValue: entry.textValue }))} />}
         <label className="assets-search"><Search size={17} aria-hidden="true" /><input className="search" aria-label="Search assets" value={search} placeholder="Search assets..." onChange={(event) => setSearch(event.target.value)} /></label>
       </div>
+      {networkMode && <ActionButton className="assets-create-action" variant="secondary" icon={CirclePlus} onClick={onCreate}>Create asset</ActionButton>}
+    </div>
+    <div className="assets-layout"><div>
       {error && <div className="empty-state" role="alert">{error}<ActionButton size="small" variant="tertiary" icon={RefreshCw} onClick={onRetry}>Try again</ActionButton></div>}
       {loading && assets.length === 0 && <AssetListSkeleton />}
       {!error && !loading && assets.length === 0 && <div className="empty-state">{networkMode ? "No matching assets on this network." : "No demo assets found."}</div>}
@@ -908,9 +1027,7 @@ function AssetsPage({ networkMode, loading, error, assets, featuredAssets, searc
         const isNetworkAsset = "assetIdHex" in entry;
         const id = isNetworkAsset ? entry.assetIdHex : entry.symbol;
         const balanceStatus = isNetworkAsset ? getBalanceState(entry) : "known";
-        const amountText = isNetworkAsset && entry.balance !== null
-          ? formatUnits(entry.balance, entry.decimals)
-          : isNetworkAsset ? "" : displayAmount(entry.balance, entry.decimals);
+        const amountText = entry.balance === null ? "" : formatAssetListAmount(entry.balance, entry.decimals);
         return <div className="asset-row" key={id} role="button" tabIndex={0} onClick={() => onOpenDetail(entry)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onOpenDetail(entry); } }}>
           {isNetworkAsset ? <AssetIcon asset={entry} size={40} /> : <span className="coin small-coin" style={{ background: entry.color }}>{entry.symbol[0]}</span>}
           <span className="asset-row-info"><strong>{entry.name}</strong><small>{entry.symbol}</small></span>
@@ -965,8 +1082,29 @@ function ActivityPage({ networkMode, filter, setFilter, rows }: { networkMode: b
     {networkMode && <SegmentedControl className="activity-filter-tabs" ariaLabel="Filter activity" value={filter} onValueChange={(value) => setFilter(value as typeof filter)} options={filters} />}
     {rows.length === 0
       ? <div className="card empty-state">{networkMode ? "No recent transactions in this browser yet. Incoming transfers and complete history are not indexed here." : "No network activity is available in Demo mode."}</div>
-      : <div className="card activity-list">{rows.map((entry, index) => entry.kind === "swap"
-        ? <div className="activity-row activity-row-swap" key={`${entry.transactionId ?? entry.date}-${index}`}><span className="received"><ArrowLeftRight size={15} aria-hidden="true" /> Swapped</span><strong>{entry.amountIn} {entry.assetIn} → {entry.amountOut} {entry.assetOut}</strong><span>Browser-local<small>Not a complete history</small></span><small>{entry.date}</small>{entry.transactionId && <CopyableValue label="Transaction" value={entry.transactionId} />}</div>
-        : <div className="activity-row" key={`${entry.transactionId ?? entry.date}-${index}`}><span className="sent"><ArrowUpRight size={15} aria-hidden="true" /> Sent</span><strong>{entry.asset}</strong><span><CopyableValue label="Recipient" value={entry.recipient} /></span><strong>{entry.amount}</strong><small>{entry.date}</small>{entry.transactionId && <CopyableValue label="Transaction" value={entry.transactionId} />}</div>)}</div>}
+      : <div className="card activity-list" role="region" aria-label="Activity history table" tabIndex={0}><div className="activity-table" role="table" aria-label="Activity">
+        <div className="activity-row activity-row--header" role="row">
+          <span role="columnheader">Type</span>
+          <span role="columnheader">Asset / Pair</span>
+          <span role="columnheader" className="activity-amount-heading">Amount</span>
+          <span role="columnheader">Recipient</span>
+          <span role="columnheader">Transaction</span>
+        </div>
+        {rows.map((entry, index) => {
+          const isSwap = entry.kind === "swap";
+          const key = entry.transactionId ?? `activity-${index}`;
+          return <div className={`activity-row${isSwap ? " activity-row--swap" : ""}`} key={key} role="row">
+            <span className={`activity-kind${isSwap ? " activity-kind--swap" : " activity-kind--sent sent"}`} role="cell">
+              {isSwap ? <><ArrowLeftRight size={15} aria-hidden="true" /> Swapped</> : <><ArrowUpRight size={15} aria-hidden="true" /> Sent</>}
+            </span>
+            <strong className="activity-assets" role="cell">{isSwap ? `${entry.assetIn} → ${entry.assetOut}` : entry.asset}</strong>
+            <strong className="activity-amount" role="cell">{isSwap
+              ? `${activityAmount(entry.amountIn, entry.assetIn)} → ${activityAmount(entry.amountOut, entry.assetOut)}`
+              : activityAmount(entry.amount, entry.asset)}</strong>
+            <span className="activity-recipient" role="cell">{isSwap ? <span className="activity-empty-value">—</span> : <CopyableValue value={entry.recipient} layout="inline" />}</span>
+            <span className="activity-transaction" role="cell">{entry.transactionId ? <CopyableValue value={entry.transactionId} layout="inline" /> : <span className="activity-empty-value">—</span>}</span>
+          </div>;
+        })}
+      </div></div>}
   </section>;
 }

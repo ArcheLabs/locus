@@ -1,7 +1,7 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { CheckCircle2, ChevronDown, Unplug, UserRound, X } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, ChevronDown, Unplug, UserRound, X } from "lucide-react";
 import { formatLocusId } from "@archelabs/locus";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { LocusWebSession, SessionKind } from "../session/types.js";
 import type { MatrixProfile } from "../matrix/MatrixProfile.js";
 import { loadMatrixProfile } from "../matrix/MatrixProfile.js";
@@ -16,6 +16,8 @@ type Props = {
   restoreError?: string;
   pendingKind?: SessionKind | null;
   onConnect: () => void;
+  onSwitchAccount: () => void;
+  switchingAccount?: boolean;
   onDisconnect: () => void;
   onRemoveMatrixDevice: () => void;
 };
@@ -24,11 +26,13 @@ function matrixDisplayName(profile: MatrixProfile | null, userId: string): strin
   return profile?.displayName || userId.slice(1).split(":", 1)[0] || userId;
 }
 
-export function AccountMenu({ session, lifecycle, restoreError, pendingKind = null, onConnect, onDisconnect, onRemoveMatrixDevice }: Props) {
+export function AccountMenu({ session, lifecycle, restoreError, pendingKind = null, onConnect, onSwitchAccount, switchingAccount = false, onDisconnect, onRemoveMatrixDevice }: Props) {
   const [open, setOpen] = useState(false);
   const [removeConfirmation, setRemoveConfirmation] = useState(false);
   const [profileResult, setProfileResult] = useState<{ key: string; profile: MatrixProfile } | null>(null);
   const [avatarFailed, setAvatarFailed] = useState(false);
+  const accountKey = session ? `${session.kind}:${session.connectionId ?? session.address}:${session.address}` : "";
+  const previousAccountKey = useRef(accountKey);
   const matrixHomeserver = session?.kind === "matrix" ? session.matrix?.homeserver : undefined;
   const matrixUserId = session?.kind === "matrix" ? session.matrix?.userId : undefined;
   const matrixProfileKey = matrixHomeserver && matrixUserId ? `${matrixHomeserver}|${matrixUserId}` : "";
@@ -48,6 +52,13 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
       loaded?.dispose();
     };
   }, [matrixHomeserver, matrixProfileKey, matrixUserId]);
+
+  useEffect(() => {
+    if (previousAccountKey.current === accountKey) return;
+    previousAccountKey.current = accountKey;
+    setOpen(false);
+    setRemoveConfirmation(false);
+  }, [accountKey]);
 
   if (!session) return <div className="disconnected-session">
     <ActionButton variant="secondary" icon={UserRound} className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring" || pendingKind !== null} aria-label="Connect an Ownership">
@@ -125,8 +136,12 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
           </section>}
 
           <footer className="account-center-footer">
-            <ActionButton variant="secondary" icon={Unplug} onClick={() => { setOpen(false); onDisconnect(); }}>Disconnect from Locus</ActionButton>
-            <small>{session.kind === "matrix" ? "Your Matrix device and crypto store will be kept." : "Only the Locus session is disconnected."}</small>
+            {(session.kind === "evm" || session.kind === "polkadot") && <ActionButton variant="secondary" icon={ArrowLeftRight} disabled={switchingAccount} onClick={() => {
+              setOpen(false);
+              window.setTimeout(onSwitchAccount, 0);
+            }}>{switchingAccount ? "Switching account…" : "Switch account"}</ActionButton>}
+            <ActionButton variant="danger" icon={Unplug} onClick={() => { setOpen(false); onDisconnect(); }}>Disconnect</ActionButton>
+            <small>{session.kind === "matrix" ? "Your Matrix device and crypto store will be kept." : session.kind === "evm" || session.kind === "polkadot" ? "Disconnecting only ends the Locus session. Wallet authorization is kept." : "Only the Locus session is disconnected."}</small>
           </footer>
         </div>
       </Dialog.Content>

@@ -1,20 +1,28 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowDownUp, Droplets, Plus, RefreshCw, X } from "lucide-react";
-import { formatLiquiditySharePercentage, formatUnits, minimumLiquidityAmount, ownershipKey, parseUnits, quoteAddLiquidity as calculateAddLiquidity, quoteInitialLiquidity, toHex, type LocusClient, type LiquidityPosition, type Ownership, type Pool } from "@archelabs/locus";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { ArrowLeft, Droplets, Plus, RefreshCw } from "lucide-react";
+import { formatUnits, minimumLiquidityAmount, ownershipKey, parseUnits, quoteAddLiquidity as calculateAddLiquidity, quoteInitialLiquidity, toHex, type LocusClient, type LiquidityPosition, type Ownership, type Pool, type PreparedOwnershipAction, type SignedOwnershipAction } from "@archelabs/locus";
 import type { AssetView } from "../assets.js";
 import { AssetIdentity, AssetSelector } from "../../components/AssetSelector.js";
+import { AssetAmountInput } from "../../components/AssetAmountInput.js";
+import { ConfirmationAssetList } from "../../components/ConfirmationAssetList.js";
 import { ActionButton } from "../../components/ActionButton.js";
 import { Modal } from "../../components/Modal.js";
+import type { GlobalTransactionNotice } from "../../components/GlobalNotifications.js";
 import { normalizeActionError } from "../../errors/normalizeError.js";
+import { waitForWalletSignature, withPreparationTimeout } from "../createAssetWorkflow.js";
 import { poolPriceDisplay, proportionalAmount } from "./liquidityMath.js";
-import type { PermissionlessLiquidityConfig } from "./liquidityConfig.js";
 import type { LiquidityScope } from "./liquidityTypes.js";
 import "./permissionlessLiquidity.css";
 
 type Operation = "create" | "initialize" | "add" | "remove";
 type PendingAction = { transactionId: string; action: string; networkId: string; serviceId: number; ownerKey: string; createdAt: number };
 type PairPoolState = { key: string; pool: Pool | null; loading: boolean; error: string };
+type LiquidityReview =
+  | { operation: Exclude<Operation, "remove">; scope: LiquidityScope; assetA: AssetView; assetB: AssetView; amountA: string; amountB: string }
+  | { operation: "remove"; scope: LiquidityScope; position: LiquidityPosition };
 const SLIPPAGE_BPS = 50;
+const OWNERSHIP_PREPARATION_TIMEOUT_MS = 45_000;
+const WALLET_SIGNATURE_TIMEOUT_MS = 120_000;
 
 function pendingStorageKey(scope: LiquidityScope): string {
   return `locus.liquidity.pending.v2.${scope.networkId}.${scope.serviceId ?? 0}.${scope.ownerKey ?? "disconnected"}`;
@@ -48,8 +56,22 @@ function friendlyError(cause: unknown): string {
   return normalized;
 }
 
-export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading, locus, networkId, serviceId, sessionOwner, connectionId, networkReady, isScopeCurrent, onPoolsRefreshed, onRefreshAssets, onConnect }: {
-  config: PermissionlessLiquidityConfig | null;
+function preReceiptFailure(cause: unknown, transactionId: string): string | null {
+  if (!cause || typeof cause !== "object") return null;
+  const rpcError = cause as { code?: unknown; data?: unknown };
+  if (rpcError.code !== -32040 || !rpcError.data || typeof rpcError.data !== "object") return null;
+  const transaction = rpcError.data as { transactionId?: unknown; status?: unknown; error?: unknown };
+  if (transaction.status !== "failed" || typeof transaction.transactionId !== "string"
+    || transaction.transactionId.toLowerCase() !== transactionId.toLowerCase()) return null;
+  return typeof transaction.error === "string" && transaction.error.length > 0
+    ? transaction.error
+    : "The service rejected the transaction before producing an action receipt.";
+}
+
+export function LiquidityPage({ view, initialTab, initialPair, assets, pools, poolsError, poolsLoading, locus, networkId, serviceId, sessionOwner, connectionId, networkReady, isScopeCurrent, onPoolsRefreshed, onRefreshAssets, onConnect, onNewPosition, onTabChange, onActionSuccess, onTransactionNotice, onClearTransactionNotice, onRetryPools, getBalanceState }: {
+  view: "home" | "new";
+  initialTab: "pools" | "positions";
+  initialPair: { assetA: string; assetB: string };
   assets: AssetView[];
   pools: Pool[];
   poolsError: string;
@@ -64,26 +86,41 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
   onPoolsRefreshed: (pools: Pool[]) => void;
   onRefreshAssets: () => Promise<unknown>;
   onConnect: () => void;
+  onNewPosition: (assetA?: string, assetB?: string) => void;
+  onTabChange: (tab: "pools" | "positions") => void;
+  onActionSuccess: (message: string) => void;
+  onTransactionNotice: (notice: GlobalTransactionNotice) => void;
+  onClearTransactionNotice: (id: string) => void;
+  onRetryPools: () => void;
+  getBalanceState: (asset: AssetView) => "known" | "loading" | "unavailable";
 }) {
-  const [assetAId, setAssetAId] = useState(assets[0]?.assetIdHex ?? "");
-  const [assetBId, setAssetBId] = useState(assets[1]?.assetIdHex ?? "");
+  const [assetAId, setAssetAId] = useState("");
+  const [assetBId, setAssetBId] = useState("");
+  const [tab, setTab] = useState(initialTab);
   const [amountA, setAmountA] = useState("");
   const [amountB, setAmountB] = useState("");
   const [withdrawPercent, setWithdrawPercent] = useState(50);
+  const [withdrawPercentText, setWithdrawPercentText] = useState("50");
   const [customWithdraw, setCustomWithdraw] = useState(false);
   const [positions, setPositions] = useState<LiquidityPosition[]>([]);
   const [positionsLoading, setPositionsLoading] = useState(false);
+  const [positionsError, setPositionsError] = useState("");
+  const [positionsRefreshRevision, setPositionsRefreshRevision] = useState(0);
+  const positionsScopeKey = useRef("");
   const [positionIndexCount, setPositionIndexCount] = useState(0n);
   const [positionCursor, setPositionCursor] = useState(0n);
   const [positionsPageLoading, setPositionsPageLoading] = useState(false);
   const [positionsPageError, setPositionsPageError] = useState("");
-  const [review, setReview] = useState<{ operation: Operation; position?: LiquidityPosition } | null>(null);
+  const [review, setReview] = useState<LiquidityReview | null>(null);
   const [busy, setBusy] = useState(false);
+  const [preparingAction, setPreparingAction] = useState(false);
+  const [preparedAction, setPreparedAction] = useState<PreparedOwnershipAction | null>(null);
+  const preparedActionRef = useRef<PreparedOwnershipAction | null>(null);
+  const preparationGeneration = useRef(0);
+  const preparationTimer = useRef<number | null>(null);
+  const routePairHydration = useRef<string | null>(null);
   const [transactionId, setTransactionId] = useState("");
-  const [transactionOutcome, setTransactionOutcome] = useState<"pending" | "applied" | "failed" | null>(null);
-  const [actionMessage, setActionMessage] = useState("");
   const [error, setError] = useState("");
-  const [pending, setPending] = useState<PendingAction | null>(null);
   const [pairPoolState, setPairPoolState] = useState<PairPoolState | null>(null);
   const [pairRefreshRevision, setPairRefreshRevision] = useState(0);
   const [additionalPools, setAdditionalPools] = useState<Pool[]>([]);
@@ -94,7 +131,11 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
   const ownerKey = sessionOwner ? toHex(ownershipKey(sessionOwner)).toLowerCase() : null;
   const scope = useMemo<LiquidityScope>(() => ({ networkId, serviceId, connectionId, ownerKey }), [connectionId, networkId, ownerKey, serviceId]);
   const storageKey = pendingStorageKey(scope);
+  const transactionNoticeId = `liquidity-${storageKey}`;
   const pendingScopeReady = networkReady && sessionOwner !== null && serviceId !== null;
+  const [pending, setPending] = useState<PendingAction | null>(() => pendingScopeReady ? readPending(storageKey) : null);
+  const pendingMatchesScope = !!pending && pending.networkId === networkId && pending.serviceId === serviceId && pending.ownerKey === ownerKey;
+  const previousTransactionNoticeId = useRef(transactionNoticeId);
   const selectedA = assets.find((asset) => asset.assetIdHex === assetAId) ?? null;
   const selectedB = assets.find((asset) => asset.assetIdHex === assetBId) ?? null;
   const pairKey = selectedA && selectedB ? `${selectedA.assetIdHex}:${selectedB.assetIdHex}` : "";
@@ -107,8 +148,9 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
     return [...byKey.values()];
   }, [additionalPools, pools]);
   const poolEmpty = !!selectedPool && selectedPool.totalShares === 0n;
-  const operation: Operation = !selectedPool ? "create" : poolEmpty ? "initialize" : "add";
+  const operation: Exclude<Operation, "remove"> = !selectedPool ? "create" : poolEmpty ? "initialize" : "add";
   const busyOrPending = busy || !!pending;
+  const formLocked = busyOrPending || !!review;
   const removalPosition = review?.operation === "remove" ? review.position ?? null : null;
   const isScopeCurrentRef = useRef(isScopeCurrent);
   isScopeCurrentRef.current = isScopeCurrent;
@@ -123,12 +165,6 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
       return calculateAddLiquidity(selectedPool.reserve0, selectedPool.reserve1, selectedPool.totalShares, aIs0 ? rawA : rawB, aIs0 ? rawB : rawA);
     } catch { return null; }
   })() : null;
-  const ownSharesBeforeAdd = selectedPool
-    ? positions.find((position) => toHex(position.pool.asset0).toLowerCase() === toHex(selectedPool.asset0).toLowerCase()
-      && toHex(position.pool.asset1).toLowerCase() === toHex(selectedPool.asset1).toLowerCase())?.shares ?? 0n
-    : 0n;
-  const sharesAfterAdd = liquidityQuote ? ownSharesBeforeAdd + liquidityQuote.sharesMinted : 0n;
-  const totalSharesAfterAdd = (selectedPool?.totalShares ?? 0n) + (liquidityQuote?.sharesMinted ?? 0n);
   const selectedAIsPoolAsset0 = !!selectedPool && !!selectedA
     && toHex(selectedA.assetId).toLowerCase() === toHex(selectedPool.asset0).toLowerCase();
   const quoteUsedA = liquidityQuote
@@ -137,22 +173,64 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
   const quoteUsedB = liquidityQuote
     ? selectedPool && !poolEmpty ? (selectedAIsPoolAsset0 ? liquidityQuote.amount1Used : liquidityQuote.amount0Used) : liquidityQuote.amount1Used
     : 0n;
+  const initialPrice = selectedAmounts && selectedA && selectedB && selectedAmounts[0] > 0n && selectedAmounts[1] > 0n
+    ? poolPriceDisplay(selectedAmounts[0], selectedAmounts[1], selectedA.decimals, selectedB.decimals)
+    : "—";
 
   useEffect(() => {
-    if (!assets.length) return;
-    const valid = new Set(assets.map((asset) => asset.assetIdHex));
-    if (!valid.has(assetAId) || !valid.has(assetBId) || assetAId === assetBId) {
-      const first = assets[0]!;
-      const second = assets.find((asset) => asset.assetIdHex !== first.assetIdHex);
-      if (second) { setAssetAId(first.assetIdHex); setAssetBId(second.assetIdHex); setAmountA(""); setAmountB(""); }
-    }
-  }, [assetAId, assetBId, assets]);
+    setTab(initialTab);
+  }, [initialTab]);
+
+  useEffect(() => {
+    if (view !== "new" || !initialPair.assetA || !initialPair.assetB || !assets.length) return;
+    const routePairKey = `${initialPair.assetA.toLowerCase()}:${initialPair.assetB.toLowerCase()}`;
+    if (routePairHydration.current === routePairKey) return;
+    const assetA = assets.find((asset) => asset.assetIdHex.toLowerCase() === initialPair.assetA.toLowerCase());
+    const assetB = assets.find((asset) => asset.assetIdHex.toLowerCase() === initialPair.assetB.toLowerCase());
+    if (!assetA || !assetB || assetA.assetIdHex === assetB.assetIdHex) return;
+    routePairHydration.current = routePairKey;
+    // A route pair is only a starting value. Once the user has made a choice
+    // or entered an amount, later catalog updates must not restore the URL pair.
+    if (assetAId || assetBId || amountA || amountB) return;
+    setPair(assetA.assetIdHex, assetB.assetIdHex);
+  }, [amountA, amountB, assetAId, assetBId, assets, initialPair.assetA, initialPair.assetB, view]);
+
+  useEffect(() => () => {
+    preparationGeneration.current += 1;
+    if (preparationTimer.current !== null) window.clearTimeout(preparationTimer.current);
+    const prepared = preparedActionRef.current;
+    preparedActionRef.current = null;
+    if (prepared) locus?.abandonPreparedOwnershipAction(prepared);
+  }, [locus]);
+
+  useEffect(() => {
+    if (review && !isScopeCurrentRef.current(review.scope)) closeReview();
+  }, [review, scope]);
 
   useEffect(() => {
     setPending(pendingScopeReady ? readPending(storageKey) : null);
     setTransactionId("");
-    setTransactionOutcome(null);
   }, [pendingScopeReady, storageKey]);
+
+  useEffect(() => {
+    if (previousTransactionNoticeId.current !== transactionNoticeId) {
+      onClearTransactionNotice(previousTransactionNoticeId.current);
+      previousTransactionNoticeId.current = transactionNoticeId;
+    }
+    if (!pendingScopeReady || !pendingMatchesScope) {
+      onClearTransactionNotice(transactionNoticeId);
+      return;
+    }
+    if (pending) {
+      showPendingNotice(pending, busy);
+      return;
+    }
+    if (transactionId) {
+      showLiquidityFailureNotice(transactionId, error);
+      return;
+    }
+    onClearTransactionNotice(transactionNoticeId);
+  }, [busy, error, locus, onClearTransactionNotice, onTransactionNotice, pending, pendingMatchesScope, pendingScopeReady, scope, storageKey, transactionId, transactionNoticeId]);
 
   useEffect(() => {
     setAdditionalPools([]);
@@ -162,10 +240,17 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
 
   useEffect(() => {
     if (!locus || !sessionOwner || !networkReady) {
-      setPositions([]); setPositionIndexCount(0n); setPositionCursor(0n); setPositionsLoading(false); return;
+      positionsScopeKey.current = "";
+      setPositions([]); setPositionIndexCount(0n); setPositionCursor(0n); setPositionsLoading(false); setPositionsError(""); return;
     }
     let cancelled = false;
+    const currentPositionsScopeKey = JSON.stringify(scope);
+    if (positionsScopeKey.current !== currentPositionsScopeKey) {
+      positionsScopeKey.current = currentPositionsScopeKey;
+      setPositions([]); setPositionIndexCount(0n); setPositionCursor(0n);
+    }
     setPositionsLoading(true);
+    setPositionsError("");
     setPositionsPageError("");
     void Promise.all([
       locus.liquidityPositionCount(sessionOwner),
@@ -175,10 +260,10 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
         setPositionIndexCount(count); setPositionCursor(count > 50n ? 50n : count); setPositions(next);
       }
     }).catch(() => {
-      if (!cancelled && isScopeCurrentRef.current(scope)) { setPositions([]); setPositionIndexCount(0n); setPositionCursor(0n); }
+      if (!cancelled && isScopeCurrentRef.current(scope)) setPositionsError("Your positions could not be loaded. Try again when the Service is available.");
     }).finally(() => { if (!cancelled && isScopeCurrentRef.current(scope)) setPositionsLoading(false); });
     return () => { cancelled = true; };
-  }, [locus, networkReady, scope, sessionOwner, pools]);
+  }, [locus, networkReady, scope, sessionOwner, positionsRefreshRevision]);
 
   useEffect(() => {
     if (!selectedA || !selectedB || selectedA.assetIdHex === selectedB.assetIdHex || !locus || !networkReady) {
@@ -196,19 +281,17 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
     return () => { cancelled = true; };
   }, [assetAId, assetBId, locus, networkReady, pairRefreshRevision, scope]);
 
-  function setPair(a: string, b: string) {
-    setAssetAId(a); setAssetBId(b); setAmountA(""); setAmountB(""); setError("");
-  }
-
-  function chooseFeatured(assetA: string, assetB: string) {
-    const a = assets.find((asset) => asset.catalogKey === assetA);
-    const b = assets.find((asset) => asset.catalogKey === assetB);
-    if (a && b) setPair(a.assetIdHex, b.assetIdHex);
+  function setPair(a: string, b: string, changedSide: "a" | "b" | "both" = "both") {
+    setAssetAId(a); setAssetBId(b);
+    if (changedSide === "a" || changedSide === "both") setAmountA("");
+    if (changedSide === "b" || changedSide === "both") setAmountB("");
+    setError("");
   }
 
   function updateAmountA(value: string) {
     setAmountA(value);
-    if (!selectedPool || poolEmpty || !selectedA || !selectedB) { setAmountB(""); return; }
+    setError("");
+    if (!selectedPool || poolEmpty || !selectedA || !selectedB) return;
     try {
       const rawA = parseUnits(value, selectedA.decimals);
       const aIs0 = toHex(selectedA.assetId).toLowerCase() === toHex(selectedPool.asset0).toLowerCase();
@@ -220,7 +303,8 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
 
   function updateAmountB(value: string) {
     setAmountB(value);
-    if (!selectedPool || poolEmpty || !selectedA || !selectedB) { setAmountA(""); return; }
+    setError("");
+    if (!selectedPool || poolEmpty || !selectedA || !selectedB) return;
     try {
       const rawB = parseUnits(value, selectedB.decimals);
       const aIs0 = toHex(selectedA.assetId).toLowerCase() === toHex(selectedPool.asset0).toLowerCase();
@@ -230,7 +314,144 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
     } catch { setAmountA(""); }
   }
 
-  function submitPreview() {
+  function releasePreparedAction() {
+    const prepared = preparedActionRef.current;
+    preparedActionRef.current = null;
+    setPreparedAction(null);
+    if (prepared) locus?.abandonPreparedOwnershipAction(prepared);
+  }
+
+  function closeReview() {
+    preparationGeneration.current += 1;
+    if (preparationTimer.current !== null) {
+      window.clearTimeout(preparationTimer.current);
+      preparationTimer.current = null;
+    }
+    releasePreparedAction();
+    setPreparingAction(false);
+    setReview(null);
+  }
+
+  async function prepareReviewAction(request: LiquidityReview, percent: number): Promise<PreparedOwnershipAction> {
+    if (!locus || !sessionOwner || !isScopeCurrentRef.current(request.scope)) throw new Error("The active Ownership or network changed. Review this action again.");
+
+    let actionName: "createPool" | "addPoolLiquidity" | "removePoolLiquidity";
+    let actionInput: Record<string, Uint8Array | bigint>;
+
+    if (request.operation === "remove") {
+      if (!Number.isInteger(percent) || percent < 1 || percent > 100) throw new Error("Choose a whole percentage from 1 to 100.");
+      const position = request.position;
+      const shares = percent === 100 ? position.shares : position.shares * BigInt(percent) / 100n;
+      if (shares === 0n) throw new Error("This share amount is too small to withdraw.");
+      const quote = await locus.quoteRemoveLiquidity(position.pool.asset0, position.pool.asset1, sessionOwner, shares);
+      if (!isScopeCurrentRef.current(request.scope)) throw new Error("The active Ownership or network changed. Review this action again.");
+      actionName = "removePoolLiquidity";
+      actionInput = {
+        assetA: position.pool.asset0,
+        assetB: position.pool.asset1,
+        shares,
+        amountAOut: quote.amount0,
+        amountBOut: quote.amount1,
+        minAmountA: minimumLiquidityAmount(quote.amount0, SLIPPAGE_BPS),
+        minAmountB: minimumLiquidityAmount(quote.amount1, SLIPPAGE_BPS),
+      };
+    } else {
+      const assetA = request.assetA;
+      const assetB = request.assetB;
+      const rawA = parseUnits(request.amountA, assetA.decimals);
+      const rawB = parseUnits(request.amountB, assetB.decimals);
+      if (rawA <= 0n || rawB <= 0n) throw new Error("Both amounts must be greater than zero.");
+
+      const [currentPool, balanceA, balanceB] = await Promise.all([
+        locus.getPool(assetA.assetId, assetB.assetId),
+        locus.balanceOf(assetA.assetId, sessionOwner),
+        locus.balanceOf(assetB.assetId, sessionOwner),
+      ]);
+      if (!isScopeCurrentRef.current(request.scope)) throw new Error("The active Ownership or network changed. Review this action again.");
+      if (rawA > balanceA || rawB > balanceB) throw new Error("Your balance changed and is no longer sufficient for these amounts.");
+
+      const currentOperation: Exclude<Operation, "remove"> = !currentPool
+        ? "create"
+        : currentPool.totalShares === 0n ? "initialize" : "add";
+      if (currentOperation !== request.operation) {
+        setPairRefreshRevision((revision) => revision + 1);
+        throw new Error("The pool changed while you were reviewing. Check the updated pair and try again.");
+      }
+
+      if (request.operation === "create") {
+        const quote = quoteInitialLiquidity(rawA, rawB);
+        actionName = "createPool";
+        actionInput = { assetA: assetA.assetId, assetB: assetB.assetId, amountA: rawA, amountB: rawB, initialShares: quote.sharesMinted };
+      } else {
+        if (!currentPool) throw new Error("This pool is no longer available. Review the pair again.");
+        const aIs0 = toHex(assetA.assetId).toLowerCase() === toHex(currentPool.asset0).toLowerCase();
+        const quote = calculateAddLiquidity(
+          currentPool.reserve0,
+          currentPool.reserve1,
+          currentPool.totalShares,
+          aIs0 ? rawA : rawB,
+          aIs0 ? rawB : rawA,
+        );
+        const usedA = aIs0 ? quote.amount0Used : quote.amount1Used;
+        const usedB = aIs0 ? quote.amount1Used : quote.amount0Used;
+        if (usedA > balanceA || usedB > balanceB) throw new Error("Your balance is no longer sufficient for the quoted deposit.");
+        actionName = "addPoolLiquidity";
+        actionInput = {
+          assetA: assetA.assetId,
+          assetB: assetB.assetId,
+          maxAmountA: rawA,
+          maxAmountB: rawB,
+          amountAUsed: usedA,
+          amountBUsed: usedB,
+          sharesMinted: quote.sharesMinted,
+          minShares: minimumLiquidityAmount(quote.sharesMinted, SLIPPAGE_BPS),
+          initialShares: currentPool.totalShares === 0n ? quote.sharesMinted : 0n,
+        };
+      }
+    }
+
+    if (!isScopeCurrentRef.current(request.scope)) throw new Error("The active Ownership or network changed. Review this action again.");
+    return locus.prepareOwnershipAction(actionName, actionInput);
+  }
+
+  async function prepareForReview(request: LiquidityReview, percent = withdrawPercent, openWhenReady = false) {
+    if (!locus) return;
+    preparationGeneration.current += 1;
+    const generation = preparationGeneration.current;
+    if (preparationTimer.current !== null) {
+      window.clearTimeout(preparationTimer.current);
+      preparationTimer.current = null;
+    }
+    releasePreparedAction();
+    setPreparingAction(true);
+    setError("");
+
+    try {
+      const preparation = prepareReviewAction(request, percent);
+      const prepared = await withPreparationTimeout(
+        preparation,
+        OWNERSHIP_PREPARATION_TIMEOUT_MS,
+        (latePrepared) => locus.abandonPreparedOwnershipAction(latePrepared),
+      );
+      if (generation !== preparationGeneration.current || !isScopeCurrentRef.current(request.scope)) {
+        locus.abandonPreparedOwnershipAction(prepared);
+        return;
+      }
+      preparedActionRef.current = prepared;
+      setPreparedAction(prepared);
+      if (openWhenReady) setReview(request);
+    } catch (cause) {
+      if (generation !== preparationGeneration.current) return;
+      setPreparedAction(null);
+      setReview(null);
+      if (isScopeCurrentRef.current(request.scope)) setError(friendlyError(cause));
+    } finally {
+      if (generation === preparationGeneration.current) setPreparingAction(false);
+    }
+  }
+
+  async function submitPreview() {
+    if (!amountA.trim() || !amountB.trim()) return;
     if (!selectedA || !selectedB || selectedA.assetIdHex === selectedB.assetIdHex) { setError("Choose two different assets."); return; }
     if (selectedPoolLoading || selectedPoolError) { setError(selectedPoolError || "Pool state is still loading."); return; }
     try {
@@ -240,8 +461,11 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
       if (selectedA.balance === null || selectedB.balance === null) throw new Error("Balances are still loading.");
       if (a > selectedA.balance || b > selectedB.balance) throw new Error("One or both amounts exceed your balance.");
       if (!liquidityQuote) throw new Error("These amounts are too large, too small, or outside the pool reserve limit.");
-      setError(""); setReview({ operation });
+      const request: LiquidityReview = { operation, scope, assetA: selectedA, assetB: selectedB, amountA, amountB };
+      setBusy(true);
+      await prepareForReview(request, withdrawPercent, true);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Enter valid amounts."); }
+    finally { setBusy(false); }
   }
 
   async function refreshAfterApplied(expectedScope: LiquidityScope) {
@@ -254,6 +478,26 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
     if (!isScopeCurrent(expectedScope)) return;
     onPoolsRefreshed(nextPools); setPositions(nextPositions); setPositionIndexCount(nextPositionCount);
     setPositionCursor(nextPositionCount > 50n ? 50n : nextPositionCount); await onRefreshAssets();
+  }
+
+  async function clearPreReceiptFailure(id: string, cause: unknown, expectedScope: LiquidityScope): Promise<boolean> {
+    const reason = preReceiptFailure(cause, id);
+    if (!reason || !isScopeCurrent(expectedScope)) return false;
+    const saved = readPending(storageKey);
+    if (saved?.transactionId.toLowerCase() === id.toLowerCase()) window.localStorage.removeItem(storageKey);
+    setPending((current) => current?.transactionId.toLowerCase() === id.toLowerCase() ? null : current);
+    setTransactionId(id);
+    setPairRefreshRevision((revision) => revision + 1);
+    let refreshed = false;
+    try { await refreshAfterApplied(expectedScope); refreshed = true; } catch { /* Keep the terminal failure visible if refresh is temporarily unavailable. */ }
+    if (!isScopeCurrent(expectedScope)) return true;
+    const followUp = reason.includes("jamscript_plan_v1")
+      ? "Pool creation on this deployed Service must be upgraded before retrying."
+      : "Review the current pool and balance state before another attempt.";
+    const message = `The transaction failed before an action receipt was created (${reason}). No liquidity action was applied. ${refreshed ? "Pool state and balances were refreshed." : "The automatic state refresh failed; refresh the page before continuing."} ${followUp}`;
+    setError(message);
+    showLiquidityFailureNotice(id, message);
+    return true;
   }
 
   async function loadMorePositions() {
@@ -279,13 +523,37 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
   }
 
   function clearFinalizedFailure(id: string, status: string, errorCode: number | null) {
-    window.localStorage.removeItem(storageKey);
-    setPending(null);
+    const saved = readPending(storageKey);
+    if (saved?.transactionId.toLowerCase() === id.toLowerCase()) window.localStorage.removeItem(storageKey);
+    setPending((current) => current?.transactionId.toLowerCase() === id.toLowerCase() ? null : current);
     setTransactionId(id);
-    setTransactionOutcome("failed");
-    setActionMessage("");
-    setError(`Transaction finalized as ${status}${errorCode === null ? "" : ` (error ${errorCode})`}. The liquidity action was not applied; review the current state before trying again.`);
+    const message = `Transaction finalized as ${status}${errorCode === null ? "" : ` (error ${errorCode})`}. The liquidity action was not applied; review the current state before trying again.`;
+    setError(message);
+    showLiquidityFailureNotice(id, message);
     setPairRefreshRevision((revision) => revision + 1);
+  }
+
+  function showPendingNotice(current: PendingAction, checking: boolean) {
+    onTransactionNotice({
+      id: transactionNoticeId,
+      title: checking ? "Checking liquidity transaction" : `${current.action} pending`,
+      message: checking ? "Waiting for confirmation." : "The transaction is saved. Check its status before signing another liquidity action.",
+      transactionId: current.transactionId,
+      busy: checking,
+      actionLabel: "Check status",
+      onAction: () => void waitForPending(current),
+    });
+  }
+
+  function showLiquidityFailureNotice(id: string, message = error) {
+    onTransactionNotice({
+      id: transactionNoticeId,
+      title: "Liquidity action failed",
+      message: message || "The action was not applied. Review the current pool and balances before retrying.",
+      transactionId: id,
+      tone: "error",
+      dismissible: true,
+    });
   }
 
   async function loadMorePools() {
@@ -306,7 +574,7 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
 
   async function waitForPending(current: PendingAction, expectedScope = scope) {
     if (!locus || busy || !isScopeCurrent(expectedScope)) return;
-    setBusy(true); setError(""); setActionMessage("Checking the saved transaction. No new action will be submitted.");
+    setBusy(true); setError("");
     try {
       const receipt = await locus.waitForAction(current.transactionId, { intervalMs: 750, timeoutMs: 180_000 });
       if (!isScopeCurrent(expectedScope)) return;
@@ -314,114 +582,146 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
         clearFinalizedFailure(current.transactionId, receipt.actionReceipt.status, receipt.actionReceipt.errorCode);
         return;
       }
-      window.localStorage.removeItem(storageKey); setPending(null); setTransactionOutcome("applied"); setActionMessage("Liquidity action confirmed.");
+      window.localStorage.removeItem(storageKey); setPending(null); setTransactionId("");
+      onClearTransactionNotice(transactionNoticeId);
       await refreshAfterApplied(expectedScope);
       setPairRefreshRevision((revision) => revision + 1);
+      if (current.action !== "Remove liquidity") onActionSuccess(current.action === "Create pool" ? "Pool created" : "Liquidity added");
     } catch (cause) {
       if (!isScopeCurrent(expectedScope)) return;
-      setError(`${friendlyError(cause)} The transaction remains saved; check its status before signing anything else.`);
-    } finally { if (isScopeCurrent(expectedScope)) setBusy(false); }
+      if (await clearPreReceiptFailure(current.transactionId, cause, expectedScope)) return;
+      showPendingNotice(current, false);
+    } finally {
+      setBusy(false);
+      if (isScopeCurrent(expectedScope)) {
+        const saved = readPending(storageKey);
+        if (saved?.transactionId.toLowerCase() === current.transactionId.toLowerCase()) showPendingNotice(saved, false);
+      }
+    }
   }
 
-  async function confirmAction() {
-    if (!locus || !sessionOwner || !selectedA || !selectedB || !review || busyOrPending || !isScopeCurrent(scope)) return;
-    setBusy(true); setError(""); setActionMessage("");
-    const expectedScope = scope;
+  function confirmAction() {
+    if (!locus || !review || !preparedActionRef.current || busyOrPending || preparingAction
+      || !isScopeCurrentRef.current(review.scope)) return;
+
+    const prepared = preparedActionRef.current;
+    let signature: Promise<SignedOwnershipAction>;
+    try {
+      // No RPC or asynchronous state read may run before this call. It must
+      // execute in the Confirm button's user gesture for mobile wallets.
+      signature = locus.signPreparedOwnershipAction(prepared);
+    } catch (cause) {
+      locus.abandonPreparedOwnershipAction(prepared);
+      closeReview();
+      setError(friendlyError(cause));
+      return;
+    }
+
+    preparedActionRef.current = null;
+    setPreparedAction(null);
+    setPreparingAction(false);
+    setBusy(true);
+    setError("");
+    void finishConfirmedAction(review, prepared, signature);
+  }
+
+  async function finishConfirmedAction(request: LiquidityReview, prepared: PreparedOwnershipAction, signature: Promise<SignedOwnershipAction>) {
+    if (!locus) return;
+    let signatureReceived = false;
     let submittedId = "";
     try {
-      const currentPool = await locus.getPool(selectedA.assetId, selectedB.assetId);
-      if (!isScopeCurrent(expectedScope)) return;
-      if (review.operation === "create" && currentPool) throw new Error("This pool was created while you were reviewing. Refresh and review the pair again.");
-      if (review.operation !== "create" && !currentPool) throw new Error("This pool is no longer available. Refresh and review the pair again.");
-      const rawA = parseUnits(amountA, selectedA.decimals);
-      const rawB = parseUnits(amountB, selectedB.decimals);
-      const balanceA = await locus.balanceOf(selectedA.assetId, sessionOwner);
-      const balanceB = await locus.balanceOf(selectedB.assetId, sessionOwner);
-      if (rawA > balanceA || rawB > balanceB) throw new Error("Your balance changed and is no longer sufficient for these amounts.");
-      if (!isScopeCurrent(expectedScope)) return;
-      let submitted;
-      if (review.operation === "create") {
-        submitted = await locus.createPool(selectedA.assetId, selectedB.assetId, rawA, rawB);
-      } else {
-        // Add is quoted against the just-read finalized pool so the unused maximum remains in the wallet.
-        const quote = await locus.quoteAddLiquidity(selectedA.assetId, selectedB.assetId, rawA, rawB);
-        const aIs0 = toHex(selectedA.assetId).toLowerCase() === toHex(currentPool!.asset0).toLowerCase();
-        const usedA = aIs0 ? quote.amount0Used : quote.amount1Used;
-        const usedB = aIs0 ? quote.amount1Used : quote.amount0Used;
-        if (usedA > balanceA || usedB > balanceB) throw new Error("Your balance is no longer sufficient for the quoted deposit.");
-        submitted = await locus.addPoolLiquidity(selectedA.assetId, selectedB.assetId, rawA, rawB, minimumLiquidityAmount(quote.sharesMinted, SLIPPAGE_BPS));
-      }
+      const signed = await waitForWalletSignature(signature, WALLET_SIGNATURE_TIMEOUT_MS);
+      signatureReceived = true;
+      if (!isScopeCurrentRef.current(request.scope)) throw new Error("The active Ownership or network changed. Check the action before continuing.");
+      const submitted = await locus.submitSignedOwnershipAction(signed);
       submittedId = submitted.transactionId;
-      const saved: PendingAction = { transactionId: submittedId, action: operationLabel(review.operation), networkId, serviceId: serviceId!, ownerKey: ownerKey!, createdAt: Date.now() };
-      window.localStorage.setItem(storageKey, JSON.stringify(saved)); setPending(saved); setTransactionId(submittedId); setTransactionOutcome("pending"); setReview(null);
+      const saved: PendingAction = {
+        transactionId: submittedId,
+        action: operationLabel(request.operation),
+        networkId: request.scope.networkId,
+        serviceId: request.scope.serviceId!,
+        ownerKey: request.scope.ownerKey!,
+        createdAt: Date.now(),
+      };
+      setPending(saved); setTransactionId(submittedId);
+      try { window.localStorage.setItem(pendingStorageKey(request.scope), JSON.stringify(saved)); } catch { /* Keep the in-memory pending guard if this browser blocks local storage. */ }
+      closeReview();
+
       const receipt = await locus.waitForAction(submittedId, { intervalMs: 750, timeoutMs: 180_000 });
-      if (!isScopeCurrent(expectedScope)) return;
+      if (!isScopeCurrentRef.current(request.scope)) return;
       if (receipt.actionReceipt.status !== "applied") {
         clearFinalizedFailure(submittedId, receipt.actionReceipt.status, receipt.actionReceipt.errorCode);
         return;
       }
-      window.localStorage.removeItem(storageKey); setPending(null); setTransactionOutcome("applied"); setActionMessage("Liquidity action confirmed."); setAmountA(""); setAmountB("");
-      await refreshAfterApplied(expectedScope);
+      window.localStorage.removeItem(pendingStorageKey(request.scope));
+      setPending(null); setTransactionId("");
+      onClearTransactionNotice(transactionNoticeId);
+      if (request.operation !== "remove") { setAmountA(""); setAmountB(""); }
+      await refreshAfterApplied(request.scope);
       setPairRefreshRevision((revision) => revision + 1);
+      if (request.operation !== "remove") onActionSuccess(request.operation === "create" ? "Pool created" : "Liquidity added");
     } catch (cause) {
-      if (!isScopeCurrent(expectedScope)) return;
+      if (!signatureReceived) locus.abandonPreparedOwnershipAction(prepared);
+      if (!isScopeCurrentRef.current(request.scope)) return;
+      if (submittedId && await clearPreReceiptFailure(submittedId, cause, request.scope)) return;
       if (!submittedId && /error 6002|POOL_ALREADY_EXISTS/i.test(normalizeActionError(cause, ""))) {
         setPairRefreshRevision((revision) => revision + 1);
       }
-      setError(submittedId
-        ? `${friendlyError(cause)} Transaction ${submittedId} is saved. Check its status before signing anything again.`
-        : `${friendlyError(cause)} No transaction ID was received; the action was not confirmed as submitted.`);
-    } finally { if (isScopeCurrent(expectedScope)) setBusy(false); }
+      closeReview();
+      if (submittedId) showPendingNotice(readPending(pendingStorageKey(request.scope)) ?? {
+        transactionId: submittedId,
+        action: operationLabel(request.operation),
+        networkId: request.scope.networkId,
+        serviceId: request.scope.serviceId!,
+        ownerKey: request.scope.ownerKey!,
+        createdAt: Date.now(),
+      }, false);
+      else setError(`${friendlyError(cause)} No transaction ID was received; check the pair and transaction status before trying again.`);
+    } finally {
+      setBusy(false);
+    }
   }
 
-  async function requestRemoval(position: LiquidityPosition, percentage: number) {
-    if (!sessionOwner || !locus || busyOrPending || !isScopeCurrent(scope)) return;
-    setWithdrawPercent(percentage);
-    setCustomWithdraw(false);
-    setReview({ operation: "remove", position });
-  }
-
-  function requestCustomRemoval(position: LiquidityPosition) {
+  async function requestCustomRemoval(position: LiquidityPosition) {
     if (!sessionOwner || !locus || busyOrPending || !isScopeCurrent(scope)) return;
     setWithdrawPercent(50);
+    setWithdrawPercentText("50");
     setCustomWithdraw(true);
-    setReview({ operation: "remove", position });
+    setBusy(true);
+    try { await prepareForReview({ operation: "remove", position, scope }, 50, true); }
+    finally { setBusy(false); }
   }
 
-  async function confirmRemoval(position: LiquidityPosition) {
-    if (!locus || !sessionOwner || !review || busyOrPending || !isScopeCurrent(scope)) return;
-    if (!Number.isInteger(withdrawPercent) || withdrawPercent < 1 || withdrawPercent > 100) { setError("Choose a whole percentage from 1 to 100."); return; }
-    const shares = withdrawPercent === 100 ? position.shares : position.shares * BigInt(withdrawPercent) / 100n;
-    if (shares === 0n) { setError("This share amount is too small to withdraw."); return; }
-    setBusy(true); setError(""); let submittedId = ""; const expectedScope = scope;
-    try {
-      const quote = await locus.quoteRemoveLiquidity(position.pool.asset0, position.pool.asset1, sessionOwner, shares);
-      if (!isScopeCurrent(expectedScope)) return;
-      const min0 = minimumLiquidityAmount(quote.amount0, SLIPPAGE_BPS);
-      const min1 = minimumLiquidityAmount(quote.amount1, SLIPPAGE_BPS);
-      const submitted = await locus.removePoolLiquidity(position.pool.asset0, position.pool.asset1, shares, min0, min1);
-      submittedId = submitted.transactionId;
-      const saved: PendingAction = { transactionId: submittedId, action: "Remove liquidity", networkId, serviceId: serviceId!, ownerKey: ownerKey!, createdAt: Date.now() };
-      window.localStorage.setItem(storageKey, JSON.stringify(saved)); setPending(saved); setTransactionId(submittedId); setTransactionOutcome("pending"); setReview(null);
-      const receipt = await locus.waitForAction(submittedId, { intervalMs: 750, timeoutMs: 180_000 });
-      if (!isScopeCurrent(expectedScope)) return;
-      if (receipt.actionReceipt.status !== "applied") {
-        clearFinalizedFailure(submittedId, receipt.actionReceipt.status, receipt.actionReceipt.errorCode);
-        return;
-      }
-      window.localStorage.removeItem(storageKey); setPending(null); setTransactionOutcome("applied"); setActionMessage("Liquidity action confirmed.");
-      await refreshAfterApplied(expectedScope);
-      setPairRefreshRevision((revision) => revision + 1);
-    } catch (cause) {
-      if (!isScopeCurrent(expectedScope)) return;
-      if (!submittedId && /error 6002|POOL_ALREADY_EXISTS/i.test(normalizeActionError(cause, ""))) {
-        setPairRefreshRevision((revision) => revision + 1);
-      }
-      setError(submittedId ? `${friendlyError(cause)} Transaction ${submittedId} is saved. Check its status before signing anything again.` : friendlyError(cause));
-    } finally { if (isScopeCurrent(expectedScope)) setBusy(false); }
+  function updateCustomWithdrawPercent(value: string) {
+    setWithdrawPercentText(value);
+    const trimmedValue = value.trim();
+    const percent = trimmedValue ? Number(trimmedValue) : 0;
+    setWithdrawPercent(percent);
+    const currentReview = review;
+    if (currentReview?.operation !== "remove") return;
+    preparationGeneration.current += 1;
+    if (preparationTimer.current !== null) window.clearTimeout(preparationTimer.current);
+    preparationTimer.current = null;
+    releasePreparedAction();
+    setError("");
+    if (!trimmedValue) {
+      setPreparingAction(false);
+      return;
+    }
+    if (!Number.isInteger(percent) || percent < 1 || percent > 100) {
+      setPreparingAction(false);
+      setError("Choose a whole percentage from 1 to 100.");
+      return;
+    }
+    setPreparingAction(true);
+    preparationTimer.current = window.setTimeout(() => {
+      preparationTimer.current = null;
+      void prepareForReview(currentReview, percent);
+    }, 250);
   }
 
   const removalQuote = review?.operation === "remove" && review.position && sessionOwner
+    && Number.isInteger(withdrawPercent) && withdrawPercent >= 1 && withdrawPercent <= 100
     ? (() => {
       const shares = withdrawPercent === 100 ? review.position.shares : review.position.shares * BigInt(withdrawPercent) / 100n;
       const last = shares === review.position.pool.totalShares;
@@ -431,78 +731,193 @@ export function LiquidityPage({ config, assets, pools, poolsError, poolsLoading,
         amount1: last ? review.position.pool.reserve1 : review.position.pool.reserve1 * shares / review.position.pool.totalShares,
       };
     })() : null;
+  const removalAssetLines = removalPosition && removalQuote ? [
+    { id: toHex(removalPosition.pool.asset0).toLowerCase(), amount: removalQuote.amount0 },
+    { id: toHex(removalPosition.pool.asset1).toLowerCase(), amount: removalQuote.amount1 },
+  ].flatMap((line) => {
+    const asset = assets.find((candidate) => candidate.assetIdHex === line.id);
+    return asset ? [{ asset, amount: formatUnits(line.amount, asset.decimals) }] : [];
+  }) : [];
 
-  return <section className="page liquidity-page">
-    <header className="liquidity-page-actions">
-      {sessionOwner ? <ActionButton variant="primary" icon={Plus} onClick={() => document.getElementById("liquidity-new-position")?.scrollIntoView({ behavior: "smooth", block: "center" })}>New position</ActionButton> : <ActionButton variant="primary" onClick={onConnect}>Connect</ActionButton>}
-    </header>
-    {poolsError && <div className="inline-alert" role="alert">Pool information could not be refreshed. Existing on-chain data is shown where available.</div>}
-    {error && <div className="inline-alert permissionless-liquidity-error" role="alert">{error}</div>}
-    {actionMessage && <div className="inline-alert" role="status">{actionMessage}</div>}
-    {transactionId && <div className="liquidity-tx-receipt"><strong>{transactionOutcome === "failed" ? "Liquidity action was not applied" : pending || transactionOutcome === "pending" ? `${pending?.action ?? "Liquidity action"} · transaction pending` : "Liquidity action confirmed"}</strong><code>{transactionId}</code></div>}
-    {pending && <div className="inline-alert"><div><strong>{pending.action} is still being checked.</strong><p>Its transaction ID is saved for this network and Ownership. Do not sign another liquidity action until its status is known.</p></div><ActionButton size="small" variant="secondary" icon={RefreshCw} loading={busy} onClick={() => void waitForPending(pending)}>Check transaction status</ActionButton></div>}
+  const insufficientAsset = selectedAmounts && selectedA && selectedB
+    ? selectedA.balance !== null && selectedAmounts[0] > selectedA.balance ? selectedA
+      : selectedB.balance !== null && selectedAmounts[1] > selectedB.balance ? selectedB
+        : null
+    : null;
+  const validAmounts = !!selectedAmounts && selectedAmounts.every((value) => value > 0n);
+  const requiredAmountMissing = !amountA.trim() || !amountB.trim();
+  const balanceLabel = (asset: AssetView) => getBalanceState(asset) === "loading" ? "Loading…"
+    : getBalanceState(asset) === "unavailable" ? "Unavailable"
+      : formatUnits(asset.balance ?? 0n, asset.decimals);
+  const ctaLabel = !sessionOwner ? "Connect Ownership"
+    : !selectedA || !selectedB ? "Select assets"
+      : selectedA.assetIdHex === selectedB.assetIdHex ? "Choose different assets"
+        : !networkReady ? "Service unavailable"
+          : selectedPoolLoading ? "Checking pool…"
+            : selectedPoolError ? "Pool state unavailable"
+              : pending ? "Transaction pending…"
+                : busy ? "Preparing…"
+                  : selectedA.balance === null || selectedB.balance === null ? [selectedA, selectedB].some(asset => getBalanceState(asset) === "loading") ? "Loading balances…" : "Balance unavailable"
+                    : insufficientAsset ? `Insufficient ${insufficientAsset.symbol}`
+                      : !validAmounts ? requiredAmountMissing ? "Provide liquidity" : "Enter an amount"
+                        : !liquidityQuote ? "Amount outside pool limits"
+                          : "Provide liquidity";
+  const ctaDisabled = sessionOwner
+    ? !networkReady || !selectedA || !selectedB || selectedA.assetIdHex === selectedB.assetIdHex || selectedPoolLoading || !!selectedPoolError
+      || busyOrPending || !!review || selectedA.balance === null || selectedB.balance === null || !validAmounts || !!insufficientAsset || !liquidityQuote
+    : false;
 
-    <section className="liquidity-section"><div className="liquidity-section-heading"><div><h2>Your positions</h2><p>Each position belongs to its contributing Ownership.</p></div></div>
-      {!sessionOwner && <div className="empty-state"><p>Connect an Ownership to see positions and provide liquidity.</p><ActionButton onClick={onConnect}>Connect</ActionButton></div>}
-      {sessionOwner && positionsLoading && <p className="muted">Loading positions…</p>}
-      {sessionOwner && !positionsLoading && positions.length === 0 && positionCursor >= positionIndexCount && <div className="empty-state"><p>You do not have an active liquidity position yet.</p></div>}
-      {sessionOwner && !positionsLoading && positions.length === 0 && positionCursor < positionIndexCount && <p className="muted">No active positions on this page. There are more positions to check.</p>}
-      {sessionOwner && positions.map((position) => {
-        const asset0 = assets.find((asset) => asset.assetIdHex === toHex(position.pool.asset0).toLowerCase());
-        const asset1 = assets.find((asset) => asset.assetIdHex === toHex(position.pool.asset1).toLowerCase());
-        return <article className="liquidity-position-card" key={`${position.pool.asset0.toString()}-${position.pool.asset1.toString()}`}>
-          <div className="liquidity-position-main"><div className="liquidity-asset-pair">{asset0 && <AssetIdentity asset={asset0} size={30} />}<span className="liquidity-pair-divider">/</span>{asset1 && <AssetIdentity asset={asset1} size={30} />}<span className="liquidity-position-share">{formatLiquiditySharePercentage(position.shares, position.pool.totalShares)} pool share</span></div>
-            <div className="liquidity-position-underlying">{asset0 ? <AssetIdentity asset={asset0} size={22} amount={formatUnits(position.amount0, asset0.decimals)} className="asset-identity--amount-only" /> : position.amount0.toString()} <span>+</span> {asset1 ? <AssetIdentity asset={asset1} size={22} amount={formatUnits(position.amount1, asset1.decimals)} className="asset-identity--amount-only" /> : position.amount1.toString()}</div>
+  function handleTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const keys = ["ArrowLeft", "ArrowRight", "Home", "End"];
+    if (!keys.includes(event.key)) return;
+    event.preventDefault();
+    const nextTab = event.key === "Home" ? "pools" : event.key === "End" ? "positions"
+      : event.key === "ArrowRight" ? (tab === "pools" ? "positions" : "pools")
+        : (tab === "pools" ? "positions" : "pools");
+    setTab(nextTab);
+    onTabChange(nextTab);
+    document.getElementById(`liquidity-tab-${nextTab}`)?.focus();
+  }
+
+  function updateTab(next: "pools" | "positions") {
+    setTab(next);
+    onTabChange(next);
+  }
+
+  function retryPositions() {
+    setPositionsError("");
+    setPositionsRefreshRevision((revision) => revision + 1);
+  }
+
+  function pairPrice(assetA: AssetView, assetB: AssetView, pool: Pool): string {
+    const aIs0 = assetA.assetIdHex === toHex(pool.asset0).toLowerCase();
+    return poolPriceDisplay(aIs0 ? pool.reserve0 : pool.reserve1, aIs0 ? pool.reserve1 : pool.reserve0, assetA.decimals, assetB.decimals);
+  }
+
+  const actionStatus = <>
+    {error && !transactionId && <div className="inline-alert permissionless-liquidity-error" role="alert">{error}</div>}
+  </>;
+
+  return <section className={`page liquidity-page${view === "new" ? " liquidity-page--new" : ""}`}>
+    {view === "home" ? <>
+      <div className="liquidity-toolbar">
+        <div className="liquidity-tabs" role="tablist" aria-label="Liquidity views" onKeyDown={handleTabKeyDown}>
+          <button id="liquidity-tab-pools" type="button" role="tab" aria-selected={tab === "pools"} aria-controls="liquidity-panel-pools" tabIndex={tab === "pools" ? 0 : -1} className={tab === "pools" ? "active" : ""} onClick={() => updateTab("pools")}>Pools</button>
+          <button id="liquidity-tab-positions" type="button" role="tab" aria-selected={tab === "positions"} aria-controls="liquidity-panel-positions" tabIndex={tab === "positions" ? 0 : -1} className={tab === "positions" ? "active" : ""} onClick={() => updateTab("positions")}>My positions</button>
+        </div>
+        <ActionButton variant="primary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton>
+      </div>
+      <div className="liquidity-status-messages">{actionStatus}</div>
+      <section id={`liquidity-panel-${tab}`} className="liquidity-tab-panel" role="tabpanel" aria-labelledby={`liquidity-tab-${tab}`}>
+        {tab === "pools" ? <>
+          <div className="liquidity-pools-list">
+            {!networkReady && !poolsLoading && exploredPools.length === 0 && <p className="muted">Waiting for the Service connection…</p>}
+            {poolsLoading && exploredPools.length === 0 && <div className="liquidity-query-skeleton" aria-busy="true" aria-label="Loading pools"><span /><span /></div>}
+            {!poolsLoading && poolsError && exploredPools.length === 0 && <div className="liquidity-query-error" role="alert"><p>Pool information is unavailable right now.</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={onRetryPools}>Try again</ActionButton></div>}
+            {networkReady && !poolsLoading && !poolsError && exploredPools.length === 0 && <div className="liquidity-compact-empty"><span className="muted">No liquidity pools yet.</span><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton></div>}
+            {exploredPools.map((pool) => {
+              const asset0 = assets.find((asset) => asset.assetIdHex === toHex(pool.asset0).toLowerCase());
+              const asset1 = assets.find((asset) => asset.assetIdHex === toHex(pool.asset1).toLowerCase());
+              return <article className="liquidity-explore-card" key={`${toHex(pool.asset0)}-${toHex(pool.asset1)}`}>
+                <div className="liquidity-explore-pair"><div className="liquidity-asset-pair">{asset0 && <AssetIdentity asset={asset0} size={30} />}<span className="liquidity-pair-divider">/</span>{asset1 && <AssetIdentity asset={asset1} size={30} />}</div></div>
+                {asset0 && asset1 && <div className="liquidity-explore-balances" role="group" aria-label="Pool balances">
+                  <span><strong>{formatUnits(pool.reserve0, asset0.decimals)}</strong> {asset0.symbol}</span>
+                  <span><strong>{formatUnits(pool.reserve1, asset1.decimals)}</strong> {asset1.symbol}</span>
+                </div>}
+                <ActionButton size="small" variant="secondary" disabled={busyOrPending || !asset0 || !asset1} onClick={() => { if (asset0 && asset1) onNewPosition(asset0.assetIdHex, asset1.assetIdHex); }}>Add</ActionButton>
+              </article>;
+            })}
+            {poolsPageError && <div className="inline-alert" role="alert">{poolsPageError}</div>}
+            {hasMorePools && <ActionButton variant="secondary" loading={poolsPageLoading} disabled={poolsPageLoading || busyOrPending} onClick={() => void loadMorePools()}>Load more pools</ActionButton>}
           </div>
-          <div className="liquidity-position-actions"><ActionButton size="small" variant="secondary" disabled={busyOrPending} onClick={() => { if (asset0 && asset1) setPair(asset0.assetIdHex, asset1.assetIdHex); document.getElementById("liquidity-new-position")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>Add</ActionButton><ActionButton size="small" variant="secondary" disabled={busyOrPending} onClick={() => void requestRemoval(position, 50)}>Remove</ActionButton></div>
-          <div className="liquidity-position-actions liquidity-position-actions--percent">{[25, 50, 75, 100].map((pct) => <button key={pct} type="button" disabled={busyOrPending} onClick={() => void requestRemoval(position, pct)}>{pct}%</button>)}<button type="button" disabled={busyOrPending} onClick={() => requestCustomRemoval(position)}>Custom</button></div>
-        </article>;
-      })}
-      {positionsPageError && <div className="inline-alert" role="alert">{positionsPageError}</div>}
-      {sessionOwner && positionCursor < positionIndexCount && <ActionButton variant="secondary" loading={positionsPageLoading} disabled={positionsPageLoading || busyOrPending} onClick={() => void loadMorePositions()}>Load more positions</ActionButton>}
-    </section>
+        </> : <div className="liquidity-positions-list">
+          {positionsLoading && positions.length === 0 && <div className="liquidity-query-skeleton" aria-busy="true" aria-label="Loading positions"><span /><span /></div>}
+          {!positionsLoading && positionsError && <div className="liquidity-query-error" role="alert"><p>{positionsError}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={retryPositions}>Try again</ActionButton></div>}
+          {!positionsLoading && !positionsError && !sessionOwner && <div className="liquidity-compact-empty"><span className="muted">Connect to see your positions.</span><ActionButton size="small" variant="secondary" onClick={onConnect}>Connect</ActionButton></div>}
+          {!positionsLoading && !positionsError && sessionOwner && !networkReady && <p className="muted">Waiting for the Service connection…</p>}
+          {!positionsLoading && !positionsError && sessionOwner && networkReady && positions.length === 0 && positionCursor >= positionIndexCount && <div className="liquidity-compact-empty"><span className="muted">No liquidity positions yet.</span><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton></div>}
+          {!positionsLoading && !positionsError && sessionOwner && positions.length === 0 && positionCursor < positionIndexCount && <p className="muted">No active positions on this page. More positions are available.</p>}
+          {sessionOwner && positions.map((position) => {
+            const asset0 = assets.find((asset) => asset.assetIdHex === toHex(position.pool.asset0).toLowerCase());
+            const asset1 = assets.find((asset) => asset.assetIdHex === toHex(position.pool.asset1).toLowerCase());
+            return <article className="liquidity-position-card" key={`${position.pool.asset0.toString()}-${position.pool.asset1.toString()}`}>
+              <div className="liquidity-position-main">
+                <div className="liquidity-asset-pair">{asset0 && <AssetIdentity asset={asset0} size={28} amount={formatUnits(position.amount0, asset0.decimals)} />}<span className="liquidity-pair-divider">/</span>{asset1 && <AssetIdentity asset={asset1} size={28} amount={formatUnits(position.amount1, asset1.decimals)} />}</div>
+              </div>
+              <div className="liquidity-position-actions"><ActionButton size="small" variant="secondary" disabled={busyOrPending || !asset0 || !asset1} onClick={() => { if (asset0 && asset1) onNewPosition(asset0.assetIdHex, asset1.assetIdHex); }}>Manage</ActionButton><ActionButton size="small" variant="secondary" disabled={busyOrPending} onClick={() => void requestCustomRemoval(position)}>Remove</ActionButton></div>
+            </article>;
+          })}
+          {positionsPageError && <div className="inline-alert" role="alert">{positionsPageError}</div>}
+          {sessionOwner && positionCursor < positionIndexCount && <ActionButton variant="secondary" loading={positionsPageLoading} disabled={positionsPageLoading || busyOrPending} onClick={() => void loadMorePositions()}>Load more positions</ActionButton>}
+        </div>}
+      </section>
+    </> : <>
+      <header className="liquidity-new-heading">
+        <button type="button" className="liquidity-back-link" onClick={() => onTabChange("pools")}><ArrowLeft size={18} aria-hidden="true" /> Liquidity</button>
+        <h1>New position</h1>
+      </header>
+      <div className="liquidity-status-messages">{actionStatus}</div>
+      <section className="liquidity-section liquidity-new-card">
+        <div className="liquidity-deposit-form">
+          <AssetAmountInput
+            className="liquidity-amount-field"
+            selector={<AssetSelector aria-label="Token A" value={assetAId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetAId && asset.assetIdHex !== assetBId) setPair(asset.assetIdHex, assetBId, "a"); }} variant="compact" showBalance={false} disabled={formLocked} triggerClassName="liquidity-asset-selector" />}
+            label="Token A"
+            balance={sessionOwner && selectedA ? `Balance: ${balanceLabel(selectedA)} ${selectedA.symbol}` : ""}
+            id="liquidity-amount-a"
+            amount={amountA}
+            onAmountChange={updateAmountA}
+            onMax={() => { if (selectedA) updateAmountA(formatUnits(selectedA.balance ?? 0n, selectedA.decimals)); }}
+            maxDisabled={!selectedA || selectedA.balance === null}
+            disabled={formLocked}
+            ariaLabel={`${selectedA?.symbol ?? "Token A"} amount`}
+          />
+          <AssetAmountInput
+            className="liquidity-amount-field"
+            selector={<AssetSelector aria-label="Token B" value={assetBId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetBId && asset.assetIdHex !== assetAId) setPair(assetAId, asset.assetIdHex, "b"); }} variant="compact" showBalance={false} disabled={formLocked} triggerClassName="liquidity-asset-selector" />}
+            label="Token B"
+            balance={sessionOwner && selectedB ? `Balance: ${balanceLabel(selectedB)} ${selectedB.symbol}` : ""}
+            id="liquidity-amount-b"
+            amount={amountB}
+            onAmountChange={updateAmountB}
+            onMax={() => { if (selectedB) updateAmountB(formatUnits(selectedB.balance ?? 0n, selectedB.decimals)); }}
+            maxDisabled={!selectedB || selectedB.balance === null}
+            disabled={formLocked}
+            ariaLabel={`${selectedB?.symbol ?? "Token B"} amount`}
+          />
+        </div>
+        {selectedA && selectedB && <>
+          {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && <p className="liquidity-disclosure">Your deposit sets the starting price for this pool.</p>}
+          {selectedPool && !poolEmpty && <div className="liquidity-current-rate"><span>Current pool rate</span><strong>1 {selectedA.symbol} = {pairPrice(selectedA, selectedB, selectedPool)} {selectedB.symbol}</strong></div>}
+          {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && selectedAmounts && selectedAmounts[0] > 0n && selectedAmounts[1] > 0n && <div className="liquidity-current-rate"><span>Initial price</span><strong>1 {selectedA.symbol} = {initialPrice} {selectedB.symbol}</strong></div>}
+        </>}
+        {selectedPoolError && <div className="liquidity-query-error" role="alert"><p>{selectedPoolError}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={() => setPairRefreshRevision((revision) => revision + 1)}>Retry pool lookup</ActionButton></div>}
+        {positionsPageError && <div className="inline-alert" role="alert">{positionsPageError}</div>}
+        <ActionButton variant="primary" icon={sessionOwner ? Droplets : undefined} loading={(busy && !pending) || selectedPoolLoading} fullWidth disabled={ctaDisabled} onClick={() => sessionOwner ? void submitPreview() : onConnect()}>{ctaLabel}</ActionButton>
+      </section>
+    </>}
 
-    <section className="liquidity-section" id="liquidity-new-position"><div className="liquidity-section-heading"><div><h2>New position</h2><p>Create a pool or provide liquidity to an existing pair. Featured pairs are suggestions; any two different Service assets can be selected.</p></div></div>
-      {config?.featuredPairs.length ? <div className="liquidity-featured-pairs">{config.featuredPairs.map((pair) => <button type="button" key={`${pair.assetA}/${pair.assetB}`} onClick={() => chooseFeatured(pair.assetA, pair.assetB)}>{pair.assetA.toUpperCase()} / {pair.assetB.toUpperCase()}</button>)}</div> : <p className="muted">Featured pair suggestions are unavailable. You can still choose any two assets.</p>}
-      <div className="liquidity-pair-selectors"><label><span>Token A</span><AssetSelector aria-label="Token A" value={assetAId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetBId) setPair(asset.assetIdHex, assetBId); }} variant="compact" showBalance={false} triggerClassName="liquidity-asset-selector" /></label><button type="button" className="icon-button liquidity-switch-pair" aria-label="Switch token order" onClick={() => setPair(assetBId, assetAId)}><ArrowDownUp size={18} /></button><label><span>Token B</span><AssetSelector aria-label="Token B" value={assetBId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetAId) setPair(assetAId, asset.assetIdHex); }} variant="compact" showBalance={false} triggerClassName="liquidity-asset-selector" /></label></div>
-      {selectedPoolError && <div className="inline-alert" role="alert">{selectedPoolError}</div>}
-      {selectedA && selectedB && <div className="liquidity-deposit-form">
-        {selectedPoolLoading && <p className="muted">Checking this pair on the Service…</p>}
-        {!selectedPool && !selectedPoolLoading && <p className="liquidity-disclosure">Your initial deposit establishes this pool's starting rate. Locus does not use a market oracle.</p>}
-        {poolEmpty && <p className="liquidity-disclosure">This pool exists but has no active liquidity. Your deposit will initialize its new starting rate.</p>}
-        {selectedPool && !poolEmpty && <p className="muted">Pool rate: 1 {selectedA.symbol} ≈ {poolPriceDisplay(
-          selectedA.assetIdHex === toHex(selectedPool.asset0).toLowerCase() ? selectedPool.reserve0 : selectedPool.reserve1,
-          selectedA.assetIdHex === toHex(selectedPool.asset0).toLowerCase() ? selectedPool.reserve1 : selectedPool.reserve0,
-          selectedA.decimals, selectedB.decimals,
-        )} {selectedB.symbol} · 0.30% swap fee</p>}
-        <label><AssetIdentity asset={selectedA} size={30} className="liquidity-deposit-asset" /><input inputMode="decimal" value={amountA} placeholder="0" disabled={busyOrPending} onChange={(event) => updateAmountA(event.target.value)} /><span className="liquidity-asset-balance">Balance: {selectedA.balance === null ? "Loading…" : formatUnits(selectedA.balance, selectedA.decimals)} {selectedA.symbol}</span></label>
-        <label><AssetIdentity asset={selectedB} size={30} className="liquidity-deposit-asset" /><input inputMode="decimal" value={amountB} placeholder="0" disabled={busyOrPending} onChange={(event) => updateAmountB(event.target.value)} /><span className="liquidity-asset-balance">Balance: {selectedB.balance === null ? "Loading…" : formatUnits(selectedB.balance, selectedB.decimals)} {selectedB.symbol}</span></label>
-        <ActionButton variant="primary" icon={Droplets} disabled={!sessionOwner || !networkReady || selectedPoolLoading || !!selectedPoolError || busyOrPending || !selectedAmounts || selectedAmounts.some((value) => value <= 0n) || !liquidityQuote} onClick={submitPreview}>{sessionOwner ? operationLabel(operation) : "Connect to provide liquidity"}</ActionButton>
-      </div>}
-    </section>
-
-    <section className="liquidity-section"><div className="liquidity-section-heading"><div><h2>Explore pools</h2><p>Pool state comes from the current Service. Empty pools are not available for swaps.</p></div></div>
-      {poolsLoading && pools.length === 0 && <p className="muted">Loading pools…</p>}
-      {!poolsLoading && exploredPools.length === 0 && <div className="empty-state"><p>No pools exist on this Service yet.</p></div>}
-      {exploredPools.map((pool) => {
-        const asset0 = assets.find((asset) => asset.assetIdHex === toHex(pool.asset0).toLowerCase());
-        const asset1 = assets.find((asset) => asset.assetIdHex === toHex(pool.asset1).toLowerCase());
-        const active = pool.totalShares > 0n && pool.reserve0 > 0n && pool.reserve1 > 0n;
-        return <article className="liquidity-explore-card" key={`${toHex(pool.asset0)}-${toHex(pool.asset1)}`}>
-          <div><div className="liquidity-asset-pair">{asset0 && <AssetIdentity asset={asset0} size={30} />}<span className="liquidity-pair-divider">/</span>{asset1 && <AssetIdentity asset={asset1} size={30} />}</div>{active && asset0 && asset1 ? <div className="liquidity-reserve-assets"><AssetIdentity asset={asset0} size={22} amount={`${formatUnits(pool.reserve0, asset0.decimals)} ${asset0.symbol}`} className="asset-identity--amount-only" /><AssetIdentity asset={asset1} size={22} amount={`${formatUnits(pool.reserve1, asset1.decimals)} ${asset1.symbol}`} className="asset-identity--amount-only" /></div> : <span>Liquidity unavailable · initialize this pool</span>}</div>
-          {active && <span className="liquidity-explore-rate">Pool rate · 1 {asset0?.symbol} ≈ {poolPriceDisplay(pool.reserve0, pool.reserve1, asset0?.decimals ?? 0, asset1?.decimals ?? 0)} {asset1?.symbol}</span>}
-          <ActionButton size="small" disabled={busyOrPending || !asset0 || !asset1} onClick={() => { if (asset0 && asset1) setPair(asset0.assetIdHex, asset1.assetIdHex); document.getElementById("liquidity-new-position")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>{active ? "Add liquidity" : "Initialize liquidity"}</ActionButton>
-        </article>;
-      })}
-      {poolsPageError && <div className="inline-alert" role="alert">{poolsPageError}</div>}
-      {hasMorePools && <ActionButton variant="secondary" loading={poolsPageLoading} disabled={poolsPageLoading || busyOrPending} onClick={() => void loadMorePools()}>Load more pools</ActionButton>}
-    </section>
-
-    <Modal open={!!review} title={review ? operationLabel(review.operation) : "Review liquidity"} onClose={() => { if (!busy) setReview(null); }} footer={removalPosition
-      ? <><ActionButton variant="secondary" icon={X} disabled={busy} onClick={() => setReview(null)}>Cancel</ActionButton><ActionButton variant="primary" loading={busy} disabled={busyOrPending || !removalQuote || removalQuote.shares === 0n} onClick={() => void confirmRemoval(removalPosition)}>Confirm removal</ActionButton></>
-      : <><ActionButton variant="secondary" icon={X} disabled={busy} onClick={() => setReview(null)}>Cancel</ActionButton><ActionButton variant="primary" loading={busy} disabled={busyOrPending} onClick={() => void confirmAction()}>Confirm and sign</ActionButton></>}>
-      {removalPosition && removalQuote ? <div className="liquidity-review"><p>Remove {withdrawPercent}% of your position ({formatUnits(removalQuote.shares, 0)} shares).</p>{customWithdraw && <label>Custom percentage<input aria-label="Custom withdrawal percentage" type="number" min="1" max="100" step="1" value={withdrawPercent} onChange={(event) => setWithdrawPercent(Number(event.target.value))} /></label>}<p>You receive approximately:</p><div className="liquidity-review-assets">{assets.find((asset) => asset.assetIdHex === toHex(removalPosition.pool.asset0).toLowerCase()) && <AssetIdentity asset={assets.find((asset) => asset.assetIdHex === toHex(removalPosition.pool.asset0).toLowerCase())!} size={30} amount={formatUnits(removalQuote.amount0, assets.find((asset) => asset.assetIdHex === toHex(removalPosition.pool.asset0).toLowerCase())?.decimals ?? 0)} />} {assets.find((asset) => asset.assetIdHex === toHex(removalPosition.pool.asset1).toLowerCase()) && <AssetIdentity asset={assets.find((asset) => asset.assetIdHex === toHex(removalPosition.pool.asset1).toLowerCase())!} size={30} amount={formatUnits(removalQuote.amount1, assets.find((asset) => asset.assetIdHex === toHex(removalPosition.pool.asset1).toLowerCase())?.decimals ?? 0)} />}</div><p>Minimum output includes {SLIPPAGE_BPS / 100}% slippage protection.</p>{withdrawPercent === 100 && <p>Your position will close. {removalQuote.shares === removalPosition.pool.totalShares && "This will empty the pool."}</p>}</div>
-        : selectedA && selectedB && selectedAmounts && liquidityQuote ? <div className="liquidity-review"><div className="liquidity-review-assets"><AssetIdentity asset={selectedA} size={30} /><span>/</span><AssetIdentity asset={selectedB} size={30} /></div><p>Estimated deposit:</p><div className="liquidity-review-assets"><AssetIdentity asset={selectedA} size={30} amount={formatUnits(quoteUsedA, selectedA.decimals)} /><AssetIdentity asset={selectedB} size={30} amount={formatUnits(quoteUsedB, selectedB.decimals)} /></div><p>Estimated shares minted: {liquidityQuote.sharesMinted.toString()}. Your estimated pool share after deposit: {formatLiquiditySharePercentage(sharesAfterAdd, totalSharesAfterAdd)}.</p>{(!selectedPool || poolEmpty) && <p className="liquidity-warning">The initial deposit establishes the pool's starting rate.</p>}{selectedPool && !poolEmpty && <p>Unused maximum amounts stay in your Ownership balance. Minimum shares use {SLIPPAGE_BPS / 100}% slippage protection.</p>}<p>No external market price is used.</p></div> : <p>Confirm this liquidity action in your wallet.</p>}
+    <Modal
+      open={!!review}
+      title={review ? operationLabel(review.operation) : "Review liquidity"}
+      onClose={closeReview}
+      footer={<><ActionButton variant="secondary" onClick={closeReview}>Cancel</ActionButton><ActionButton variant="primary" loading={busy || preparingAction} disabled={busyOrPending || preparingAction || !preparedAction || (removalPosition !== null && (!removalQuote || removalQuote.shares === 0n))} onClick={confirmAction}>Confirm</ActionButton></>}
+    >
+      {removalPosition ? <div className="liquidity-review">
+        {customWithdraw
+          ? <label className="liquidity-withdraw-field"><span>Remove (%)</span><input aria-label="Custom withdrawal percentage" type="number" min="1" max="100" step="1" value={withdrawPercentText} onChange={(event) => updateCustomWithdrawPercent(event.target.value)} /></label>
+          : <span className="liquidity-review-caption">Remove {withdrawPercent}%</span>}
+        {error && <p className="liquidity-review-error" role="alert">{error}</p>}
+        {removalQuote && <ConfirmationAssetList items={removalAssetLines} />}
+      </div>
+        : review?.operation === "create" ? <ConfirmationAssetList items={[
+          { asset: review.assetA, amount: review.amountA },
+          { asset: review.assetB, amount: review.amountB },
+        ]} />
+          : selectedA && selectedB && liquidityQuote ? <ConfirmationAssetList items={[
+            { asset: selectedA, amount: formatUnits(quoteUsedA, selectedA.decimals) },
+            { asset: selectedB, amount: formatUnits(quoteUsedB, selectedB.decimals) },
+          ]} /> : null}
     </Modal>
   </section>;
 }

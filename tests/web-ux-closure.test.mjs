@@ -11,6 +11,9 @@ import { parseSlippageBps } from "../web/src/locus/swap/swapValidation.ts";
 test("routes support base-path candidate Liquidity while preserving direct pages", () => {
   assert.equal(pathForRoute("liquidity", "/candidate/"), "/candidate/liquidity");
   assert.equal(routeFromPath("/candidate/liquidity", "/candidate/"), "liquidity");
+  assert.equal(pathForRoute("liquidity-new", "/candidate/"), "/candidate/liquidity/new");
+  assert.equal(routeFromPath("/candidate/liquidity/new", "/candidate/"), "liquidity-new");
+  assert.equal(routeFromPath("/liquidity/new", "/"), "liquidity-new");
   assert.equal(pathForRoute("swap", "/"), "/swap");
   assert.equal(routeFromPath("/activity", "/"), "activity");
 });
@@ -25,7 +28,7 @@ test("Matrix restore does not open verification UI for an authorization that is 
 });
 
 test("amount and recipient validators reject unsafe or incomplete input", () => {
-  assert.equal(validatePositiveAmount("", 6, 100_000n), "Enter an amount.");
+  assert.equal(validatePositiveAmount("", 6, 100_000n), null);
   assert.equal(validatePositiveAmount("0", 6, 100_000n), "Amount must be greater than 0.");
   assert.equal(validatePositiveAmount("1e3", 6, 100_000n), "Enter a positive decimal amount.");
   assert.equal(validatePositiveAmount("1.0000001", 6, 100_000_000n), "This asset supports up to 6 decimal places.");

@@ -57,19 +57,31 @@ test("existing-pool deposit input keeps the reserve ratio with bigint unit conve
 
 test("Liquidity is visible to all users and positions/pools come from Service queries", () => {
   assert.match(appSource, /\["assets", "send", "swap", "liquidity", "activity"\]/);
-  assert.match(appSource, /page === "liquidity" && <LiquidityPage/);
+  assert.match(appSource, /\(page === "liquidity" \|\| page === "liquidity-new"\) && <LiquidityPage/);
   assert.match(appSource, /queryFn: \(\) => network\.locus!\.listPools\(\)/);
   assert.match(pageSource, /locus\.listLiquidityPositions\(sessionOwner, \{ offset: 0n, limit: 50 \}\)/);
   assert.match(pageSource, /locus\.liquidityPositionCount\(sessionOwner\)/);
   assert.match(pageSource, /Load more positions/);
-  assert.match(pageSource, /locus\.createPool\(/);
-  assert.match(pageSource, /locus\.addPoolLiquidity\(/);
-  assert.match(pageSource, /locus\.removePoolLiquidity\(/);
+  assert.match(pageSource, /actionName = "createPool"/);
+  assert.match(pageSource, /initialShares: quote\.sharesMinted/);
+  assert.match(pageSource, /actionName = "addPoolLiquidity"/);
+  assert.match(pageSource, /amountAUsed: usedA/);
+  assert.match(pageSource, /amountBUsed: usedB/);
+  assert.match(pageSource, /sharesMinted: quote\.sharesMinted/);
+  assert.match(pageSource, /initialShares: currentPool\.totalShares === 0n \? quote\.sharesMinted : 0n/);
+  assert.match(pageSource, /actionName = "removePoolLiquidity"/);
+  assert.match(pageSource, /amountAOut: quote\.amount0/);
+  assert.match(pageSource, /amountBOut: quote\.amount1/);
   assert.match(pageSource, /locus\.listPools\(\{ offset: BigInt\(pools\.length \+ additionalPools\.length\), limit: 50 \}\)/);
   assert.match(pageSource, /Load more pools/);
-  assert.match(pageSource, /locus\.getPool\(selectedA\.assetId, selectedB\.assetId\)/);
+  assert.match(pageSource, /locus\.getPool\(assetA\.assetId, assetB\.assetId\)/);
   assert.match(pageSource, /asset\.catalogKey === assetA/);
-  assert.match(pageSource, /Featured pair suggestions/i);
+  assert.match(pageSource, /Featured pairs are unavailable/i);
+  assert.match(pageSource, /role="tablist"/);
+  assert.match(pageSource, /aria-selected=\{tab === "positions"\}/);
+  assert.match(pageSource, /onNewPosition\(a\.assetIdHex, b\.assetIdHex\)/);
+  assert.match(pageSource, /Your initial deposit establishes this pool’s starting rate/);
+  assert.match(pageSource, /role="alert"/);
   assert.doesNotMatch(appSource + pageSource, /isLiquidityManager|managerKey|POOL_MANAGER_REQUIRED|Connect Treasury/);
 });
 

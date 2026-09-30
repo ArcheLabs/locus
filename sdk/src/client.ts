@@ -452,7 +452,8 @@ export class LocusClient {
     assertPoolReserve(amountA, "amountA");
     assertPoolReserve(amountB, "amountB");
     if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
-    return this.submit("createPool", { assetA, assetB, amountA, amountB });
+    const initialShares = quoteInitialLiquidity(amountA, amountB).sharesMinted;
+    return this.submit("createPool", { assetA, assetB, amountA, amountB, initialShares });
   }
 
   async addPoolLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount, minShares: Amount): Promise<SubmitActionResult> {
@@ -461,7 +462,28 @@ export class LocusClient {
     assertPoolReserve(maxAmountB, "maxAmountB");
     assertAmount(minShares, "minShares");
     if (maxAmountA === 0n || maxAmountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
-    return this.submit("addPoolLiquidity", { assetA, assetB, maxAmountA, maxAmountB, minShares });
+    const pool = await this.getPool(assetA, assetB);
+    if (!pool) throw locusError(LOCUS_ERROR_CODES.POOL_NOT_FOUND);
+    const assetAIs0 = compareAssetIds(assetA, pool.asset0) === 0;
+    const maxAmount0 = assetAIs0 ? maxAmountA : maxAmountB;
+    const maxAmount1 = assetAIs0 ? maxAmountB : maxAmountA;
+    const quote = pool.totalShares === 0n
+      ? quoteInitialLiquidity(maxAmount0, maxAmount1)
+      : calculateAddLiquidity(pool.reserve0, pool.reserve1, pool.totalShares, maxAmount0, maxAmount1);
+    const amountAUsed = assetAIs0 ? quote.amount0Used : quote.amount1Used;
+    const amountBUsed = assetAIs0 ? quote.amount1Used : quote.amount0Used;
+    const initialShares = pool.totalShares === 0n ? quote.sharesMinted : 0n;
+    return this.submit("addPoolLiquidity", {
+      assetA,
+      assetB,
+      maxAmountA,
+      maxAmountB,
+      amountAUsed,
+      amountBUsed,
+      sharesMinted: quote.sharesMinted,
+      minShares,
+      initialShares,
+    });
   }
 
   async removePoolLiquidity(assetA: AssetId, assetB: AssetId, shares: Amount, minAmountA: Amount, minAmountB: Amount): Promise<SubmitActionResult> {
@@ -470,7 +492,21 @@ export class LocusClient {
     assertAmount(minAmountA, "minAmountA");
     assertAmount(minAmountB, "minAmountB");
     if (shares === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
-    return this.submit("removePoolLiquidity", { assetA, assetB, shares, minAmountA, minAmountB });
+    const session = this.requireSession();
+    const pool = await this.getPool(assetA, assetB);
+    if (!pool) throw locusError(LOCUS_ERROR_CODES.POOL_NOT_FOUND);
+    const ownerShares = await this.liquiditySharesOf(assetA, assetB, session.subject);
+    const quote = calculateRemoveLiquidity(pool.reserve0, pool.reserve1, pool.totalShares, ownerShares, shares);
+    const assetAIs0 = compareAssetIds(assetA, pool.asset0) === 0;
+    return this.submit("removePoolLiquidity", {
+      assetA,
+      assetB,
+      shares,
+      amountAOut: assetAIs0 ? quote.amount0 : quote.amount1,
+      amountBOut: assetAIs0 ? quote.amount1 : quote.amount0,
+      minAmountA,
+      minAmountB,
+    });
   }
 
   async liquiditySharesOf(assetA: AssetId, assetB: AssetId, owner: Ownership): Promise<Amount> {

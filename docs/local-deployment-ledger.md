@@ -1,25 +1,38 @@
 # MiniJAM Local deployment ledger
 
-The production web app targets **MiniJAM Local / Development**. The active
-immutable Locus Service is `797069104` with code hash
-`0x9c9cd5766cbdc8cdaa927103899283e974c5cdf9367e49d76369a8d335bd1cb8` and
-service key
-`0xeeb9c2c46f5fff320952ceb77bef3f4152a37e679e92e28603682de5ad8ec254`.
-It was built reproducibly with published `jams v0.1.0-rc.8` and the verified
-canonical rc.8 toolchain (SHA-256
-`f804235bdae7239e57d9a7eb0d4413df65d1f785c05aa0cb4af5a28297548d03`), then
-registered in the existing JamScript Backend. Consumer CI run `36215662751`
-passed on cutover commit `3d786aa81c52ce09950334837cebf901322e5ed2`.
+The production web app targets **MiniJAM Local / Development**. Its active
+immutable Locus Service is `3362439117`, finalized at block `16470`, with code
+hash
+`0xe8919ce6dca6b301ffa7bcf9b2d99f7174909df11f6ada6e67b0cd837fe0e110`.
+It was built from Locus commit `f490fa6` with JamScript CLI `v0.1.0-dev` from
+source commit `82d2e15f6a6f26a86ed3f0c7b3a9fa26fb88ced5`. This Local deployment
+uses the development toolchain (`canonical_toolchain=false`), Clang 20.1.8,
+and release optimization under the existing 5M PVM action budget. The artifact
+contains the 512 KiB guest arena fix and passed the real Matrix transfer,
+createPool, and swap PVM regression checks.
 
-The HTTPS deployment now serves the Local network configuration and descriptor
-for Service `797069104`; the catalog is bound to the same genesis and Service
-ID. The previous live Service `3083943385` remains registered and is retained
-for rollback, with its descriptor at
-`web/public/deployments/local-3083943385.json` and its prior static build at
-`/var/www/locus-rollback-3083943385-20260926`. `3302613027` remains the older
-rollback deployment.
+The HTTPS `/` deployment and Local catalog both target Service `3362439117`.
+Its state was initialized from scratch: six curated assets have their complete
+initial supply at Treasury, and `poolCount=0`. No state or balances were
+migrated. Former Service `3389972726` remains immutable with its prior state;
+its rollback descriptor and catalog are preserved at
+`web/public/deployments/local-rollback-3389972726.json` and
+`web/public/catalogs/local-3389972726.json`. Former production Service
+`4209643396` remains immutable with its prior state; its rollback descriptor and catalog are preserved at
+`web/public/deployments/local-rollback-4209643396.json` and
+`web/public/catalogs/local-4209643396.json`. Former Service `4062826813` also
+remains immutable with its rollback descriptor and catalog preserved at
+`web/public/deployments/local-rollback-4062826813.json` and
+`web/public/catalogs/local-4062826813.json`. `2323996321`, `797069104`,
+`3083943385`, and `3302613027` are older historical deployments.
 
 The HTTPS `/rpc` route validated the new descriptor and Backend service state.
+All six curated asset creation actions finalized, and their full initial
+supplies were verified at Treasury on the new Service.
+The Local backend now runs `locus-backend:local-stale-context-retry-20260930`.
+It retries a batch only when MiniJAM explicitly rejects the preflight context
+as stale, rebuilding the batch from the latest finalized context. The prior
+`backend-v0.1.0-rc.8` image remains available locally for rollback.
 The on-chain Matrix adapter bootstrap, controller grant, authorized action, and
 client reconstruction/restore check passed using the adapter's valid local
 proof fixture. This was not a real Matrix OAuth/SAS session; interactive
@@ -52,12 +65,10 @@ assets, with each full initial supply held by Treasury, and `poolCount=0`.
 No liquidity was created or seeded. The v2 candidate does not inherit v1 pool
 positions or arbitrary user balances.
 
-The candidate frontend is available at
-`https://locus.minijam.xyz/candidate/`. Live HTTPS checks confirmed its app,
-asset paths, descriptor, catalog, and permissionless liquidity configuration.
-The production `/` frontend and `/deployments/local.json` remain on Service
-`797069104`; no production cutover was performed. The prior candidate static
-build is preserved at
+The separate candidate frontend remains available at
+`https://locus.minijam.xyz/candidate/` and targets Service `2915918722`. Its
+catalog and state are independent of production and are not part of this
+cutover. Candidate rollback builds remain at
 `/var/www/locus-candidate-v1-153994977-before-v2-20260928T130431Z` and
 `/var/www/locus-candidate-v1-live-rollback-20260928T130431Z`.
 

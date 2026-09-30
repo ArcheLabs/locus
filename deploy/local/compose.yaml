@@ -1,0 +1,47 @@
+services:
+  minijam:
+    image: ghcr.io/archelabs/minijam@sha256:9e08ccf5a0ce373860082ef79453c8f3d86c61d95af671bb0cfce19799ef3b00
+    container_name: locus-minijam
+    command: ["--dev"]
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      MINIJAM_DATA_DIR: /data
+    ports:
+      - "127.0.0.1:9944:9944"
+      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8082:8082"
+    volumes:
+      - /var/lib/locus/minijam:/data
+    logging: &bounded-logs
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - locus-local
+
+  backend:
+    image: locus-backend:local-stale-context-retry-20260930
+    container_name: locus-backend
+    restart: unless-stopped
+    depends_on:
+      minijam:
+        condition: service_started
+    environment:
+      JAMSCRIPT_BACKEND_BIND: 0.0.0.0:8090
+      JAMSCRIPT_BACKEND_DATA: /var/lib/jamscript
+      JAMSCRIPT_BACKEND_CORS_ORIGINS: https://locus.minijam.xyz
+      JAMSCRIPT_NODE_RPC: http://minijam:9944
+      JAMSCRIPT_FORMAL_RPC: http://minijam:8080
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - /var/lib/locus/backend:/var/lib/jamscript
+    logging: *bounded-logs
+    networks:
+      - locus-local
+
+networks:
+  locus-local:
+    name: locus-local

@@ -2,6 +2,7 @@ import { createAppKit } from "@reown/appkit/react";
 import { WagmiAdapter } from "@reown/appkit-adapter-wagmi";
 import { QueryClient } from "@tanstack/react-query";
 import { defineChain } from "viem";
+import { LOCUS_WEBSITE_URL } from "../navigation/links.js";
 
 // MINI Genesis uses Reown AppKit for EVM wallet discovery and selection.
 // Locus reuses that same wallet layer for EVM only; Polkadot stays on the
@@ -26,7 +27,7 @@ createAppKit({
   metadata: {
     name: "Locus",
     description: "Ownership assets and identity",
-    url: typeof window === "undefined" ? "https://locus.archelabs.xyz" : window.location.origin,
+    url: typeof window === "undefined" ? LOCUS_WEBSITE_URL : window.location.origin,
     icons: [],
   },
   features: { analytics: false, email: false, socials: false, swaps: false, onramp: false },

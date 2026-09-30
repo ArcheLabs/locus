@@ -3,6 +3,8 @@ version = "v0.1.0-rc.8"
 
 [jamscript_backend]
 version = "backend-v0.1.0-rc.8"
+image = "ghcr.io/archelabs/jamscript-backend"
+digest = "sha256:4fd6baf37c7a4ba539585f9b1a157dad053d0836f75ded49b97fb704179a6e25"
 
 [jamscript_client]
 package = "@jamscript/client"
@@ -11,4 +13,4 @@ version = "0.1.0-rc.4"
 [minijam]
 version = "stage1-v0.2.0"
 image = "ghcr.io/archelabs/minijam:stage1-v0.2.0"
-digest = ""
+digest = "sha256:9e08ccf5a0ce373860082ef79453c8f3d86c61d95af671bb0cfce19799ef3b00"
