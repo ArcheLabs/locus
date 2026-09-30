@@ -41,6 +41,7 @@ export class EvmSessionBridge {
   private disposed = false;
   private inFlight: Promise<void> | null = null;
   private reconcileAgain = false;
+  private successfulCommits = 0;
   private windowSource: EventSource | null = null;
   private documentSource: EventSource | null = null;
   private providerListeners: Array<[string, (...args: unknown[]) => void]> = [];
@@ -77,13 +78,15 @@ export class EvmSessionBridge {
   async beginConnection(): Promise<boolean> {
     this.pending = true;
     this.expectedAddress = null;
+    const commitsBefore = this.successfulCommits;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    const fastPathMs = this.addressHint ? ACCOUNT_QUERY_TIMEOUT_MS + 150 : EXISTING_ACCOUNT_FAST_PATH_MS;
     await Promise.race([
       this.reconcile(),
-      new Promise<void>((resolve) => { timeout = setTimeout(resolve, EXISTING_ACCOUNT_FAST_PATH_MS); }),
+      new Promise<void>((resolve) => { timeout = setTimeout(resolve, fastPathMs); }),
     ]);
     if (timeout !== undefined) clearTimeout(timeout);
-    return this.options.getSession()?.kind === "evm";
+    return this.options.getSession()?.kind === "evm" || this.successfulCommits > commitsBefore;
   }
 
   beginRestore(address: string): void {
@@ -163,6 +166,7 @@ export class EvmSessionBridge {
           if (this.disposed || provider !== this.provider || this.options.getSession()?.address?.toLowerCase() !== current.address.toLowerCase()) return;
           this.options.commitSession(refreshed);
           this.committedProvider = provider;
+          this.successfulCommits += 1;
         } catch (cause) {
           this.options.onError?.(cause instanceof Error ? cause : new Error("Could not refresh the EVM wallet session."));
         }
@@ -184,6 +188,7 @@ export class EvmSessionBridge {
       }
       this.options.commitSession(session);
       this.committedProvider = provider;
+      this.successfulCommits += 1;
       this.pending = false;
       this.expectedAddress = null;
     } catch (cause) {

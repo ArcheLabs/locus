@@ -38,7 +38,7 @@ import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSessio
 import { matrixStateRequiresUserInteraction } from "./matrix/MatrixInteraction.js";
 import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
 import { completeMatrixAuthCallback, hasMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
-import { useAppKitAccount, useAppKitProvider } from "@reown/appkit/react";
+import { useAppKitAccount, useAppKitProvider, useDisconnect } from "@reown/appkit/react";
 import type { Eip1193Provider } from "@jamscript/client";
 import type { SessionKind } from "./session/types.js";
 import { OwnershipInput } from "./locus/OwnershipInput.js";
@@ -154,8 +154,9 @@ export function App() {
   const oauthCallbackAttempted = useRef(false);
   const provisionalMatrixAuth = useRef<MatrixOAuthSession | null>(null);
   const matrixAuthAbort = useRef<AbortController | null>(null);
-  const { address: appKitAddress } = useAppKitAccount({ namespace: "eip155" });
+  const { address: appKitAddress, isConnected: appKitEvmConnected } = useAppKitAccount({ namespace: "eip155" });
   const { walletProvider } = useAppKitProvider<Eip1193Provider>("eip155");
+  const { disconnect: disconnectAppKit } = useDisconnect();
   const sessionRef = useRef(session);
   const lifecycleRef = useRef(lifecycle);
   const evmBridgeRef = useRef<EvmSessionBridge | null>(null);
@@ -839,7 +840,21 @@ export function App() {
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}
       </main>
       {toast && <div className="toast" role="status">{toast}</div>}
-      <ConnectDialog open={connectOpen} onClose={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); setConnectOpen(false); }} onCancelMatrix={cancelMatrixSignIn} onMatrixSelected={() => setActiveSessionKind(window.localStorage, "matrix")} onConnected={(next) => { setWalletConnectPending(null); setSession(next); if (next.kind === "matrix") setPendingMatrixConnection(null); }} onConnectionPendingChange={setWalletConnectPending} onEvmConnectRequested={() => { setActiveSessionKind(window.localStorage, "evm"); setWalletConnectPending("evm"); setEvmConnectError(""); return evmBridge.beginConnection(); }} onEvmConnectCancelled={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); }} evmError={evmConnectError} evmAccountAvailable={Boolean(walletProvider && appKitAddress)} locus={network.locus} initialMatrixConnection={connectOpen ? pendingMatrixConnection : null} />
+      <ConnectDialog open={connectOpen} onClose={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); setConnectOpen(false); }} onCancelMatrix={cancelMatrixSignIn} onMatrixSelected={() => setActiveSessionKind(window.localStorage, "matrix")} onConnected={(next) => { setWalletConnectPending(null); setSession(next); if (next.kind === "matrix") setPendingMatrixConnection(null); }} onConnectionPendingChange={setWalletConnectPending} onEvmConnectRequested={async () => {
+        setActiveSessionKind(window.localStorage, "evm");
+        setWalletConnectPending("evm");
+        setEvmConnectError("");
+        const reconnected = await evmBridge.beginConnection();
+        // AppKit can restore a connection marker from browser storage before
+        // its EIP-1193 provider is usable. Its modal then refuses to open as
+        // "already connected". Clear only that stale EVM adapter connection
+        // so the user can select MetaMask and authorize it again.
+        if (!reconnected && appKitEvmConnected) {
+          evmBridge.cancelConnection();
+          await disconnectAppKit({ namespace: "eip155" });
+        }
+        return reconnected;
+      }} onEvmConnectCancelled={() => { evmBridge.cancelConnection(); setWalletConnectPending(null); }} evmError={evmConnectError} evmAccountAvailable={Boolean(walletProvider && appKitAddress)} locus={network.locus} initialMatrixConnection={connectOpen ? pendingMatrixConnection : null} />
       {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={resolvedRecipient} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
       <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
       <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} networkId={network.networkId} serviceId={network.deployment?.serviceId ?? null} onClose={() => setCreateAssetOpen(false)} onCreated={() => void refreshAssets()} />
