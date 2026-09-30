@@ -800,7 +800,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
             {!networkReady && !poolsLoading && exploredPools.length === 0 && <p className="muted">Waiting for the Service connection…</p>}
             {poolsLoading && exploredPools.length === 0 && <div className="liquidity-query-skeleton" aria-busy="true" aria-label="Loading pools"><span /><span /></div>}
             {!poolsLoading && poolsError && exploredPools.length === 0 && <div className="liquidity-query-error" role="alert"><p>Pool information is unavailable right now.</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={onRetryPools}>Try again</ActionButton></div>}
-            {networkReady && !poolsLoading && !poolsError && exploredPools.length === 0 && <div className="liquidity-compact-empty"><strong>No liquidity pools yet.</strong><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton></div>}
+            {networkReady && !poolsLoading && !poolsError && exploredPools.length === 0 && <div className="liquidity-compact-empty"><span className="muted">No liquidity pools yet.</span><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton></div>}
             {exploredPools.map((pool) => {
               const asset0 = assets.find((asset) => asset.assetIdHex === toHex(pool.asset0).toLowerCase());
               const asset1 = assets.find((asset) => asset.assetIdHex === toHex(pool.asset1).toLowerCase());
@@ -819,9 +819,9 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         </> : <div className="liquidity-positions-list">
           {positionsLoading && positions.length === 0 && <div className="liquidity-query-skeleton" aria-busy="true" aria-label="Loading positions"><span /><span /></div>}
           {!positionsLoading && positionsError && <div className="liquidity-query-error" role="alert"><p>{positionsError}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={retryPositions}>Try again</ActionButton></div>}
-          {!positionsLoading && !positionsError && !sessionOwner && <div className="liquidity-compact-empty"><strong>Connect to see your positions.</strong><ActionButton size="small" variant="secondary" onClick={onConnect}>Connect</ActionButton></div>}
+          {!positionsLoading && !positionsError && !sessionOwner && <div className="liquidity-compact-empty"><span className="muted">Connect to see your positions.</span><ActionButton size="small" variant="secondary" onClick={onConnect}>Connect</ActionButton></div>}
           {!positionsLoading && !positionsError && sessionOwner && !networkReady && <p className="muted">Waiting for the Service connection…</p>}
-          {!positionsLoading && !positionsError && sessionOwner && networkReady && positions.length === 0 && positionCursor >= positionIndexCount && <div className="liquidity-compact-empty"><strong>No liquidity positions yet.</strong><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton></div>}
+          {!positionsLoading && !positionsError && sessionOwner && networkReady && positions.length === 0 && positionCursor >= positionIndexCount && <div className="liquidity-compact-empty"><span className="muted">No liquidity positions yet.</span><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton></div>}
           {!positionsLoading && !positionsError && sessionOwner && positions.length === 0 && positionCursor < positionIndexCount && <p className="muted">No active positions on this page. More positions are available.</p>}
           {sessionOwner && positions.map((position) => {
             const asset0 = assets.find((asset) => asset.assetIdHex === toHex(position.pool.asset0).toLowerCase());

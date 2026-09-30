@@ -21,7 +21,7 @@
 .liquidity-section-heading p { margin: 5px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 .liquidity-position-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .liquidity-compact-empty, .liquidity-query-error { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 13px 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface-subtle); }
-.liquidity-compact-empty strong, .liquidity-query-error strong { font-size: 14px; }
+.liquidity-query-error strong { font-size: 14px; }
 .liquidity-compact-empty p, .liquidity-query-error p { margin: 4px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.45; }
 .liquidity-query-error { border-color: var(--danger-border); }
 .liquidity-query-skeleton { display: grid; gap: 9px; min-height: 60px; padding: 10px 2px; }
