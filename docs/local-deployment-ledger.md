@@ -1,21 +1,24 @@
 # MiniJAM Local deployment ledger
 
 The production web app targets **MiniJAM Local / Development**. Its active
-immutable Locus Service is `3389972726`, finalized at block `14673`, with code
+immutable Locus Service is `3362439117`, finalized at block `16470`, with code
 hash
-`0x8cbeae6e641143a69ad950168620f007f3bff4a3288b67f540aba222716b4402`.
-It was built from Locus commit `7cbd34a` with JamScript CLI `v0.1.0-rc.8`
-from source commit `b2031db`. Its local ScriptC toolchain bundle SHA-256 is
-`364827c28cfcf29335d9481c80370c28e0a9b8a2a7a4a4a652a0e07e0c03d91e`; the
-service profile uses release optimization (`-O2`) under the existing 5M PVM
-action budget. This fixes the prior planner trap caused by unoptimized service
-code.
+`0xe8919ce6dca6b301ffa7bcf9b2d99f7174909df11f6ada6e67b0cd837fe0e110`.
+It was built from Locus commit `f490fa6` with JamScript CLI `v0.1.0-dev` from
+source commit `82d2e15f6a6f26a86ed3f0c7b3a9fa26fb88ced5`. This Local deployment
+uses the development toolchain (`canonical_toolchain=false`), Clang 20.1.8,
+and release optimization under the existing 5M PVM action budget. The artifact
+contains the 512 KiB guest arena fix and passed the real Matrix transfer,
+createPool, and swap PVM regression checks.
 
-The HTTPS `/` deployment and Local catalog both target Service `3389972726`.
+The HTTPS `/` deployment and Local catalog both target Service `3362439117`.
 Its state was initialized from scratch: six curated assets have their complete
 initial supply at Treasury, and `poolCount=0`. No state or balances were
-migrated. Former production Service `4209643396` remains immutable with its
-prior state; its rollback descriptor and catalog are preserved at
+migrated. Former Service `3389972726` remains immutable with its prior state;
+its rollback descriptor and catalog are preserved at
+`web/public/deployments/local-rollback-3389972726.json` and
+`web/public/catalogs/local-3389972726.json`. Former production Service
+`4209643396` remains immutable with its prior state; its rollback descriptor and catalog are preserved at
 `web/public/deployments/local-rollback-4209643396.json` and
 `web/public/catalogs/local-4209643396.json`. Former Service `4062826813` also
 remains immutable with its rollback descriptor and catalog preserved at
@@ -26,6 +29,10 @@ remains immutable with its rollback descriptor and catalog preserved at
 The HTTPS `/rpc` route validated the new descriptor and Backend service state.
 All six curated asset creation actions finalized, and their full initial
 supplies were verified at Treasury on the new Service.
+The Local backend now runs `locus-backend:local-stale-context-retry-20260930`.
+It retries a batch only when MiniJAM explicitly rejects the preflight context
+as stale, rebuilding the batch from the latest finalized context. The prior
+`backend-v0.1.0-rc.8` image remains available locally for rollback.
 The on-chain Matrix adapter bootstrap, controller grant, authorized action, and
 client reconstruction/restore check passed using the adapter's valid local
 proof fixture. This was not a real Matrix OAuth/SAS session; interactive

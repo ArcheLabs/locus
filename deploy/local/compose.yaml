@@ -22,7 +22,7 @@ services:
       - locus-local
 
   backend:
-    image: ghcr.io/archelabs/jamscript-backend@sha256:4fd6baf37c7a4ba539585f9b1a157dad053d0836f75ded49b97fb704179a6e25
+    image: locus-backend:local-stale-context-retry-20260930
     container_name: locus-backend
     restart: unless-stopped
     depends_on:
