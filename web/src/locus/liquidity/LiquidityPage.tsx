@@ -542,6 +542,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       busy: checking,
       actionLabel: "Check status",
       onAction: () => void waitForPending(current),
+      dismissible: true,
     });
   }
 

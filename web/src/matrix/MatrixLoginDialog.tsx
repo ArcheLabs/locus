@@ -21,11 +21,11 @@ function verificationTitle(state: MatrixConnectionState): string {
     case "VERIFICATION_CONFIRMING": return "Verification confirmed";
     case "VERIFIED": return "Device verified";
     case "CONTROLLER_AUTHORIZING": return "Authorizing device";
-    case "CONTROLLER_AUTHORIZATION_QUEUED": return "Authorization queued";
+    case "CONTROLLER_AUTHORIZATION_QUEUED": return "Authorization pending";
     case "CONTROLLER_AUTHORIZATION_FINALIZING": return "Authorizing device";
-    case "CONTROLLER_AUTHORIZATION_UNKNOWN": return "Authorization status unavailable";
-    case "CONTROLLER_REVOKED": return "Controller revoked";
-    case "CONTROLLER_AUTHORIZATION_FAILED": return "Authorization needs attention";
+    case "CONTROLLER_AUTHORIZATION_UNKNOWN": return "Status unavailable";
+    case "CONTROLLER_REVOKED": return "Device revoked";
+    case "CONTROLLER_AUTHORIZATION_FAILED": return "Authorization failed";
     case "READY": return "Connected";
   }
 }
@@ -270,17 +270,15 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   return (
     <Modal open={open} title="Connect Matrix" onClose={cancel} footer={<>
       <ActionButton variant="secondary" icon={X} onClick={cancel}>Cancel</ActionButton>
-      {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <ActionButton variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>Retry authorization</ActionButton>}
-      {(connectionState === "CONTROLLER_AUTHORIZATION_QUEUED" || connectionState === "CONTROLLER_AUTHORIZATION_FINALIZING" || connectionState === "CONTROLLER_AUTHORIZATION_UNKNOWN") && <ActionButton variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>Check authorization status</ActionButton>}
-      {showingVerification && verification?.phase === "requested" && !verification.startedByLocus && <ActionButton variant="primary" icon={ShieldCheck} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>Accept verification</ActionButton>}
+      {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <ActionButton variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>Retry</ActionButton>}
+      {(connectionState === "CONTROLLER_AUTHORIZATION_QUEUED" || connectionState === "CONTROLLER_AUTHORIZATION_FINALIZING" || connectionState === "CONTROLLER_AUTHORIZATION_UNKNOWN") && <ActionButton variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>Check status</ActionButton>}
+      {showingVerification && verification?.phase === "requested" && !verification.startedByLocus && <ActionButton variant="primary" icon={ShieldCheck} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>Accept</ActionButton>}
       {canCompare && <>
         <ActionButton variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>They don’t match</ActionButton>
         <ActionButton variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>They match</ActionButton>
       </>}
     </>}>
-      <p className="modal-lead">{showingVerification
-        ? "Verify Locus as a trusted second Matrix device in Element. A verified device signs through its device key; your cross-signing master key remains the Locus Ownership."
-        : "Use your Matrix account to control Locus through a verified Matrix device."}</p>
+      {!showingVerification && <p className="modal-lead">Sign in with your Matrix account.</p>}
       {showingVerification ? <div className="matrix-verification-flow" aria-live="polite">
         <section className="verification-card">
           <strong>{verificationTitle(connectionState)}</strong>
@@ -304,15 +302,15 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
             : <p>A verification request arrived from Element device <code>{verification?.otherDeviceId ?? "Unknown device"}</code>. Accept it here to continue.</p>)}
           {verification?.startedByLocus && verification.phase === "sas-waiting" && <p>Verification request sent to your other Matrix devices. Accept it in Element; Locus will continue when Element responds.</p>}
           {connectionState === "VERIFICATION_SAS_READY" && <p>Compare these emoji with the other device in Element. Confirm only when all seven match.</p>}
-          {connectionState === "VERIFICATION_CONFIRMING" && <p>Verification was confirmed. Locus is waiting for the Matrix cross-signing proof before it can authorize this device.</p>}
-          {connectionState === "VERIFIED" && <p>The public M → S → D signatures are verified. Authorizing this device for Locus…</p>}
-          {connectionState === "CONTROLLER_AUTHORIZING" && <p>Matrix verification is complete. Waiting for MiniJAM to confirm this device’s controller authorization…</p>}
-          {connectionState === "CONTROLLER_AUTHORIZATION_QUEUED" && <p>The authorization transaction is queued. Keep this window open. Locus will continue checking it in the background; do not repeat Matrix verification.</p>}
-          {connectionState === "CONTROLLER_AUTHORIZATION_FINALIZING" && <p>The authorization transaction was submitted. Waiting for MiniJAM to finalize it…</p>}
-          {connectionState === "CONTROLLER_AUTHORIZATION_UNKNOWN" && <p>The authorization transaction is still pending or its status is temporarily unavailable. Your Matrix device remains verified. Check its status here; do not repeat Matrix verification.</p>}
-          {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <p>Matrix verification is complete, but Locus could not finish authorizing this device. The error is shown below. Retry after addressing it.</p>}
-          {connectionState === "CONTROLLER_REVOKED" && <p>This Locus Matrix controller was previously revoked. It cannot be restored. Sign out of this Matrix device and sign in again to create a new device, or reconnect using another active controller.</p>}
-          {connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ? <p>Preparing the Locus Matrix device. Keep this window open.</p> : null}
+          {connectionState === "VERIFICATION_CONFIRMING" && <p>Verification complete. Waiting for Matrix proof…</p>}
+          {connectionState === "VERIFIED" && <p>Device verified. Authorizing…</p>}
+          {connectionState === "CONTROLLER_AUTHORIZING" && <p>Waiting for MiniJAM confirmation…</p>}
+          {connectionState === "CONTROLLER_AUTHORIZATION_QUEUED" && <p>Checking in the background…</p>}
+          {connectionState === "CONTROLLER_AUTHORIZATION_FINALIZING" && <p>Waiting for MiniJAM confirmation…</p>}
+          {connectionState === "CONTROLLER_AUTHORIZATION_UNKNOWN" && <p>Authorization is still pending. Check again here.</p>}
+          {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <p>Could not authorize this device. Check the error and retry.</p>}
+          {connectionState === "CONTROLLER_REVOKED" && <p>This device was revoked. Sign in again on a new Matrix device.</p>}
+          {connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ? <p>Preparing Matrix device…</p> : null}
           {canCompare && <div className="matrix-sas-emojis" aria-label="Short authentication string emojis">
             {verification.emojis.map((emoji, index) => <span className="matrix-sas-emoji" key={`${index}-${emoji.symbol}`} title={emoji.description}><span aria-hidden="true">{emoji.symbol}</span><small>{emoji.description}</small></span>)}
           </div>}
@@ -373,7 +371,6 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
         </div>}
       </>}
       {error && !(stage === "custom-server" && !customServer.trim()) && !(stage === "password" && (!passwordUser.trim() || !password)) && <div className="transaction-error" role="alert">{error}</div>}
-      <p className="modal-note">Locus never stores your Matrix password. Device verification is required before Matrix can authorize an identity.</p>
     </Modal>
   );
 }
