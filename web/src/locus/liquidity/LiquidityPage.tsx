@@ -117,8 +117,6 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
   const preparationTimer = useRef<number | null>(null);
   const routePairHydration = useRef<string | null>(null);
   const [transactionId, setTransactionId] = useState("");
-  const [transactionOutcome, setTransactionOutcome] = useState<"pending" | "applied" | "failed" | null>(null);
-  const [actionMessage, setActionMessage] = useState("");
   const [error, setError] = useState("");
   const [pending, setPending] = useState<PendingAction | null>(null);
   const [pairPoolState, setPairPoolState] = useState<PairPoolState | null>(null);
@@ -212,7 +210,6 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
   useEffect(() => {
     setPending(pendingScopeReady ? readPending(storageKey) : null);
     setTransactionId("");
-    setTransactionOutcome(null);
   }, [pendingScopeReady, storageKey]);
 
   useEffect(() => {
@@ -467,8 +464,6 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
     if (saved?.transactionId.toLowerCase() === id.toLowerCase()) window.localStorage.removeItem(storageKey);
     setPending((current) => current?.transactionId.toLowerCase() === id.toLowerCase() ? null : current);
     setTransactionId(id);
-    setTransactionOutcome("failed");
-    setActionMessage("");
     setPairRefreshRevision((revision) => revision + 1);
     let refreshed = false;
     try { await refreshAfterApplied(expectedScope); refreshed = true; } catch { /* Keep the terminal failure visible if refresh is temporarily unavailable. */ }
@@ -507,8 +502,6 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
     if (saved?.transactionId.toLowerCase() === id.toLowerCase()) window.localStorage.removeItem(storageKey);
     setPending((current) => current?.transactionId.toLowerCase() === id.toLowerCase() ? null : current);
     setTransactionId(id);
-    setTransactionOutcome("failed");
-    setActionMessage("");
     setError(`Transaction finalized as ${status}${errorCode === null ? "" : ` (error ${errorCode})`}. The liquidity action was not applied; review the current state before trying again.`);
     setPairRefreshRevision((revision) => revision + 1);
   }
@@ -531,7 +524,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
 
   async function waitForPending(current: PendingAction, expectedScope = scope) {
     if (!locus || busy || !isScopeCurrent(expectedScope)) return;
-    setBusy(true); setError(""); setActionMessage("Checking the saved transaction. No new action will be submitted.");
+    setBusy(true); setError("");
     try {
       const receipt = await locus.waitForAction(current.transactionId, { intervalMs: 750, timeoutMs: 180_000 });
       if (!isScopeCurrent(expectedScope)) return;
@@ -539,7 +532,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
         clearFinalizedFailure(current.transactionId, receipt.actionReceipt.status, receipt.actionReceipt.errorCode);
         return;
       }
-      window.localStorage.removeItem(storageKey); setPending(null); setTransactionOutcome("applied"); setActionMessage("Liquidity action confirmed.");
+      window.localStorage.removeItem(storageKey); setPending(null); setTransactionId("");
       await refreshAfterApplied(expectedScope);
       setPairRefreshRevision((revision) => revision + 1);
       if (current.action !== "Remove liquidity") onActionSuccess(current.action === "Create pool" ? "Pool created" : "Liquidity added");
@@ -571,7 +564,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
     setPreparedAction(null);
     setPreparingAction(false);
     setBusy(true);
-    setError(""); setActionMessage("");
+    setError("");
     void finishConfirmedAction(review, prepared, signature);
   }
 
@@ -594,7 +587,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
         createdAt: Date.now(),
       };
       window.localStorage.setItem(pendingStorageKey(request.scope), JSON.stringify(saved));
-      setPending(saved); setTransactionId(submittedId); setTransactionOutcome("pending");
+      setPending(saved); setTransactionId(submittedId);
       closeReview();
 
       const receipt = await locus.waitForAction(submittedId, { intervalMs: 750, timeoutMs: 180_000 });
@@ -604,7 +597,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
         return;
       }
       window.localStorage.removeItem(pendingStorageKey(request.scope));
-      setPending(null); setTransactionOutcome("applied"); setActionMessage("Liquidity action confirmed.");
+      setPending(null); setTransactionId("");
       if (request.operation !== "remove") { setAmountA(""); setAmountB(""); }
       await refreshAfterApplied(request.scope);
       setPairRefreshRevision((revision) => revision + 1);
@@ -729,6 +722,22 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
     return poolPriceDisplay(aIs0 ? pool.reserve0 : pool.reserve1, aIs0 ? pool.reserve1 : pool.reserve0, assetA.decimals, assetB.decimals);
   }
 
+  const actionStatus = <>
+    {error && <div className="inline-alert permissionless-liquidity-error" role="alert">{error}</div>}
+    {pending && <div className="liquidity-pending-card" role="status">
+      <div className="liquidity-pending-copy">
+        <strong>{busy ? "Checking transaction status…" : `${pending.action} is still being checked.`}</strong>
+        <p>The transaction is saved for this network and Ownership. Wait for its status before signing another liquidity action.</p>
+        <code>{pending.transactionId}</code>
+      </div>
+      <ActionButton size="small" variant="secondary" icon={RefreshCw} loading={busy} disabled={busy} onClick={() => void waitForPending(pending)}>Check status</ActionButton>
+    </div>}
+    {!pending && transactionId && <div className="liquidity-tx-receipt">
+      <strong>Liquidity action was not applied</strong>
+      <code>{transactionId}</code>
+    </div>}
+  </>;
+
   return <section className={`page liquidity-page${view === "new" ? " liquidity-page--new" : ""}`}>
     {view === "home" ? <>
       <div className="liquidity-toolbar">
@@ -738,12 +747,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
         </div>
         <ActionButton variant="primary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton>
       </div>
-      <div className="liquidity-status-messages">
-        {error && <div className="inline-alert permissionless-liquidity-error" role="alert">{error}</div>}
-        {actionMessage && <div className="inline-alert" role="status">{actionMessage}</div>}
-        {transactionId && <div className="liquidity-tx-receipt"><strong>{transactionOutcome === "failed" ? "Liquidity action was not applied" : pending || transactionOutcome === "pending" ? `${pending?.action ?? "Liquidity action"} · transaction pending` : "Liquidity action confirmed"}</strong><code>{transactionId}</code></div>}
-        {pending && <div className="inline-alert"><div><strong>{pending.action} is still being checked.</strong><p>Its transaction ID is saved for this network and Ownership. Do not sign another liquidity action until its status is known.</p></div><ActionButton size="small" variant="secondary" icon={RefreshCw} loading={busy} onClick={() => void waitForPending(pending)}>Check transaction status</ActionButton></div>}
-      </div>
+      <div className="liquidity-status-messages">{actionStatus}</div>
       <section id={`liquidity-panel-${tab}`} className="liquidity-tab-panel" role="tabpanel" aria-labelledby={`liquidity-tab-${tab}`}>
         {tab === "pools" ? <>
           <section className="liquidity-featured">
@@ -783,8 +787,10 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
               <div className="liquidity-position-main">
                 <div className="liquidity-asset-pair">{asset0 && <AssetIdentity asset={asset0} size={30} />}<span className="liquidity-pair-divider">/</span>{asset1 && <AssetIdentity asset={asset1} size={30} />}</div>
                 <div className="liquidity-position-underlying">{asset0 ? <AssetIdentity asset={asset0} size={22} amount={`${formatUnits(position.amount0, asset0.decimals)} ${asset0.symbol}`} className="asset-identity--amount-only" /> : position.amount0.toString()} <span>+</span> {asset1 ? <AssetIdentity asset={asset1} size={22} amount={`${formatUnits(position.amount1, asset1.decimals)} ${asset1.symbol}`} className="asset-identity--amount-only" /> : position.amount1.toString()}</div>
-                <span className="liquidity-position-share">Pool share · {formatLiquiditySharePercentage(position.shares, position.pool.totalShares)}</span>
-                <CopyableValue label="Ownership" value={formatLocusId(sessionOwner)} />
+                <div className="liquidity-position-meta">
+                  <span className="liquidity-position-share">Pool share · {formatLiquiditySharePercentage(position.shares, position.pool.totalShares)}</span>
+                  <CopyableValue label="Ownership" value={formatLocusId(sessionOwner)} layout="inline" />
+                </div>
               </div>
               <div className="liquidity-position-actions"><ActionButton size="small" variant="secondary" disabled={busyOrPending || !asset0 || !asset1} onClick={() => { if (asset0 && asset1) onNewPosition(asset0.assetIdHex, asset1.assetIdHex); }}>Manage</ActionButton><ActionButton size="small" variant="secondary" disabled={busyOrPending} onClick={() => void requestRemoval(position, 50)}>Remove</ActionButton></div>
               <details className="liquidity-position-remove-options"><summary>Remove a specific amount</summary><div className="liquidity-position-actions">{[25, 50, 75, 100].map((pct) => <button key={pct} type="button" disabled={busyOrPending} onClick={() => void requestRemoval(position, pct)}>{pct}%</button>)}<button type="button" disabled={busyOrPending} onClick={() => requestCustomRemoval(position)}>Custom</button></div></details>
@@ -799,10 +805,7 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
         <button type="button" className="liquidity-back-link" onClick={() => onTabChange("pools")}><ArrowLeft size={18} aria-hidden="true" /> Liquidity</button>
         <h1>New position</h1>
       </header>
-      {error && <div className="inline-alert permissionless-liquidity-error" role="alert">{error}</div>}
-      {actionMessage && <div className="inline-alert" role="status">{actionMessage}</div>}
-      {pending && <div className="inline-alert"><div><strong>{pending.action} is still being checked.</strong><p>Its transaction ID is saved for this network and Ownership. Do not sign another liquidity action until its status is known.</p></div><ActionButton size="small" variant="secondary" icon={RefreshCw} loading={busy} onClick={() => void waitForPending(pending)}>Check transaction status</ActionButton></div>}
-      {transactionId && <div className="liquidity-tx-receipt"><strong>{transactionOutcome === "failed" ? "Liquidity action was not applied" : pending || transactionOutcome === "pending" ? `${pending?.action ?? "Liquidity action"} · transaction pending` : "Liquidity action confirmed"}</strong><code>{transactionId}</code></div>}
+      <div className="liquidity-status-messages">{actionStatus}</div>
       <section className="liquidity-section liquidity-new-card">
         <div className="liquidity-deposit-form">
           <AssetAmountInput
@@ -854,7 +857,6 @@ export function LiquidityPage({ view, initialTab, initialPair, config, assets, p
     <Modal
       open={!!review}
       title={review ? operationLabel(review.operation) : "Review liquidity"}
-      hideTitle={review?.operation === "create"}
       onClose={closeReview}
       footer={removalPosition
         ? <><ActionButton variant="secondary" icon={X} onClick={closeReview}>Cancel</ActionButton><ActionButton variant="primary" loading={busy || preparingAction} disabled={busyOrPending || preparingAction || !preparedAction || !removalQuote || removalQuote.shares === 0n} onClick={confirmAction}>Remove</ActionButton></>
