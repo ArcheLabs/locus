@@ -288,7 +288,7 @@ test("create-asset UI prepares before the signature gesture and exposes every ac
   }
   assert.match(source, /CREATE_ASSET_PREPARATION_TIMEOUT_MS = 45_000/);
   assert.match(source, /Enter asset details/);
-  assert.match(source, /Preparation timed out\. No signature was requested and no transaction was submitted/);
+  assert.match(i18nSource, /preparationTimeout:.*No signature was requested and no transaction was submitted/);
   assert.match(source, /locus\.signPreparedOwnershipAction\(preparedAction\)/);
   assert.match(source, /locus\.abandonPreparedOwnershipAction\(preparedAction\)/);
   assert.match(source, /resumeCreateAssetFinalization/);
