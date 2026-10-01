@@ -340,7 +340,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
       ? showingLoginProgress
         ? <span className="matrix-login-title-progress"><LoaderCircle aria-hidden="true" size={22} />{text(verificationTitle(connectionState, verification))}</span>
         : text(verificationTitle(connectionState, verification))
-      : t("ui.connectMatrix")} onClose={cancel} closeLabel={t("ui.cancelSignIn")} footer={<ActionButton variant="secondary" icon={X} onClick={cancel}>{t("ui.cancelSignIn")}</ActionButton>}>
+      : t("ui.connectMatrix")} onClose={cancel} closeLabel={t("ui.cancelSignIn")} footer={<ActionButton variant="secondary" icon={X} onClick={cancel}>{t("common.cancel")}</ActionButton>}>
       {!showingVerification && <p className="modal-lead">{t("ui.signInMatrix")}</p>}
       {showingVerification ? <div className="matrix-verification-flow" aria-live="polite">
         <section className="verification-card">

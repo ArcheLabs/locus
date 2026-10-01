@@ -883,7 +883,7 @@ test("canceling Matrix verification clears the provisional login and closes the 
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   const connectDialog = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
   const app = await fs.readFile(new URL("../web/src/app.tsx", import.meta.url), "utf8");
-  assert.match(dialog, /onClick=\{cancel\}>\{t\("ui\.cancelSignIn"\)\}/);
+  assert.match(dialog, /onClick=\{cancel\}>\{t\("common\.cancel"\)\}/);
   assert.match(dialog, /onCancel\(pendingConnection\)/);
   assert.match(dialog, /authAttempt\.current \+= 1/);
   assert.match(dialog, /dialogGeneration\.current \+= 1/);
