@@ -110,6 +110,7 @@ export class MatrixCryptoDevice {
   private readonly pendingVerificationRequests: VerificationOutgoingRequest[] = [];
   private readonly acceptedFlows = new Set<string>();
   private readonly startedSasFlows = new Set<string>();
+  private lastSyncErrorDiagnostic: string | null = null;
   private activeFlowId: string | null = null;
   private ownVerificationInFlight: Promise<void> | null = null;
   private initialSyncComplete = false;
@@ -200,6 +201,8 @@ export class MatrixCryptoDevice {
       if (cause instanceof MatrixConnectorError && cause.code === "MATRIX_SESSION_INVALID") {
         return { state: "SESSION_INVALID", reason: "matrix-session-expired" };
       }
+      const diagnostic = cause instanceof MatrixConnectorError ? cause.code : cause instanceof Error ? cause.name : typeof cause;
+      console.warn("[Locus Matrix] Device trust refresh failed", diagnostic);
       return { state: "UNKNOWN", reason: "matrix-trust-refresh-failed" };
     }
   }
@@ -582,7 +585,7 @@ export class MatrixCryptoDevice {
             (payload.device_lists?.left ?? []).map((value) => new UserId(value)),
           );
           try {
-          await this.machine.receiveSyncChanges(
+            await this.machine.receiveSyncChanges(
               JSON.stringify(payload.to_device?.events ?? []),
               lists,
               new Map(Object.entries(payload.device_one_time_keys_count ?? {})),
@@ -591,9 +594,12 @@ export class MatrixCryptoDevice {
             lists.free();
           }
           since = payload.next_batch;
+          // The trust read needs SDK state from at least one applied /sync.
+          // Do not make it wait for unrelated verification UI work or uploads.
+          this.initialSyncComplete = true;
           await this.refreshVerificationRequests(http);
           await this.flush(http);
-          this.initialSyncComplete = true;
+          this.lastSyncErrorDiagnostic = null;
           for (const listener of this.trustListeners) listener();
         } catch (error) {
           if (abort.signal.aborted) return;
@@ -601,6 +607,14 @@ export class MatrixCryptoDevice {
             this.initialSyncFailure = { state: "SESSION_INVALID", reason: "matrix-session-expired" };
             for (const listener of this.trustListeners) listener();
             return;
+          }
+          // /sync may already have updated trust even if a separate outgoing
+          // verification request failed. Let the trust state machine observe it.
+          if (this.initialSyncComplete) for (const listener of this.trustListeners) listener();
+          const diagnostic = error instanceof MatrixConnectorError ? error.code : error instanceof Error ? error.name : typeof error;
+          if (diagnostic !== this.lastSyncErrorDiagnostic) {
+            console.warn("[Locus Matrix] Device sync retrying", diagnostic);
+            this.lastSyncErrorDiagnostic = diagnostic;
           }
           for (const listener of this.syncErrorListeners) listener(error);
           await new Promise((resolve) => window.setTimeout(resolve, 2_000));

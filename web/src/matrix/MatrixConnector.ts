@@ -501,6 +501,7 @@ async function makeConnected(
   let unsubscribeVerification: () => void = () => {};
   let unsubscribeSyncError: () => void = () => {};
   let trustSnapshot: MatrixDeviceTrustSnapshot = { state: "UNKNOWN", reason: "initializing" };
+  let lastTrustUnknownReason: string | null = null;
   let trustRevision = 0;
   const attemptId = `${stored.userId}|${stored.deviceId}|${++matrixConnectionAttemptSequence}`;
   const initialVerification = crypto.currentVerification;
@@ -615,13 +616,32 @@ async function makeConnected(
       return;
     }
     if (snapshot.state === "UNKNOWN") {
-      connected.error = "暂时无法确认设备状态，请重试。";
+      if (snapshot.reason === "initial-sync-pending") {
+        connected.error = "";
+        if (connected.state === "READY") notify();
+        else if (connected.state !== "TRUST_CHECKING") setState("TRUST_CHECKING");
+        else notify();
+        return;
+      }
+      const reason = snapshot.reason ?? "unknown";
+      if (reason !== lastTrustUnknownReason) {
+        console.warn("[Locus Matrix] Device trust is unknown", reason);
+        lastTrustUnknownReason = reason;
+      }
+      connected.error = snapshot.reason === "initial-sync-pending"
+        ? "正在同步 Matrix 设备状态，请稍候。"
+        : snapshot.reason === "crypto-device-data-unavailable"
+          ? "Matrix 尚未返回当前设备的签名密钥，正在等待更新。"
+          : snapshot.reason === "current-identity-or-device-key-unavailable"
+            ? "Matrix 尚未返回账号的交叉签名信息，正在等待更新。"
+            : "暂时无法确认设备状态，请重试。";
       if (connected.state === "READY") notify();
       else if (["CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) setState("CONTROLLER_AUTHORIZATION_UNKNOWN");
       else if (isVerificationInteraction()) notify();
       else setState("TRUST_UNKNOWN");
       return;
     }
+    lastTrustUnknownReason = null;
     if (snapshot.state === "UNVERIFIED") {
       connected.error = connected.state === "READY" ? securityMessage : "";
       if (connected.state === "READY") {

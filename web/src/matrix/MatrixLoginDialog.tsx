@@ -296,7 +296,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
             <ActionButton size="small" variant="primary" loading={working} disabled={working} onClick={() => void useDifferentMatrixAccount()}>重新登录</ActionButton>
           </> : connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" || connectionState === "TRUST_CHECKING" ?
             <div className="matrix-verification-status" role="status">正在准备登录…</div> : connectionState === "TRUST_UNKNOWN" ? <>
-              <p>暂时无法确认设备状态，请重试。</p>
+              <p>{pendingConnection?.error || "暂时无法确认设备状态，请重试。"}</p>
               <ActionButton size="small" variant="secondary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void refreshDeviceTrust()}>重试</ActionButton>
             </> : needsElementConfirmation ? <>
               {verification?.phase === "unsupported" ? <>
@@ -385,7 +385,10 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(legacyCapabilities.sso ? "legacy-options" : returnStage); setPassword(""); setError(""); }}>Back</ActionButton>
         </div>}
       </>}
-      {error && !(stage === "custom-server" && !customServer.trim()) && !(stage === "password" && (!passwordUser.trim() || !password)) && <div className="transaction-error" role="alert">{error}</div>}
+      {error && !(showingVerification && connectionState === "TRUST_UNKNOWN")
+        && !(stage === "custom-server" && !customServer.trim())
+        && !(stage === "password" && (!passwordUser.trim() || !password))
+        && <div className="transaction-error" role="alert">{error}</div>}
     </Modal>
   );
 }
