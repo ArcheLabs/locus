@@ -26,12 +26,39 @@ export type MatrixDeviceTrustSnapshot = {
   reason?: string;
 };
 
+/** OwnUserIdentity.masterKey is a JSON-encoded CrossSigningKey, not Base64. */
+export function matrixMasterPublicKeyFromSdk(serialized: string, userId: string): string | null {
+  let key: unknown;
+  try { key = JSON.parse(serialized); }
+  catch { return null; }
+  if (!key || typeof key !== "object" || Array.isArray(key)) return null;
+  const candidate = key as { user_id?: unknown; usage?: unknown; keys?: unknown };
+  if (candidate.user_id !== userId
+    || !Array.isArray(candidate.usage) || candidate.usage.length !== 1 || candidate.usage[0] !== "master"
+    || !candidate.keys || typeof candidate.keys !== "object" || Array.isArray(candidate.keys)) return null;
+  const entries = Object.entries(candidate.keys).filter(([id]) => id.startsWith("ed25519:"));
+  if (entries.length !== 1) return null;
+  const value = entries[0][1];
+  if (typeof value !== "string" || !/^[A-Za-z0-9+/_-]+={0,2}$/.test(value)) return null;
+  try {
+    const normalized = value.replace(/-/g, "+").replace(/_/g, "/").replace(/=+$/, "");
+    const decoded = atob(normalized.padEnd(Math.ceil(normalized.length / 4) * 4, "="));
+    return decoded.length === 32 ? value : null;
+  } catch { return null; }
+}
+
 /**
  * Trust policy for Locus's current Matrix device.
  *
- * This deliberately excludes a device's generic/local `isVerified()` bit. A
- * local verification mark is weaker than the cross-signing trust chain used
- * by Locus's Matrix ownership proof.
+ * Confirm the SDK-validated M→S→D chain for the master and device keys bound
+ * to this login's Locus ownership. Locus still validates and authorizes the
+ * ownership proof before READY. This is not a general E2EE recipient policy.
+ *
+ * Local identity verification is separate: an externally signed device can
+ * have a valid owner signature while this fresh OlmMachine has not verified
+ * the master locally. Requiring isVerified/isCrossSigningTrusted here would
+ * reject the external verification supported by the existing proof protocol.
+ * Neither a local device trust mark nor raw server signature presence suffices.
  */
 export function evaluateMatrixDeviceTrust(signals: MatrixDeviceTrustSignals): MatrixDeviceTrustSnapshot {
   if (!signals.identityAvailable || !signals.deviceAvailable) {
@@ -48,10 +75,7 @@ export function evaluateMatrixDeviceTrust(signals: MatrixDeviceTrustSignals): Ma
   }
   if (!signals.masterKeyMatches) return { state: "IDENTITY_CHANGED", reason: "cross-signing-identity-changed" };
   if (!signals.deviceKeyMatches) return { state: "DEVICE_REVOKED", reason: "current-device-key-unavailable" };
-  if (!signals.identityVerified
-    || !signals.identityTrustsOwnDevice
-    || !signals.deviceCrossSignedByOwner
-    || !signals.deviceCrossSigningTrusted) {
+  if (!signals.identityTrustsOwnDevice || !signals.deviceCrossSignedByOwner) {
     return { state: "UNVERIFIED", reason: "trusted-cross-signing-chain-incomplete" };
   }
   return { state: "VERIFIED" };

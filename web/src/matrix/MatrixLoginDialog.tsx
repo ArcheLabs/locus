@@ -15,7 +15,7 @@ function verificationTitle(state: MatrixConnectionState): string {
   switch (state) {
     case "AUTHENTICATED":
     case "DEVICE_KEYS_READY":
-    case "TRUST_CHECKING": return "正在登录";
+    case "TRUST_CHECKING": return "确认设备";
     case "TRUST_UNKNOWN": return "确认设备状态";
     case "VERIFICATION_REQUIRED":
     case "VERIFICATION_REQUESTED":
@@ -294,10 +294,13 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           {needsRelogin ? <>
             <p>当前登录状态不可用，请重新登录。</p>
             <ActionButton size="small" variant="primary" loading={working} disabled={working} onClick={() => void useDifferentMatrixAccount()}>重新登录</ActionButton>
-          </> : connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" || connectionState === "TRUST_CHECKING" ?
+          </> : connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ?
             <div className="matrix-verification-status" role="status">正在准备登录…</div> : connectionState === "TRUST_UNKNOWN" ? <>
               <p>{pendingConnection?.error || "暂时无法确认设备状态，请重试。"}</p>
               <ActionButton size="small" variant="secondary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void refreshDeviceTrust()}>重试</ActionButton>
+            </> : connectionState === "TRUST_CHECKING" ? <>
+              <p>请在已登录的 Matrix 客户端中确认这是你的新设备。若 Element 显示“这是你吗？”，请选择“是我”。确认后 Locus 会自动继续。</p>
+              <ActionButton size="small" variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void refreshDeviceTrust()}>我已完成验证</ActionButton>
             </> : needsElementConfirmation ? <>
               {verification?.phase === "unsupported" ? <>
                 <p>这次请求使用二维码验证，Locus 目前只支持 SAS。请在另一台设备选择 SAS 后重试。</p>
@@ -329,7 +332,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
               <p>{pendingConnection?.error || "暂时无法完成登录，请重试。"}</p>
               <ActionButton size="small" variant="secondary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>重试</ActionButton>
             </> : <div className="matrix-verification-status" role="status">正在完成登录…</div>}
-          {needsElementConfirmation && <details className="matrix-recovery-details">
+          {(needsElementConfirmation || connectionState === "TRUST_CHECKING") && <details className="matrix-recovery-details">
             <summary>找不到设备？</summary>
             <div className="matrix-recovery-content"><p>打开 Element → 设置 → 会话，找到 “Locus” 设备并选择“验证”。</p></div>
           </details>}

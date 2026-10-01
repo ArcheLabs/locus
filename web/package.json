@@ -4,6 +4,7 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
+    "test:matrix": "node --experimental-strip-types --test ../tests/web-matrix-verification.test.mjs tests/matrix-device-trust.test.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/assert-matrix-wasm.mjs && node --experimental-strip-types scripts/assert-production-network.mjs"
   },

@@ -21,7 +21,7 @@ import {
   VerificationRequestPhase,
 } from "@matrix-org/matrix-sdk-crypto-wasm";
 import { describeMatrixCause, matrixCryptoStageFailure, MatrixConnectorError } from "./MatrixErrors.ts";
-import { evaluateMatrixDeviceTrust, type MatrixDeviceTrustSnapshot } from "./MatrixDeviceTrust.ts";
+import { evaluateMatrixDeviceTrust, matrixMasterPublicKeyFromSdk, type MatrixDeviceTrustSnapshot } from "./MatrixDeviceTrust.ts";
 
 type MatrixHttp = (path: string, body: string, method?: "POST" | "PUT") => Promise<string>;
 type MatrixFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -242,16 +242,16 @@ export class MatrixCryptoDevice {
       let currentDeviceKey: string | null = null;
       try { currentDeviceKey = ed25519?.toBase64() ?? null; }
       finally { ed25519?.free(); }
-      const currentMasterKey = identity.masterKey;
+      const currentMasterKey = matrixMasterPublicKeyFromSdk(identity.masterKey, this.userId);
       const identityTrustsOwnDevice = await identity.trustsOurOwnDevice();
       return evaluateMatrixDeviceTrust({
         identityAvailable: true,
         deviceAvailable: true,
         identityChanged: identity.hasVerificationViolation(),
         deviceRevoked: device.isDeleted(),
-        masterKeyAvailable: typeof currentMasterKey === "string" && currentMasterKey.length > 0,
+        masterKeyAvailable: currentMasterKey !== null,
         deviceKeyAvailable: currentDeviceKey !== null,
-        masterKeyMatches: typeof currentMasterKey === "string" && sameMatrixBase64(currentMasterKey, this.expectedMasterKey),
+        masterKeyMatches: currentMasterKey !== null && sameMatrixBase64(currentMasterKey, this.expectedMasterKey),
         deviceKeyMatches: currentDeviceKey !== null && sameMatrixBase64(currentDeviceKey, this.expectedDeviceKey),
         identityVerified: identity.isVerified(),
         identityTrustsOwnDevice,
@@ -662,7 +662,8 @@ export class MatrixCryptoDevice {
     for (const request of this.pendingVerificationRequests) request.free();
     this.pendingVerificationRequests.length = 0;
     this.verificationSnapshot = null;
-    try { this.machine.close(); } finally { this.machine.free(); }
+    // close() consumes the WASM wrapper; free() afterwards is a double free.
+    this.machine.close();
   }
 }
 

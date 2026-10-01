@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   createMatrixDeviceTrustMonitor,
   evaluateMatrixDeviceTrust,
+  matrixMasterPublicKeyFromSdk,
   MATRIX_TRUST_POLL_INTERVAL_MS,
 } from "../web/src/matrix/MatrixDeviceTrust.ts";
 import { matrixControllerReceiptFailure, MatrixConnectorError } from "../web/src/matrix/MatrixErrors.ts";
@@ -36,16 +37,56 @@ const verifiedSignals = {
   deviceCrossSigningTrusted: true,
 };
 
+const matrixUserId = "@alice:example.org";
+const masterPublicKey = Buffer.alloc(32, 255).toString("base64").replace(/=+$/, "");
+const sdkMasterKey = (publicKey = masterPublicKey) => JSON.stringify({
+  user_id: matrixUserId,
+  usage: ["master"],
+  keys: { [`ed25519:${publicKey}`]: publicKey },
+  signatures: { [matrixUserId]: { "ed25519:DEVICE": "signature" } },
+});
+
+test("SDK master-key JSON is decoded before identity comparison", () => {
+  const serialized = sdkMasterKey();
+  assert.notEqual(serialized, masterPublicKey, "the old comparison rejects every SDK identity");
+  const extracted = matrixMasterPublicKeyFromSdk(serialized, matrixUserId);
+  assert.equal(extracted, masterPublicKey);
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, masterKeyMatches: extracted === masterPublicKey }).state, "VERIFIED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityVerified: false, deviceCrossSigningTrusted: false, masterKeyMatches: extracted === masterPublicKey }).state, "VERIFIED");
+  const changedKey = Buffer.alloc(32, 1).toString("base64").replace(/=+$/, "");
+  const changed = matrixMasterPublicKeyFromSdk(sdkMasterKey(changedKey), matrixUserId);
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, masterKeyMatches: changed === masterPublicKey }).state, "IDENTITY_CHANGED");
+});
+
+test("SDK master-key extraction rejects unavailable or invalid data without inventing an identity change", () => {
+  for (const serialized of ["", "not-json", masterPublicKey, "null", "[]", "{}",
+    JSON.stringify({ user_id: "@other:example.org", usage: ["master"], keys: { "ed25519:key": masterPublicKey } }),
+    JSON.stringify({ user_id: matrixUserId, usage: ["self_signing"], keys: { "ed25519:key": masterPublicKey } }),
+    JSON.stringify({ user_id: matrixUserId, usage: ["master"], keys: { "ed25519:a": masterPublicKey, "ed25519:b": masterPublicKey } }),
+    sdkMasterKey("too-short"), sdkMasterKey("invalid!base64"),
+  ]) {
+    const extracted = matrixMasterPublicKeyFromSdk(serialized, matrixUserId);
+    assert.equal(extracted, null);
+    assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, masterKeyAvailable: extracted !== null, masterKeyMatches: false }).state, "UNKNOWN");
+  }
+});
+
+test("SDK master-key extraction accepts standard and URL-safe Base64 with optional padding", () => {
+  for (const publicKey of [masterPublicKey, `${masterPublicKey}=`, masterPublicKey.replace(/\//g, "_").replace(/\+/g, "-")]) {
+    assert.equal(matrixMasterPublicKeyFromSdk(sdkMasterKey(publicKey), matrixUserId), publicKey);
+  }
+});
+
 test("Matrix trust requires the SDK's cross-signing chain and exact current device keys", () => {
   assert.deepEqual(evaluateMatrixDeviceTrust(verifiedSignals), { state: "VERIFIED" });
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityAvailable: false }).state, "UNKNOWN");
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceAvailable: false }).state, "UNKNOWN");
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, masterKeyAvailable: false }).state, "UNKNOWN");
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceKeyAvailable: false }).state, "UNKNOWN");
-  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityVerified: false }).state, "UNVERIFIED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityVerified: false }).state, "VERIFIED");
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityTrustsOwnDevice: false }).state, "UNVERIFIED");
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceCrossSignedByOwner: false }).state, "UNVERIFIED");
-  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceCrossSigningTrusted: false }).state, "UNVERIFIED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceCrossSigningTrusted: false }).state, "VERIFIED");
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityChanged: true }).state, "IDENTITY_CHANGED");
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceRevoked: true }).state, "DEVICE_REVOKED");
   assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, masterKeyMatches: false }).state, "IDENTITY_CHANGED");
@@ -163,6 +204,7 @@ test("connector uses trust before proof and never treats SAS done or server proo
   const dialog = await readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   assert.match(crypto, /this\.machine\.queryKeysForUsers\(\[user\]\)/);
   assert.match(crypto, /identity\.trustsOurOwnDevice\(\)/);
+  assert.match(crypto, /matrixMasterPublicKeyFromSdk\(identity\.masterKey, this\.userId\)/);
   assert.match(crypto, /device\.isCrossSignedByOwner\(\)/);
   assert.match(crypto, /device\.isCrossSigningTrusted\(\)/);
   assert.doesNotMatch(crypto, /device\.isVerified\(\)/);
