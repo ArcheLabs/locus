@@ -348,7 +348,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
             <p>{t("ui.signInUnavailable")}</p>
             <ActionButton size="small" variant="primary" loading={working} disabled={working} onClick={() => void useDifferentMatrixAccount()}>{t("ui.signInAgain")}</ActionButton>
           </> : initializing ?
-            <div className="matrix-verification-status" role="status">{connectionState === "TRUST_UNKNOWN" ? t("auth.verifyingDevice") : t("auth.loggingIn")}</div> : needsElementConfirmation ? <>
+            <div className="matrix-verification-status" role="status">{t("auth.verifyingDevice")}</div> : needsElementConfirmation ? <>
               {verification?.phase === "done" ? <p className="matrix-verification-status" role="status">{t("ui.verificationDone")}</p>
                 : verification?.phase === "confirming" ? <>
                   <p>{t("ui.verifyDeviceHelp")}</p>
@@ -437,7 +437,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(legacyCapabilities.sso ? "legacy-options" : returnStage); setPassword(""); setError(""); }}>{t("ui.back")}</ActionButton>
         </div>}
       </>}
-      {error && !(showingVerification && connectionState === "TRUST_UNKNOWN")
+      {error && !initializing
         && !(stage === "custom-server" && !customServer.trim())
         && !(stage === "password" && (!passwordUser.trim() || !password))
         && <div className="transaction-error" role="alert">{text(error)}</div>}
