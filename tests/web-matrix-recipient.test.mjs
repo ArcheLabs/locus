@@ -18,7 +18,7 @@ test("browser resolver request sends only the Matrix ID and no credential", asyn
   assert.deepEqual(JSON.parse(request.options.body), { userId });
   assert.equal("authorization" in request.options.headers, false);
   assert.equal(request.options.credentials, "omit");
-  assert.equal(request.options.mode, "same-origin");
+  assert.equal(request.options.mode, "cors");
   assert.equal(request.options.redirect, "error");
 });
 

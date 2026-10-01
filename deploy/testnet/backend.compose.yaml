@@ -1,0 +1,27 @@
+services:
+  jamscript-backend:
+    image: ghcr.io/archelabs/jamscript-backend@sha256:4fd6baf37c7a4ba539585f9b1a157dad053d0836f75ded49b97fb704179a6e25
+    restart: unless-stopped
+    stop_grace_period: 60s
+    environment:
+      JAMSCRIPT_BACKEND_BIND: 0.0.0.0:8090
+      JAMSCRIPT_BACKEND_DATA: /var/lib/jamscript
+      JAMSCRIPT_BACKEND_CORS_ORIGINS: https://archelabs.github.io
+      JAMSCRIPT_NODE_RPC: http://node:9944
+      JAMSCRIPT_FORMAL_RPC: http://formal-rpc:8080
+    ports:
+      - "127.0.0.1:8090:8090"
+    volumes:
+      - /var/lib/locus/backend:/var/lib/jamscript
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+    networks:
+      - minijam-testnet-chain
+
+networks:
+  minijam-testnet-chain:
+    external: true
+    name: minijam-testnet-chain

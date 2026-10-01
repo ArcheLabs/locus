@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
+import { realpathSync } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 import { formatLocusId, matrixOwnership } from "../../sdk/src/ownership.ts";
 
 export const TUWUNEL_ORIGIN = "http://127.0.0.1:8008";
@@ -229,13 +231,14 @@ function pinMasterKey(userId, masterKey, state, statePath, queueRef) {
   return queued.result;
 }
 
-function json(response, status, body) {
+function json(response, status, body, headers = {}) {
   const encoded = JSON.stringify(body);
   response.writeHead(status, {
     "cache-control": "no-store",
     "content-type": "application/json; charset=utf-8",
     "content-length": Buffer.byteLength(encoded),
     "x-content-type-options": "nosniff",
+    ...headers,
   });
   response.end(encoded);
 }
@@ -274,32 +277,86 @@ async function loadAsToken(path) {
   }
 }
 
+function parseAllowedOrigins(value) {
+  if (typeof value !== "string") throw resolverError("MATRIX_RESOLVER_CONFIGURATION_ERROR");
+  const origins = new Set();
+  for (const candidate of value.split(",").map((item) => item.trim()).filter(Boolean)) {
+    let parsed;
+    try {
+      parsed = new URL(candidate);
+    } catch (error) {
+      throw resolverError("MATRIX_RESOLVER_CONFIGURATION_ERROR", error);
+    }
+    if (parsed.protocol !== "https:"
+        || parsed.origin !== candidate
+        || parsed.username !== ""
+        || parsed.password !== ""
+        || parsed.pathname !== "/"
+        || parsed.search !== ""
+        || parsed.hash !== "") {
+      throw resolverError("MATRIX_RESOLVER_CONFIGURATION_ERROR");
+    }
+    origins.add(candidate);
+  }
+  return origins;
+}
+
 export async function createResolverServer({
   port = Number(process.env.PORT || 8787),
   host = "127.0.0.1",
   homeserverUrl = process.env.MATRIX_HOMESERVER_URL || TUWUNEL_ORIGIN,
   asTokenFile = process.env.MATRIX_HOMESERVER_AS_TOKEN_FILE,
   statePath = process.env.MATRIX_RESOLVER_STATE || "/var/lib/locus-matrix-resolver/state.json",
+  allowedOrigins = process.env.MATRIX_RESOLVER_ALLOWED_ORIGINS ?? "",
   fetchImpl = fetch,
 } = {}) {
   validateConfiguredHomeserver(homeserverUrl);
   if (host !== "127.0.0.1") throw resolverError("MATRIX_RESOLVER_CONFIGURATION_ERROR");
   const asToken = await loadAsToken(asTokenFile);
   const state = await readState(statePath);
+  const allowedOriginSet = parseAllowedOrigins(allowedOrigins);
   const queueRef = { current: Promise.resolve() };
 
   const server = createServer(async (request, response) => {
-    if (request.method === "GET" && request.url === "/healthz") return json(response, 200, { status: "ready" });
+    const origin = request.headers.origin;
+    let corsHeaders = {};
+    if (origin !== undefined) {
+      if (!allowedOriginSet.has(origin)) return json(response, 403, { error: "ORIGIN_NOT_ALLOWED" });
+      corsHeaders = {
+        "access-control-allow-origin": origin,
+        "access-control-allow-methods": "POST, OPTIONS",
+        "access-control-allow-headers": "content-type",
+        "access-control-max-age": "600",
+        vary: "Origin",
+      };
+    }
+    if (request.method === "OPTIONS" && request.url === "/v1/resolve") {
+      const requestedMethod = request.headers["access-control-request-method"];
+      const requestedHeaders = (request.headers["access-control-request-headers"] ?? "")
+        .split(",")
+        .map((header) => header.trim().toLowerCase())
+        .filter(Boolean);
+      if (!origin || requestedMethod !== "POST" || requestedHeaders.some((header) => header !== "content-type")) {
+        return json(response, 403, { error: "INVALID_PREFLIGHT" }, corsHeaders);
+      }
+      response.writeHead(204, {
+        "cache-control": "no-store",
+        ...corsHeaders,
+        "content-length": "0",
+      });
+      return response.end();
+    }
+    if (request.method === "GET" && request.url === "/healthz") return json(response, 200, { status: "ready" }, corsHeaders);
     if (request.method === "GET" && request.url === "/readyz") {
       try {
         const upstream = await fetchImpl(VERSIONS_URL, { method: "GET", signal: timeoutSignal(3_000), redirect: "error" });
         if (!upstream.ok || upstream.redirected) throw resolverError("MATRIX_HOMESERVER_UNAVAILABLE");
-        return json(response, 200, { status: "ready" });
+        return json(response, 200, { status: "ready" }, corsHeaders);
       } catch {
-        return json(response, 503, { error: "MATRIX_HOMESERVER_UNAVAILABLE" });
+        return json(response, 503, { error: "MATRIX_HOMESERVER_UNAVAILABLE" }, corsHeaders);
       }
     }
-    if (request.method !== "POST" || request.url !== "/v1/resolve") return json(response, 404, { error: "NOT_FOUND" });
+    if (request.method !== "POST" || request.url !== "/v1/resolve") return json(response, 404, { error: "NOT_FOUND" }, corsHeaders);
 
     try {
       const body = await readRequestJson(request);
@@ -311,11 +368,11 @@ export async function createResolverServer({
       if (!isValidMatrixUserId(userId)) throw resolverError("INVALID_MATRIX_USER_ID");
       const resolved = await resolveMasterOwnership(userId, { asToken, fetchImpl });
       await pinMasterKey(userId, resolved.masterKey, state, statePath, queueRef);
-      return json(response, 200, { userId, ownership: resolved.ownership });
+      return json(response, 200, { userId, ownership: resolved.ownership }, corsHeaders);
     } catch (error) {
       const code = error instanceof ResolverError ? error.code : "MATRIX_RESOLVER_CONFIGURATION_ERROR";
       const status = ERROR_STATUS[code] ?? 503;
-      return json(response, status, { error: code });
+      return json(response, status, { error: code }, corsHeaders);
     }
   });
   await new Promise((resolve, reject) => {
@@ -325,7 +382,13 @@ export async function createResolverServer({
   return server;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Node resolves a symlinked entry point to its real path for import.meta.url.
+// Resolve argv[1] the same way so this starts when launched through /opt/locus/current.
+const invokedPath = process.argv[1];
+const isMainModule = invokedPath !== undefined
+  && import.meta.url === pathToFileURL(realpathSync(invokedPath)).href;
+
+if (isMainModule) {
   createResolverServer().then((server) => {
     const address = server.address();
     console.log(`Matrix resolver listening on http://127.0.0.1:${typeof address === "object" ? address.port : address}`);

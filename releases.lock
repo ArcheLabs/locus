@@ -10,7 +10,15 @@ digest = "sha256:4fd6baf37c7a4ba539585f9b1a157dad053d0836f75ded49b97fb704179a6e2
 package = "@jamscript/client"
 version = "0.1.0-rc.4"
 
+[locus]
+service_artifact_commit = "359f4605f6a8ff2dc96fbbbd9be608e8babce51c"
+
 [minijam]
-version = "stage1-v0.2.0"
-image = "ghcr.io/archelabs/minijam:stage1-v0.2.0"
-digest = "sha256:9e08ccf5a0ce373860082ef79453c8f3d86c61d95af671bb0cfce19799ef3b00"
+version = "stage1-v0.2.1"
+release_commit = "1000bd7504a61010b5e83b1cae5a651b9373ae08"
+release_manifest_sha256 = "3fbdfd5426363caf374711d52c807abfad90a65475bf86f467c50adc198578e5"
+testnet_spec_sha256 = "78c064fa605b645f19b7c9ee332321d8279219c9d43fa7a2a6ce47afe077eb7f"
+testnet_raw_spec_sha256 = "8f05ce3cf44090d0c602180521e4ca9de8971a19cd5788be0b1e2f222c1b225c"
+node_image = "ghcr.io/archelabs/minijam-node@sha256:ba765011d45f6f0307328e55f3d7311ae15570baa286ef13897ed8d59d18bfa9"
+worker_image = "ghcr.io/archelabs/minijam-worker@sha256:714bf7456ad797d8436568cfbe0375f8afbead892c7bb407fd60bb3f6ed8ac2f"
+formal_rpc_image = "ghcr.io/archelabs/minijam-formal-rpc@sha256:6314129f900154ec2f001e73b2f09c1e4ad747bc12f972438c372f55e2210904"
