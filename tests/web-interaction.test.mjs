@@ -24,6 +24,7 @@ import {
 
 const matrixConnectorSource = readFileSync(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
 const matrixDialogSource = readFileSync(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+const i18nSource = readFileSync(new URL("../web/src/i18n/I18nProvider.tsx", import.meta.url), "utf8");
 const accountMenuSource = readFileSync(new URL("../web/src/components/AccountMenu.tsx", import.meta.url), "utf8");
 const appSource = readFileSync(new URL("../web/src/app.tsx", import.meta.url), "utf8");
 const polkadotSwitchDialogSource = readFileSync(new URL("../web/src/session/PolkadotAccountSwitchDialog.tsx", import.meta.url), "utf8");
@@ -68,10 +69,13 @@ test("mock Wallet Standard Solana signer returns ED25519 Ownership", async () =>
 
 test("Matrix controller authorization restoration checks the saved transaction before permitting a replacement", () => {
   const restorePending = matrixConnectorSource.indexOf("const pendingRecord = pendingMatrixControllerAuthorizationFor(");
-  const freshSubmission = matrixConnectorSource.indexOf("const submitted = await scoped.authorizeMatrixController(proof);");
+  const intentWrite = matrixConnectorSource.indexOf("saveMatrixAuthorizationIntent({", restorePending);
+  const freshSubmission = matrixConnectorSource.indexOf("submitted = await scoped.authorizeMatrixController(proof);", intentWrite);
   assert.ok(restorePending >= 0 && freshSubmission > restorePending);
+  assert.ok(intentWrite > restorePending && freshSubmission > intentWrite);
   assert.match(matrixConnectorSource, /if \(pendingRecord\) \{[\s\S]*?await settlePending\(pendingRecord\)/);
   assert.match(matrixConnectorSource, /if \(cause instanceof MatrixControllerAuthorizationWaitTimeout\) return false;/);
+  assert.match(matrixConnectorSource, /saved\.intents\.some\([\s\S]*?CONTROLLER_RECOVERY_AMBIGUOUS/);
   assert.match(matrixConnectorSource, /validUntil: submittedWithValidity\.validUntil \?\? submittedSlot \+ 64/);
   assert.doesNotMatch(matrixConnectorSource, /matrixBootstrapUsed|hasMatrixBootstrapCompleted|bootstrapMatrixController/);
   assert.doesNotMatch(matrixDialogSource, /Existing device approval required|Authorize Matrix device|Copy controller ID|Ask that device to authorize/);
@@ -79,33 +83,36 @@ test("Matrix controller authorization restoration checks the saved transaction b
   assert.match(matrixConnectorSource, /getControllerStatus\(subject, controllerOwnership\)/);
   assert.match(matrixConnectorSource, /status === "revoked"[\s\S]*?CONTROLLER_REVOKED/);
   assert.match(matrixConnectorSource, /status === "active"[\s\S]*?removePendingMatrixControllerAuthorization[\s\S]*?return true/);
-  assert.match(matrixDialogSource, /重试/);
+  assert.match(matrixDialogSource, /t\("ui\.checkAgain"\)/);
+  assert.match(i18nSource, /checkAgain: "重试"/);
   assert.doesNotMatch(matrixDialogSource, /Check authorization status|do not repeat Matrix verification/);
 });
 
-test("Matrix restore UI follows current controller authorization states", () => {
-  const obsoleteStatePrefix = new RegExp(["CONTROLLER", "BOOTSTRAP_"].join("_"));
-  for (const source of [appSource, matrixConnectorSource, matrixDialogSource]) {
-    assert.doesNotMatch(source, obsoleteStatePrefix);
+test("Matrix identity finishes independently and account authorization runs under SessionProvider", () => {
+  const sessionTypes = readFileSync(new URL("../web/src/session/types.ts", import.meta.url), "utf8");
+  const provider = readFileSync(new URL("../web/src/session/SessionProvider.tsx", import.meta.url), "utf8");
+  const accessGate = readFileSync(new URL("../web/src/session/actionAuthorization.ts", import.meta.url), "utf8");
+  const start = matrixConnectorSource.indexOf("export type MatrixConnectionState =");
+  const end = matrixConnectorSource.indexOf("export type MatrixConnectionOptions", start);
+  const identityStates = matrixConnectorSource.slice(start, end);
+  assert.doesNotMatch(identityStates, /CONTROLLER_AUTHORIZATION|\| "READY"/);
+  assert.match(sessionTypes, /export type AccountAuthorizationState =/);
+  assert.match(sessionTypes, /access\?: SessionAccessController/);
+  assert.match(provider, /next\.access\?\.adopt\(\)/);
+  assert.match(appSource, /connected\.state === "CONNECTED"\) setSession\(connected\.session\)/);
+  assert.match(matrixDialogSource, /case "AUTHENTICATED":[\s\S]*?case "DEVICE_KEYS_READY":[\s\S]*?case "TRUST_CHECKING": return "Signing in…"/);
+  assert.match(i18nSource, /loggingIn: "正在登录…"/);
+  assert.match(matrixDialogSource, /pendingConnection\.state === "CONNECTED"[\s\S]*?onConnected\(connected\.session\)/);
+  assert.match(appSource, /matrix-account-authorization:/);
+  assert.match(appSource, /onDismiss=\{dismissGlobalNotice\}/);
+  assert.match(accessGate, /context\.access\.scopeKey === context\.authorizationScopeKey/);
+  for (const source of [appSource, readFileSync(new URL("../web/src/locus/swap/SwapPage.tsx", import.meta.url), "utf8"), readFileSync(new URL("../web/src/locus/liquidity/LiquidityPage.tsx", import.meta.url), "utf8"), readFileSync(new URL("../web/src/locus/dialogs.tsx", import.meta.url), "utf8")]) {
+    assert.match(source, /canPerformAuthorizedAction/);
   }
-  for (const state of [
-    "CONTROLLER_AUTHORIZING",
-    "CONTROLLER_AUTHORIZATION_QUEUED",
-    "CONTROLLER_AUTHORIZATION_FINALIZING",
-    "CONTROLLER_AUTHORIZATION_UNKNOWN",
-    "CONTROLLER_AUTHORIZATION_FAILED",
-    "CONTROLLER_REVOKED",
-    "TRUST_CHECKING",
-    "TRUST_UNKNOWN",
-    "RELOGIN_REQUIRED",
-  ]) {
-    assert.ok(appSource.includes(state), `app.tsx must handle ${state}`);
-  }
-  assert.match(appSource, /这台设备已无法继续连接，请重新登录/);
 });
 
 test("Account Center offers wallet switching only for EVM and Polkadot and preserves local disconnect semantics", () => {
-  assert.match(accountMenuSource, /session\.kind === "evm" \|\| session\.kind === "polkadot"[\s\S]*?Switch account/);
+  assert.match(accountMenuSource, /session\.kind === "evm" \|\| session\.kind === "polkadot"[\s\S]*?t\("accounts\.switchAccount"\)/);
   assert.match(accountMenuSource, /onSwitchAccount: \(\) => void/);
   assert.match(appSource, /openAppKit\(\{ view: "Account", namespace: "eip155" \}\)/);
   assert.match(appSource, /setPolkadotSwitchOpen\(true\)/);
@@ -125,7 +132,7 @@ test("Account Center offers wallet switching only for EVM and Polkadot and prese
   assert.match(disconnectHandler, /markSessionDisconnected/);
   assert.match(disconnectHandler, /evmBridge\.explicitDisconnect\(\)/);
   assert.doesNotMatch(disconnectHandler, /disconnectAppKit/);
-  assert.match(accountMenuSource, /session\.kind === "matrix" \? "Your Matrix device and crypto store will be kept\."/);
+  assert.match(accountMenuSource, /session\.kind === "matrix" \? t\("accounts\.keepMatrix"\)/);
 });
 
 test("network configuration stays under the Vite base path for subpath deployments", () => {
@@ -138,12 +145,16 @@ test("network configuration stays under the Vite base path for subpath deploymen
 
 test("Matrix verification is trust-driven, exposes accepted SAS requests, and has no device-type branch", async () => {
   const responsive = readFileSync(new URL("../web/src/styles/responsive.css", import.meta.url), "utf8");
-  assert.match(matrixDialogSource, /请在已登录的 Matrix 设备中确认此次登录。/);
-  assert.match(matrixDialogSource, /请在已登录的 Matrix 设备中完成此设备的验证。/);
-  assert.match(matrixDialogSource, /已在 Matrix 设备直接验证/);
-  assert.match(matrixDialogSource, /接受/);
-  assert.match(matrixDialogSource, /拒绝/);
-  assert.match(matrixDialogSource, /验证操作已完成，正在确认设备状态。/);
+  assert.match(matrixDialogSource, /t\("ui\.confirmLoginHelp"\)/);
+  assert.match(matrixDialogSource, /t\("ui\.verifyDeviceHelp"\)/);
+  assert.match(matrixDialogSource, /t\("ui\.directVerifyCheck"\)/);
+  assert.match(matrixDialogSource, /t\("ui\.accept"\)/);
+  assert.match(matrixDialogSource, /t\("ui\.reject"\)/);
+  assert.match(matrixDialogSource, /t\("ui\.verificationDone"\)/);
+  assert.match(i18nSource, /confirmLoginHelp: "请在已登录的 Matrix 设备中确认此次登录。"/);
+  assert.match(i18nSource, /verifyDeviceHelp: "请在已登录的 Matrix 设备中完成此设备的验证。"/);
+  assert.match(i18nSource, /directVerifyCheck: "已在 Matrix 设备直接验证"/);
+  assert.match(i18nSource, /verificationDone: "验证操作已完成，正在确认设备状态。"/);
   assert.doesNotMatch(matrixDialogSource, /我已完成验证|改用此设备确认|完成后返回此处|找不到设备|二维码验证，Locus 目前只支持 SAS/);
   assert.doesNotMatch(matrixDialogSource, /Short authentication string|Compare these emoji|device ID|Retry request delivery|Cancel verification|otherDeviceId/);
   assert.match(matrixConnectorSource, /createMatrixDeviceTrustMonitor\(readAndApplyTrust/);

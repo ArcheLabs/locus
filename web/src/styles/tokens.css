@@ -1,5 +1,7 @@
 :root,
 html[data-theme="light"] {
+  --content-width-narrow: 760px;
+  --content-width-wide: 1120px;
   color-scheme: light;
   --bg: #f8f9fc;
   --surface: #ffffff;

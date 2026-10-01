@@ -79,7 +79,7 @@ test("Liquidity is visible to all users and positions/pools come from Service qu
   assert.match(pageSource, /role="tablist"/);
   assert.match(pageSource, /aria-selected=\{tab === "positions"\}/);
   assert.match(pageSource, /onNewPosition\(asset0\.assetIdHex, asset1\.assetIdHex\)/);
-  assert.match(pageSource, /onClick=\{\(\) => \{ if \(asset0 && asset1\) onNewPosition\(asset0\.assetIdHex, asset1\.assetIdHex\); \}\}>Add<\/ActionButton>/);
+  assert.match(pageSource, /onClick=\{\(\) => \{ if \(asset0 && asset1\) onNewPosition\(asset0\.assetIdHex, asset1\.assetIdHex\); \}\}>\{t\("ui\.add"\)\}<\/ActionButton>/);
   assert.match(pageSource, /role="alert"/);
   assert.doesNotMatch(appSource + pageSource, /isLiquidityManager|managerKey|POOL_MANAGER_REQUIRED|Connect Treasury/);
 });
@@ -100,5 +100,5 @@ test("Swap continues to use only on-chain pool state and never fabricates a quot
   assert.equal(directPoolForPair([pool], toHex(asset0), toHex(asset0)), null);
   assert.deepEqual(poolListQueryKey("local", 153994977), ["locus", "pools", "local", 153994977]);
   assert.match(swapSource, /directPoolForPair\(pools, assetIn\.assetIdHex, assetOut\.assetIdHex\)/);
-  assert.match(swapSource, /This pair is not available for swapping yet/);
+  assert.match(swapSource, /t\("swap\.unsupportedPair"\)/);
 });

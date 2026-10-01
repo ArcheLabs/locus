@@ -1,10 +1,11 @@
 import * as Dialog from "@radix-ui/react-dialog";
 import type { PropsWithChildren, ReactNode } from "react";
 import { X } from "lucide-react";
+import { useI18n } from "../i18n/I18nProvider.js";
 
 type ModalProps = PropsWithChildren<{
   open: boolean;
-  title: string;
+  title: ReactNode;
   onClose: () => void;
   footer?: ReactNode;
   hideTitle?: boolean;
@@ -14,6 +15,7 @@ type ModalProps = PropsWithChildren<{
 }>;
 
 export function Modal({ open, title, onClose, footer, hideTitle = false, preventOutsideDismiss = false, preventEscapeDismiss = false, closeLabel = "Close", children }: ModalProps) {
+  const { text } = useI18n();
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
       <Dialog.Portal>
@@ -25,9 +27,9 @@ export function Modal({ open, title, onClose, footer, hideTitle = false, prevent
           onEscapeKeyDown={(event) => { if (preventEscapeDismiss) event.preventDefault(); }}
         >
           <header className={`modal-header${hideTitle ? " modal-header--hidden-title" : ""}`}>
-            <Dialog.Title className={hideTitle ? "sr-only" : "modal-title"}>{title}</Dialog.Title>
+            <Dialog.Title className={hideTitle ? "sr-only" : "modal-title"}>{typeof title === "string" ? text(title) : title}</Dialog.Title>
             <Dialog.Close asChild>
-              <button type="button" className="icon-button" aria-label={closeLabel}><X size={20} aria-hidden="true" /></button>
+              <button type="button" className="icon-button" aria-label={text(closeLabel)}><X size={20} aria-hidden="true" /></button>
             </Dialog.Close>
           </header>
           <div className="modal-body">{children}</div>

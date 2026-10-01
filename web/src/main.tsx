@@ -9,19 +9,22 @@ import { SessionProvider } from "./session/SessionProvider.js";
 import { WalletProvider } from "./session/WalletProvider.js";
 import { ThemeProvider } from "./theme/ThemeProvider.js";
 import { AppErrorBoundary } from "./components/AppErrorBoundary.js";
+import { I18nProvider } from "./i18n/I18nProvider.js";
 
 createRoot(document.getElementById("root")!).render(
-  <AppErrorBoundary>
-    <StrictMode>
-      <ThemeProvider>
-        <WalletProvider>
-          <NetworkProvider>
-            <SessionProvider>
-              <App />
-            </SessionProvider>
-          </NetworkProvider>
-        </WalletProvider>
-      </ThemeProvider>
-    </StrictMode>
-  </AppErrorBoundary>,
+  <StrictMode>
+    <ThemeProvider>
+      <I18nProvider>
+        <AppErrorBoundary>
+          <WalletProvider>
+            <NetworkProvider>
+              <SessionProvider>
+                <App />
+              </SessionProvider>
+            </NetworkProvider>
+          </WalletProvider>
+        </AppErrorBoundary>
+      </I18nProvider>
+    </ThemeProvider>
+  </StrictMode>,
 );

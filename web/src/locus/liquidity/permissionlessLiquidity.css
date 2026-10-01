@@ -1,7 +1,7 @@
-.liquidity-page { display: grid; gap: 16px; max-width: 960px; }
-.liquidity-page--new { max-width: 800px; }
-.page.liquidity-page { max-width: 960px; }
-.page.liquidity-page--new { max-width: 800px; }
+.liquidity-page { display: grid; gap: 16px; max-width: var(--content-width-wide); }
+.liquidity-page--new { max-width: var(--content-width-wide); }
+.page.liquidity-page { max-width: var(--content-width-wide); }
+.page.liquidity-page--new { max-width: var(--content-width-wide); }
 .liquidity-page-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .liquidity-page-heading h1, .liquidity-new-heading h1 { margin: 0 0 8px; font-size: 42px; line-height: 1.05; letter-spacing: -1.5px; }
 .liquidity-page-heading p, .liquidity-new-heading > p { margin: 0; color: var(--text-secondary); font-size: 14px; }

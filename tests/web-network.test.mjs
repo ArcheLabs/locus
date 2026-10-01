@@ -66,7 +66,7 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
   const navigationLinks = await fs.readFile(new URL("../web/src/navigation/links.ts", import.meta.url), "utf8");
   assert.match(app, /<MobileNavigation route=\{page\}/);
   assert.doesNotMatch(app + responsive, /mobile-bottom-nav/);
-  assert.match(mobileNavigation, /aria-label="Open navigation"/);
+  assert.match(mobileNavigation, /aria-label=\{t\("common\.navigate"\)\}/);
   assert.match(mobileNavigation, /aria-expanded=\{open\}/);
   assert.match(mobileNavigation, /<Dialog\.Content[^>]+mobile-navigation-dialog/);
   assert.match(mobileNavigation, /aria-modal="true"/);
@@ -74,7 +74,7 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
   assert.match(mobileNavigation, /route: "swap", label: "Swap"/);
   assert.match(mobileNavigation, /route: "liquidity", label: "Liquidity"/);
   assert.match(mobileNavigation, /route: "activity", label: "Activity"/);
-  assert.doesNotMatch(mobileNavigation, /route: "send"/);
+  assert.match(mobileNavigation, /route: "send", label: "Send"/);
   assert.match(mobileNavigation, /target="_blank" rel="noopener noreferrer"/);
   assert.match(navigationLinks, /https:\/\/x\.com\/archelabs_org/);
   assert.match(navigationLinks, /https:\/\/locus\.archelabs\.xyz/);
@@ -700,9 +700,11 @@ test("legacy password and unsupported homeservers follow advertised login flows 
     assert.deepEqual(await discoverMatrixAuthCapabilities("https://no-login.example"), { mode: "legacy", homeserver: "https://no-login.example", sso: false, password: false });
   } finally { globalThis.fetch = originalFetch; }
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  const i18n = await fs.readFile(new URL("../web/src/i18n/I18nProvider.tsx", import.meta.url), "utf8");
   assert.match(dialog, /stage === "password" && legacyCapabilities\?\.password/);
   assert.match(dialog, /legacyCapabilities\.sso &&/);
-  assert.match(dialog, /does not advertise a supported sign-in method/);
+  assert.match(dialog, /t\("ui\.unsupportedMatrixServer"\)/);
+  assert.match(i18n, /unsupportedMatrixServer: "This Matrix server does not advertise a supported sign-in method\./);
 });
 
 test("password authentication uses the selected server and trusts the login response user ID", async () => {
@@ -763,11 +765,12 @@ test("OAuth runtime errors stay actionable and do not unlock legacy fallbacks", 
   } finally { globalThis.window = originalWindow; globalThis.fetch = originalFetch; }
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(dialog, /setShowLegacy/);
-  assert.match(dialog, /setError\(cause instanceof Error \? cause\.message/);
+  assert.match(dialog, /setError\(t\("ui\.matrixSignInStartFailed"\)\)/);
 });
 
 test("Matrix login separates server selection from authenticated identity and preserves verification", async () => {
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  const i18n = await fs.readFile(new URL("../web/src/i18n/I18nProvider.tsx", import.meta.url), "utf8");
   const oauth = await fs.readFile(new URL("../web/src/matrix/MatrixOAuth.ts", import.meta.url), "utf8");
   const connector = await fs.readFile(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
   const passwordLogin = await fs.readFile(new URL("../web/src/matrix/MatrixPasswordLogin.ts", import.meta.url), "utf8");
@@ -775,9 +778,12 @@ test("Matrix login separates server selection from authenticated identity and pr
   const styles = await fs.readFile(new URL("../web/src/styles.css", import.meta.url), "utf8");
   const provider = await fs.readFile(new URL("../web/src/matrix/MatrixProvider.ts", import.meta.url), "utf8");
   const msc4108 = await fs.readFile(new URL("../docs/matrix-msc4108-feasibility.md", import.meta.url), "utf8");
-  assert.match(dialog, /Continue with Matrix\.org/);
-  assert.match(dialog, /Use another Matrix server/);
-  assert.match(dialog, /Matrix server<input/);
+  assert.match(dialog, /t\("ui\.continueMatrix"\)/);
+  assert.match(dialog, /t\("ui\.useAnotherServer"\)/);
+  assert.match(dialog, /t\("ui\.matrixServer"\)/);
+  assert.match(i18n, /continueMatrix: "Continue with Matrix\.org"/);
+  assert.match(i18n, /useAnotherServer: "Use another Matrix server"/);
+  assert.match(i18n, /matrixServer: "Matrix server"/);
   assert.doesNotMatch(dialog, /Enter a Matrix ID first/);
   assert.doesNotMatch(dialog, /const \[userId, setUserId\]/);
   assert.match(dialog, /beginMatrixOAuth\(discovered, capabilities\)/);
@@ -877,7 +883,7 @@ test("canceling Matrix verification clears the provisional login and closes the 
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   const connectDialog = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
   const app = await fs.readFile(new URL("../web/src/app.tsx", import.meta.url), "utf8");
-  assert.match(dialog, /onClick=\{cancel\}>取消登录/);
+  assert.match(dialog, /onClick=\{cancel\}>\{t\("ui\.cancelSignIn"\)\}/);
   assert.match(dialog, /onCancel\(pendingConnection\)/);
   assert.match(dialog, /authAttempt\.current \+= 1/);
   assert.match(dialog, /dialogGeneration\.current \+= 1/);

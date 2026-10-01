@@ -15,3 +15,9 @@ export function normalizeActionError(error: unknown, fallback = "The action coul
   if (normalized?.code !== undefined && LOCUS_ERROR_MESSAGES[normalized.code]) return LOCUS_ERROR_MESSAGES[normalized.code]!;
   return error instanceof Error ? error.message : fallback;
 }
+
+export function knownActionErrorMessage(error: unknown): string | null {
+  if (isWalletCancellation(error)) return "Request cancelled.";
+  const normalized = normalizeLocusError(error);
+  return normalized?.code === undefined ? null : LOCUS_ERROR_MESSAGES[normalized.code] ?? null;
+}

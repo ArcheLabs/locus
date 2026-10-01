@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useI18n } from "../i18n/I18nProvider.js";
 
 /** Shared asset selector + amount control used by Send, Swap, and Liquidity. */
 export function AssetAmountInput({
@@ -21,7 +22,7 @@ export function AssetAmountInput({
 }: {
   selector: ReactNode;
   label: string;
-  balance?: string;
+  balance?: ReactNode;
   id: string;
   amount: string;
   onAmountChange?: (value: string) => void;
@@ -36,10 +37,12 @@ export function AssetAmountInput({
   ariaDescribedBy?: string;
   className?: string;
 }) {
+  const { text } = useI18n();
+  const inputPlaceholder = /^\d+(?:\.\d+)?$/.test(placeholder) ? placeholder : text(placeholder);
   return <div className={`asset-amount-field ${className}`.trim()}>
     <div className="asset-amount-heading">
-      <label htmlFor={readOnly ? undefined : id}>{label}</label>
-      {balance && <span>{balance}</span>}
+      <label htmlFor={readOnly ? undefined : id}>{text(label)}</label>
+      {balance && <span>{typeof balance === "string" ? text(balance) : balance}</span>}
     </div>
     <div className={`asset-amount-control${readOnly ? " asset-amount-control--output" : ""}`}>
       <div className="asset-amount-selector">{selector}</div>
@@ -48,16 +51,16 @@ export function AssetAmountInput({
         className={readOnly ? "asset-amount-output" : undefined}
         value={amount}
         inputMode="decimal"
-        placeholder={placeholder}
+        placeholder={inputPlaceholder}
         disabled={disabled}
         readOnly={readOnly}
         onBlur={onAmountBlur}
         onChange={(event) => onAmountChange?.(event.target.value)}
-        aria-label={ariaLabel}
+        aria-label={text(ariaLabel)}
         aria-invalid={ariaInvalid}
         aria-describedby={ariaDescribedBy}
       />
-      {onMax && <button type="button" className="asset-amount-max" disabled={disabled || maxDisabled} onClick={onMax}>Max</button>}
+      {onMax && <button type="button" className="asset-amount-max" disabled={disabled || maxDisabled} onClick={onMax}>{text("Max")}</button>}
     </div>
   </div>;
 }

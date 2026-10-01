@@ -380,6 +380,10 @@ textarea {
 .mobile-navigation-footer a:hover { color: var(--text); background: var(--surface-hover); }
 .mobile-navigation-footer a > span:first-child { font-size: 18px; line-height: 1; }
 .mobile-navigation-footer small { font-size: 12px; }
+.mobile-navigation-settings { display: grid; align-content: start; gap: 14px; padding: 8px 0 calc(20px + env(safe-area-inset-bottom)); }
+.mobile-navigation-back { display: inline-flex; width: fit-content; min-height: 44px; align-items: center; gap: 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; }
+.mobile-navigation-settings .settings-field select { min-height: 52px; font-size: 16px; }
+.mobile-navigation-footer a { min-width: 64px; }
 .mobile-navigation-mini-mark { font-weight: 750; }
 @keyframes mobile-navigation-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mobile-navigation-slide-in { from { opacity: .8; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }

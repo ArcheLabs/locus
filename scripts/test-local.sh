@@ -23,6 +23,8 @@ echo "WEB_MATRIX_VERIFICATION_TESTS=PASS"
 echo "WEB_LIQUIDITY_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-ux-closure.test.mjs
 echo "WEB_UX_CLOSURE_TESTS=PASS"
+"${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-session-access.test.mjs
+echo "WEB_SESSION_ACCESS_TESTS=PASS"
 "${NODE_BIN}" --test "${ROOT_DIR}"/tests/web-matrix-recipient.test.mjs
 echo "WEB_MATRIX_RECIPIENT_TESTS=PASS"
 "${NODE_BIN}" --test "${ROOT_DIR}"/apps/matrix-resolver/test.mjs

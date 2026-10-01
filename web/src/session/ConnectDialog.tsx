@@ -9,6 +9,7 @@ import { readStoredMatrixSession, restoreMatrixSession, type MatrixConnected } f
 import { Wallet, X } from "lucide-react";
 import { ActionButton } from "../components/ActionButton.js";
 import { SelectField } from "../components/SelectField.js";
+import { useI18n } from "../i18n/I18nProvider.js";
 
 type Props = {
   open: boolean;
@@ -43,6 +44,7 @@ function available(kind: SessionKind): boolean {
 }
 
 export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected, onConnected, onConnectionPendingChange, onEvmConnectRequested, onEvmConnectCancelled, evmError = "", evmAccountAvailable = false, locus, initialMatrixConnection = null }: Props) {
+  const { t, text } = useI18n();
   const [connecting, setConnecting] = useState<SessionKind | null>(null);
   const [error, setError] = useState("");
   const [accountOptions, setAccountOptions] = useState<BrowserAccountOption[]>([]);
@@ -117,7 +119,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       onConnectionPendingChange?.("matrix");
       void restoreMatrixSession(stored, { locus }).then((connected) => {
         setSavedMatrixConnection(connected);
-        if (connected.state === "READY") {
+        if (connected.state === "CONNECTED") {
           onConnected(connected.session);
           onClose();
           return;
@@ -125,8 +127,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
         onClose();
         setMatrixOpen(true);
       }).catch((cause: unknown) => {
-        const detail = cause instanceof Error ? cause.message : "The saved device could not be restored.";
-        setError(`Saved Matrix device could not be restored. ${detail}`);
+        setError(t("ui.savedMatrixRestoreFailed"));
         setContinueWithNewMatrixDevice(true);
       }).finally(() => {
         setConnecting(null);
@@ -163,7 +164,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
           setWaitingForEvm(false);
           onEvmConnectCancelled();
           onConnectionPendingChange?.(null);
-          setError("The EVM wallet did not finish connecting. Return to Locus and try again.");
+          setError(t("ui.walletTimeout"));
           if (appKitModalOpen.current) {
             appKitModalOpen.current = false;
             void closeAppKitRef.current();
@@ -183,7 +184,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
           appKitModalOpen.current = false;
           void closeAppKit();
         }
-        setError(cause instanceof Error ? cause.message : "Unable to open the EVM wallet selector.");
+        setError(t("ui.walletSelectorFailed"));
       }
       return;
     }
@@ -202,7 +203,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       setAccountOptions(accounts);
       setSelectedAccount(accounts[0]?.id ?? "");
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Wallet discovery failed.");
+      setError(t("ui.walletDiscoveryFailed"));
     } finally {
       setConnecting(null);
       onConnectionPendingChange?.(null);
@@ -246,7 +247,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
       onConnectionPendingChange?.(null);
       onClose();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Wallet connection failed.");
+      setError(t("ui.walletConnectFailed"));
     } finally {
       setConnecting(null);
     }
@@ -254,8 +255,8 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
 
   return (
     <>
-    <Modal open={open && !matrixOpen && !initialMatrixConnection} title="Connect" onClose={closeConnectDialog} preventOutsideDismiss={waitingForEvm}>
-      <p className="modal-lead">Choose an Ownership signer. This does not select an execution network.</p>
+    <Modal open={open && !matrixOpen && !initialMatrixConnection} title={t("common.connect")} onClose={closeConnectDialog} preventOutsideDismiss={waitingForEvm}>
+      <p className="modal-lead">{t("ui.chooseOwnership")}</p>
       <div className="connect-options">
         {displayOptions.map((entry) => (
           <button
@@ -268,8 +269,8 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
           >
             <IdentityOption
               kind={entry.kind}
-              title={entry.label}
-              description={waitingForEvm && entry.kind === "evm" ? evmAccountAvailable ? "Wallet approved. Finishing sign-in…" : "Approve in your wallet app, then return here" : connecting === entry.kind ? entry.kind === "solana" ? "Approve in your Solana wallet…" : "Preparing the selected account…" : entry.available ? entry.description : "No compatible wallet detected"}
+              title={text(entry.label)}
+              description={text(waitingForEvm && entry.kind === "evm" ? evmAccountAvailable ? "Wallet approved. Finishing sign-in…" : "Approve in your wallet app, then return here" : connecting === entry.kind ? entry.kind === "solana" ? "Approve in your Solana wallet…" : "Preparing the selected account…" : entry.available ? entry.description : "No compatible wallet detected")}
               variant="comfortable"
               disabled={connecting !== null || waitingForEvm || !entry.available}
               trailing="arrow"
@@ -278,20 +279,20 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
         ))}
       </div>
       {selectedKind && <div className="account-picker">
-        <label htmlFor="wallet-account">Choose account</label>
+        <label htmlFor="wallet-account">{t("ui.chooseAccount")}</label>
         <SelectField
           id="wallet-account"
           value={selectedAccount}
           onValueChange={setSelectedAccount}
-          placeholder="Select account"
-          options={accountOptions.map((account) => ({ value: account.id, label: `${account.label} — ${account.description}` }))}
+          placeholder={t("ui.selectAccount")}
+          options={accountOptions.map((account) => ({ value: account.id, label: `${account.label} — ${text(account.description)}` }))}
         />
-        <ActionButton variant="primary" icon={Wallet} fullWidth disabled={!selectedAccount || connecting !== null} onClick={() => connect(selectedKind, selectedAccount)}>Connect selected account</ActionButton>
+        <ActionButton variant="primary" icon={Wallet} fullWidth disabled={!selectedAccount || connecting !== null} onClick={() => connect(selectedKind, selectedAccount)}>{t("ui.connectSelectedAccount")}</ActionButton>
       </div>}
-      {waitingForEvm && <ActionButton className="cancel-wallet-connect" variant="tertiary" size="small" icon={X} onClick={cancelEvmRequest}>Cancel wallet connection</ActionButton>}
-      {error && <div className="transaction-error">{error}</div>}
-      {continueWithNewMatrixDevice && <ActionButton variant="primary" fullWidth onClick={() => { setSavedMatrixConnection(null); onClose(); setMatrixOpen(true); }}>Continue with a new Matrix device</ActionButton>}
-      <p className="modal-note">Locus keeps assets attached to Ownership. Wallets only authorize actions.</p>
+      {waitingForEvm && <ActionButton className="cancel-wallet-connect" variant="tertiary" size="small" icon={X} onClick={cancelEvmRequest}>{t("ui.cancelWalletConnect")}</ActionButton>}
+      {(error || evmError) && <div className="transaction-error" role="alert">{text(error || evmError)}</div>}
+      {continueWithNewMatrixDevice && <ActionButton variant="primary" fullWidth onClick={() => { setSavedMatrixConnection(null); onClose(); setMatrixOpen(true); }}>{t("ui.newMatrixDevice")}</ActionButton>}
+      <p className="modal-note">{t("ui.connectOwnershipNote")}</p>
     </Modal>
     <MatrixLoginDialog open={matrixOpen} onClose={() => setMatrixOpen(false)} onCancel={onCancelMatrix} onConnected={(session) => { onConnected(session); setMatrixOpen(false); onClose(); }} locus={locus} initialConnection={savedMatrixConnection ?? initialMatrixConnection} />
     </>

@@ -6,7 +6,7 @@ export function classifyMatrixProofFailure(cause: unknown): MatrixProofFailureCl
   if (!(cause instanceof MatrixConnectorError)) return "PENDING";
   if (cause.code === "OWNERSHIP_PROOF_INVALID") return "INVALID";
   if (cause.code === "MATRIX_SESSION_INVALID") return "SESSION_INVALID";
-  if (cause.code === "CONTROLLER_REVOKED" || cause.code === "MATRIX_IDENTITY_CHANGED" || cause.code === "MATRIX_DEVICE_REVOKED") {
+  if (cause.code === "MATRIX_IDENTITY_CHANGED" || cause.code === "MATRIX_DEVICE_REVOKED") {
     return "RELOGIN_REQUIRED";
   }
   return "PENDING";
