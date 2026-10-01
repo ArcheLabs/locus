@@ -38,12 +38,8 @@ jobs:
 
       - name: Select GitHub Pages base path
         env:
-          PAGES_BASE: ${{ vars.PAGES_BASE }}
+          PAGES_BASE: /
         run: |
-          if [ -z "${PAGES_BASE}" ]; then
-            # This repository is served from its configured custom-domain root.
-            PAGES_BASE="/"
-          fi
           case "${PAGES_BASE}" in
             /*/) ;;
             *) echo "PAGES_BASE must start and end with /" >&2; exit 1 ;;
