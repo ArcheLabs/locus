@@ -10,9 +10,11 @@ type ModalProps = PropsWithChildren<{
   footer?: ReactNode;
   hideTitle?: boolean;
   closeLabel?: string;
+  preventOutsideDismiss?: boolean;
+  preventEscapeDismiss?: boolean;
 }>;
 
-export function Modal({ open, title, onClose, footer, hideTitle = false, closeLabel = "Close", children }: ModalProps) {
+export function Modal({ open, title, onClose, footer, hideTitle = false, closeLabel = "Close", preventOutsideDismiss = true, preventEscapeDismiss = true, children }: ModalProps) {
   const { text } = useI18n();
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => { if (!nextOpen) onClose(); }}>
@@ -21,8 +23,8 @@ export function Modal({ open, title, onClose, footer, hideTitle = false, closeLa
         <Dialog.Content
           className={`modal card${hideTitle ? " modal--hidden-title" : ""}`}
           aria-describedby={undefined}
-          onInteractOutside={(event) => event.preventDefault()}
-          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => { if (preventOutsideDismiss) event.preventDefault(); }}
+          onEscapeKeyDown={(event) => { if (preventEscapeDismiss) event.preventDefault(); }}
         >
           <header className={`modal-header${hideTitle ? " modal-header--hidden-title" : ""}`}>
             <Dialog.Title className={hideTitle ? "sr-only" : "modal-title"}>{typeof title === "string" ? text(title) : title}</Dialog.Title>
