@@ -1,0 +1,159 @@
+{
+  "profile_format": 1,
+  "name": "jamscript-m2-locus",
+  "entry": "scriptc_service.transformed.ts",
+  "emission": "c",
+  "optimization": "release",
+  "abi": {
+    "prefix": "jamscript_scriptc_",
+    "init_symbol": "jamscript_scriptc_service_init_scriptc",
+    "sink_register_symbol": "jamscript_scriptc_service_set_panic_sink",
+    "collect_symbol": null,
+    "result_reset_symbol": null,
+    "callback_register_symbol": "jamscript_scriptc_service_set_callback",
+    "localize_runtime": false
+  },
+  "callbacks": [
+    {
+      "name": "jamscript_verify_ed25519",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "u32"
+    }
+  ],
+  "exports": [
+    {
+      "export": "__jamscript_action_authorizeMatrixController_v1",
+      "symbol": "jamscript_scriptc_authorizeMatrixController_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_addController_v1",
+      "symbol": "jamscript_scriptc_addController_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_revokeController_v1",
+      "symbol": "jamscript_scriptc_revokeController_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_createAsset_v1",
+      "symbol": "jamscript_scriptc_createAsset_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_createPool_v1",
+      "symbol": "jamscript_scriptc_createPool_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_addPoolLiquidity_v1",
+      "symbol": "jamscript_scriptc_addPoolLiquidity_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_removePoolLiquidity_v1",
+      "symbol": "jamscript_scriptc_removePoolLiquidity_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_swapExactIn_v1",
+      "symbol": "jamscript_scriptc_swapExactIn_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_transfer_v1",
+      "symbol": "jamscript_scriptc_transfer_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_approve_v1",
+      "symbol": "jamscript_scriptc_approve_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_transferFrom_v1",
+      "symbol": "jamscript_scriptc_transferFrom_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_mint_v1",
+      "symbol": "jamscript_scriptc_mint_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    },
+    {
+      "export": "__jamscript_action_burn_v1",
+      "symbol": "jamscript_scriptc_burn_entry_v1",
+      "params": [
+        "bytes",
+        "bytes",
+        "bytes"
+      ],
+      "returns": "bytes"
+    }
+  ]
+}
