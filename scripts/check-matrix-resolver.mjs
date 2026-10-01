@@ -9,12 +9,14 @@ const [server, client, clientRequest, app, networkConfig, compose, caddy] = awai
   read("../web/src/app.tsx"),
   read("../web/public/locus-networks.json"),
   read("../ops/matrix/docker-compose.example.yml"),
-  read("../deploy/local/Caddyfile"),
+  read("../ops/matrix/Caddyfile.example"),
 ]);
 
 assert.match(server, /TUWUNEL_ORIGIN\s*=\s*"http:\/\/127\.0\.0\.1:8008"/);
 assert.match(server, /MATRIX_HOMESERVER_AS_TOKEN_FILE/);
 assert.match(server, /redirect:\s*"error"/);
+assert.match(server, /parseAllowedOrigins/);
+assert.match(server, /access-control-allow-origin/);
 assert.match(server, /MAX_REQUEST_BYTES\s*=\s*4096/);
 assert.match(server, /MATRIX_QUERY_TIMEOUT_MS\s*=\s*10_000/);
 assert.match(server, /HTTP_TIMEOUT_MS\s*=\s*15_000/);
@@ -29,10 +31,10 @@ assert.doesNotMatch(client, /discoverHomeserver|accessToken/);
 assert.match(clientRequest, /JSON\.stringify\(\{ userId \}\)/);
 assert.match(clientRequest, /redirect:\s*"error"/);
 assert.match(clientRequest, /credentials:\s*"omit"/);
-assert.match(clientRequest, /mode:\s*"same-origin"/);
+assert.match(clientRequest, /mode:\s*"cors"/);
 assert.doesNotMatch(clientRequest, /authorization\s*:/i);
 const networkConfigDocument = JSON.parse(networkConfig);
-assert.equal(networkConfigDocument.networks?.local?.matrixResolverUrl, "/matrix-resolver");
+assert.equal(networkConfigDocument.networks?.local?.matrixResolverUrl, undefined);
 assert.equal(networkConfigDocument.networks?.testnet?.matrixResolverUrl, undefined);
 assert.match(app, /MATRIX_RECIPIENT_DEBOUNCE_MS\s*=\s*400/);
 assert.match(app, /new AbortController\(\)/);
@@ -48,5 +50,5 @@ assert.doesNotMatch(caddy, /\/_matrix\/client/);
 console.log("MATRIX_RESOLVER_STATIC_BOUNDARY=PASS");
 console.log("RECIPIENT_CONTROLLED_HTTP_TARGET=false");
 console.log("CANONICAL_OWNERSHIP_ENCODING=PASS");
-console.log("FRONTEND_MATRIX_RESOLVER_LOCAL_ENABLED=PASS");
+console.log("FRONTEND_MATRIX_RESOLVER_UNCONFIGURED=PASS");
 console.log("TESTNET_MATRIX_RESOLVER_UNCONFIGURED=PASS");
