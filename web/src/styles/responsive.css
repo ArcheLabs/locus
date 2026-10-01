@@ -18,7 +18,6 @@ body {
 }
 
 .app-shell {
-  grid-template-columns: 250px minmax(0, 1fr);
   overflow: hidden;
 }
 
@@ -167,7 +166,7 @@ textarea {
 .page p { overflow-wrap: anywhere; }
 
 @media (min-width: 768px) and (max-width: 1024px) {
-  .app-shell { grid-template-columns: 220px minmax(0, 1fr); }
+  .app-shell { grid-template-columns: 240px minmax(0, 1fr); }
   .sidebar { padding: 24px 14px; }
   .brand { margin-left: 8px; font-size: 30px; }
   .nav-item { padding: 12px; font-size: 15px; }
@@ -207,9 +206,9 @@ textarea {
   .mobile-menu-trigger { display: inline-grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); }
   .mobile-header-row,
   .mobile-header-actions { display: flex; align-items: center; }
-  .mobile-header-row { justify-content: space-between; gap: 10px; }
-  .mobile-header-actions { gap: 8px; }
-  .mobile-header .brand { margin: 0; font-size: 28px; line-height: 1; letter-spacing: -1.5px; }
+  .mobile-header-row { justify-content: flex-start; gap: 10px; }
+  .mobile-header-actions { gap: 8px; margin-left: auto; }
+  .mobile-header .brand { flex: 0 0 auto; margin: 0; font-size: 28px; line-height: 1; }
   .mobile-header .profile-pill { min-height: 44px; max-width: min(48vw, 200px); padding: 6px 9px; gap: 7px; }
   .mobile-header .profile-pill > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-header-actions .network-switcher { margin: 0; }
@@ -331,10 +330,11 @@ textarea {
   .form-grid input,
   .matrix-id-field input,
   .password-fallback input { width: 100%; }
-  .matrix-verification-steps { font-size: 15px; }
-  .matrix-device-id { grid-template-columns: minmax(0, 1fr); }
-  .matrix-device-id > span { grid-column: auto; }
-  .matrix-device-id .secondary { width: 100%; justify-content: center; }
+  .matrix-verification-actions { width: 100%; }
+  .matrix-verification-actions .action-button { flex: 1; min-height: 48px; justify-content: center; white-space: normal; line-height: 1.25; }
+  .matrix-sas-emojis { gap: 6px; margin: 10px 0 6px; }
+  .matrix-sas-emoji { min-height: 68px; padding: 4px; }
+  .matrix-sas-emoji > span { font-size: 27px; }
   .matrix-auth-button,
   .legacy-auth-options .full,
   .password-fallback .full { width: 100%; min-height: 48px; justify-content: center; }
@@ -379,7 +379,11 @@ textarea {
 .mobile-navigation-footer a:hover { color: var(--text); background: var(--surface-hover); }
 .mobile-navigation-footer a > span:first-child { font-size: 18px; line-height: 1; }
 .mobile-navigation-footer small { font-size: 12px; }
-.mobile-navigation-mini-mark { font-weight: 750; }
+.mobile-navigation-settings { display: grid; align-content: start; gap: 14px; padding: 8px 0 calc(20px + env(safe-area-inset-bottom)); }
+.mobile-navigation-back { display: inline-flex; width: fit-content; min-height: 44px; align-items: center; gap: 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; }
+.mobile-navigation-settings .settings-field .select-field__trigger { min-height: 52px; font-size: 16px; }
+.mobile-navigation-footer a { min-width: 64px; }
+.mobile-navigation-footer a > .mobile-navigation-mini-mark { font-size: 13px; font-weight: 750; white-space: nowrap; }
 @keyframes mobile-navigation-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mobile-navigation-slide-in { from { opacity: .8; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
 

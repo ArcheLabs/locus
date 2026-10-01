@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "network": {
+    "name": "local",
+    "kind": "minijam",
+    "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
+    "networkDomain": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67"
+  },
+  "artifact": {
+    "codeHash": "0x7244d2be5d4c66cd59b186700c18e86464e0e5768cb73e64b4d03258cbd97114",
+    "buildId": "dfddc0c1f02abd7d6dde0ff480fa050ce544970186cc176089a6a59955b9dcf4",
+    "serviceKey": "0x2c6cc0eb8b419fdf4ed3290d33adb830628f000f54d03018130fcc19bdd249fc"
+  },
+  "service": {
+    "id": 3640358060
+  },
+  "finalized": {
+    "blockHash": "0xd8bc04975cbc7593119ed050ebbd5905afd0e17e77060b9d78c248e80e515f1d",
+    "blockNumber": 22251,
+    "stateRoot": "0x0503a65e169570496e4523003e494dcbbf97cad8721f5660140deab10f0c4926",
+    "slot": 22251
+  },
+  "backend": {
+    "protocol": "minijam-create-service-v1",
+    "operationId": "0x3d0b0d2e6a81ea7cecfc972d88a68adeed6a3aa0dcbf49cc5dd67e33ffb42f0d"
+  }
+}

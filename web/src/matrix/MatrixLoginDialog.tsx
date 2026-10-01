@@ -6,28 +6,48 @@ import { connectMatrixPasswordSession, readStoredMatrixSession, restoreMatrixSes
 import { beginMatrixOAuth, beginMatrixSso, discoverMatrixAuthCapabilities, type MatrixAuthCapabilities } from "./MatrixOAuth.js";
 import { DEFAULT_MATRIX_PROVIDER, resolveMatrixServer } from "./MatrixProvider.js";
 import type { LocusClient } from "@archelabs/locus";
-import { ArrowLeft, ArrowRight, Check, ClipboardCopy, LogIn, RefreshCw, ShieldCheck, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, LoaderCircle, LogIn, RefreshCw, X } from "lucide-react";
 import { ActionButton } from "../components/ActionButton.js";
+import { useI18n } from "../i18n/I18nProvider.js";
 
 type MatrixLoginStage = "saved-account" | "provider" | "custom-server" | "discovering" | "legacy-options" | "password" | "verification";
 
-function verificationTitle(state: MatrixConnectionState): string {
+function verificationTitle(state: MatrixConnectionState, verification: MatrixConnected["verification"]): string {
   switch (state) {
-    case "AUTHENTICATED": return "Signed in to Matrix";
-    case "DEVICE_KEYS_READY": return "Locus device is ready";
-    case "VERIFICATION_REQUIRED": return "Verification required";
-    case "VERIFICATION_REQUESTED": return "Verification requested";
-    case "VERIFICATION_SAS_READY": return "Compare these emoji";
-    case "VERIFICATION_CONFIRMING": return "Verification confirmed";
-    case "VERIFIED": return "Device verified";
-    case "CONTROLLER_AUTHORIZING": return "Authorizing device";
-    case "CONTROLLER_AUTHORIZATION_QUEUED": return "Authorization queued";
-    case "CONTROLLER_AUTHORIZATION_FINALIZING": return "Authorizing device";
-    case "CONTROLLER_AUTHORIZATION_UNKNOWN": return "Authorization status unavailable";
-    case "CONTROLLER_REVOKED": return "Controller revoked";
-    case "CONTROLLER_AUTHORIZATION_FAILED": return "Authorization needs attention";
-    case "READY": return "Connected";
+    case "AUTHENTICATED":
+    case "DEVICE_KEYS_READY":
+    case "TRUST_CHECKING": return "Signing in…";
+    case "TRUST_UNKNOWN": return "Signing in…";
+    case "VERIFICATION_REQUESTED":
+      return verification?.phase === "requested" ? "Confirm sign-in" : "Verify device";
+    case "VERIFICATION_REQUIRED":
+    case "VERIFICATION_SAS_READY": return "Verify device";
+    case "VERIFICATION_CONFIRMING": return "Confirming device status…";
+    case "RELOGIN_REQUIRED": return "Sign-in is unavailable. Please sign in again.";
+    case "CONNECTED": return "Connected";
   }
+}
+
+function waitingForElement(state: MatrixConnectionState): boolean {
+  return state === "VERIFICATION_REQUIRED" || state === "VERIFICATION_REQUESTED"
+    || state === "VERIFICATION_SAS_READY" || state === "VERIFICATION_CONFIRMING";
+}
+
+function verificationReason(verification: MatrixConnected["verification"]): string {
+  if (!verification) return "";
+  if (verification.reason === "timed-out") return "The verification request timed out. Start verification again.";
+  if (verification.reason === "unsupported-method") return "This verification request uses a method that is not supported. Start verification again.";
+  if (verification.reason === "sas-mismatch") return "The devices showed different information. Verification was cancelled.";
+  if (verification.reason === "failed") return "Verification could not be completed. Try again.";
+  if (verification.reason === "cancelled" || verification.phase === "cancelled") return "The verification request was cancelled. Start verification again.";
+  return "";
+}
+
+function verificationActionError(cause: unknown): string {
+  const code = cause && typeof cause === "object" && "code" in cause ? String((cause as { code?: unknown }).code) : "";
+  if (code === "UNSUPPORTED_MATRIX_CRYPTO_REQUEST") return "This device does not support the current verification method. Restart verification from a Matrix device.";
+  if (code === "MATRIX_SESSION_INVALID") return "The Matrix session has expired. Sign in again.";
+  return "Verification could not be completed. Try again.";
 }
 
 export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus, initialConnection = null }: {
@@ -38,6 +58,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   locus: LocusClient | null;
   initialConnection?: MatrixConnected | null;
 }) {
+  const { t, text } = useI18n();
   const [stage, setStage] = useState<MatrixLoginStage>(initialConnection ? "verification" : readStoredMatrixSession() ? "saved-account" : "provider");
   const [returnStage, setReturnStage] = useState<"provider" | "custom-server">("provider");
   const [selectedServer, setSelectedServer] = useState("");
@@ -45,39 +66,52 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   const [passwordUser, setPasswordUser] = useState("");
   const [password, setPassword] = useState("");
   const [authCapabilities, setAuthCapabilities] = useState<MatrixAuthCapabilities | null>(null);
-  const [deviceIdCopied, setDeviceIdCopied] = useState(false);
   const [working, setWorking] = useState(false);
   const [error, setError] = useState("");
   const [pendingConnection, setPendingConnection] = useState<MatrixConnected | null>(initialConnection);
   const [connectionState, setConnectionState] = useState<MatrixConnectionState>(initialConnection?.state ?? "AUTHENTICATED");
+  const [manualTrustMessage, setManualTrustMessage] = useState("");
   const [, refreshConnection] = useState(0);
   const authAttempt = useRef(0);
+  const dialogGeneration = useRef(0);
+  const activeConnection = useRef<MatrixConnected | null>(initialConnection);
   const passwordAbort = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (!open) return;
+    dialogGeneration.current += 1;
+    if (!open) {
+      activeConnection.current = null;
+      return;
+    }
     if (initialConnection) {
+      setManualTrustMessage("");
+      activeConnection.current = initialConnection;
       setPendingConnection(initialConnection);
       setConnectionState(initialConnection.state);
       setSelectedServer(initialConnection.stored.homeserver);
       setStage("verification");
-      setError(initialConnection.error);
+      setError(initialConnection.error || "");
       return;
     }
+    activeConnection.current = null;
     setPendingConnection(null);
     setConnectionState("AUTHENTICATED");
     setStage(readStoredMatrixSession() ? "saved-account" : "provider");
     setError("");
+    setManualTrustMessage("");
   }, [initialConnection, open]);
 
   useEffect(() => {
     if (!pendingConnection) return;
     const refresh = () => {
+      if (activeConnection.current !== pendingConnection) return;
       setConnectionState(pendingConnection.state);
-      setError(pendingConnection.error);
+      setError(pendingConnection.error || "");
+      if (pendingConnection.state !== "VERIFICATION_REQUIRED") setManualTrustMessage("");
       refreshConnection((value) => value + 1);
-      if (pendingConnection.state === "READY") {
+      if (pendingConnection.state === "CONNECTED") {
         const connected = pendingConnection;
+        activeConnection.current = null;
         setPendingConnection(null);
         onConnected(connected.session);
         onClose();
@@ -113,19 +147,20 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     } catch (cause) {
       if (attempt === authAttempt.current) {
         setStage(origin);
-        setError(cause instanceof Error ? cause.message : "Matrix sign-in could not start.");
+        setError(t("ui.matrixSignInStartFailed"));
       }
     } finally { if (attempt === authAttempt.current) setWorking(false); }
   }
 
   async function startSso() {
+    const attempt = ++authAttempt.current;
     setWorking(true);
     setError("");
     try {
       if (!selectedServer || !authCapabilities) throw new Error("Choose a Matrix server and discover its supported login methods first.");
       await beginMatrixSso(selectedServer, authCapabilities);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Matrix SSO sign-in could not start."); }
-    finally { setWorking(false); }
+    } catch { if (attempt === authAttempt.current) setError(t("ui.matrixSsoStartFailed")); }
+    finally { if (attempt === authAttempt.current) setWorking(false); }
   }
 
   async function passwordLogin() {
@@ -143,24 +178,25 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
         selectedServer,
         passwordUser.trim(),
         password,
-        { locus, onState: setConnectionState, signal: abortController.signal },
+        { locus, onState: (state) => { if (attempt === authAttempt.current) setConnectionState(state); }, signal: abortController.signal },
       );
       if (attempt !== authAttempt.current) {
         connected.session.cleanup?.();
         return;
       }
-      if (connected.state === "READY") {
+      if (connected.state === "CONNECTED") {
         onConnected(connected.session);
         onClose();
         return;
       }
+      activeConnection.current = connected;
       setPendingConnection(connected);
       setStage("verification");
       setConnectionState(connected.state);
-      setError(connected.error);
+      setError(connected.error || "");
       setPassword("");
     } catch (cause) {
-      if (attempt === authAttempt.current) setError(cause instanceof Error ? cause.message : "Matrix sign-in failed.");
+      if (attempt === authAttempt.current) setError(t("ui.matrixSignInFailed"));
     } finally {
       if (passwordAbort.current === abortController) passwordAbort.current = null;
       if (attempt === authAttempt.current) { setPassword(""); setWorking(false); }
@@ -171,32 +207,33 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     const stored = readStoredMatrixSession();
     if (!stored) {
       setStage("provider");
-      setError("The saved Matrix session is no longer available. Sign in to Matrix to create a device.");
+        setError(t("ui.savedDeviceUnavailable"));
       return;
     }
     const attempt = ++authAttempt.current;
     setWorking(true);
     setError("");
     try {
-      const connected = await restoreMatrixSession(stored, { locus, onState: setConnectionState });
+      const connected = await restoreMatrixSession(stored, { locus, onState: (state) => { if (attempt === authAttempt.current) setConnectionState(state); } });
       if (attempt !== authAttempt.current) {
         connected.session.cleanup?.();
         return;
       }
-      if (connected.state === "READY") {
+      if (connected.state === "CONNECTED") {
         onConnected(connected.session);
         onClose();
         return;
       }
+      activeConnection.current = connected;
       setPendingConnection(connected);
       setConnectionState(connected.state);
       setSelectedServer(stored.homeserver);
       setStage("verification");
-      setError(connected.error);
+      setError(connected.error || "");
     } catch (cause) {
       if (attempt === authAttempt.current) {
         setStage(readStoredMatrixSession() ? "saved-account" : "provider");
-        setError(cause instanceof Error ? cause.message : "Could not restore the saved Matrix device.");
+        setError(t("ui.restoreDeviceFailed"));
       }
     } finally {
       if (attempt === authAttempt.current) setWorking(false);
@@ -204,6 +241,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   }
 
   async function useDifferentMatrixAccount() {
+    const attempt = ++authAttempt.current;
     const stored = readStoredMatrixSession();
     if (!stored) {
       setStage("provider");
@@ -213,113 +251,140 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     setError("");
     try {
       await signOutMatrixSession(stored);
+      if (attempt !== authAttempt.current) return;
+      activeConnection.current = null;
       setPendingConnection(null);
       setStage("provider");
     } catch (cause) {
-      setStage(readStoredMatrixSession() ? "saved-account" : "provider");
-      setError(cause instanceof Error ? cause.message : "Could not sign out of the saved Matrix device.");
+      if (attempt !== authAttempt.current) return;
+      const localSessionStillExists = readStoredMatrixSession() !== null;
+      if (!localSessionStillExists) {
+        pendingConnection?.session.cleanup?.();
+        activeConnection.current = null;
+        setPendingConnection(null);
+      }
+      setStage(localSessionStillExists ? "saved-account" : "provider");
+      setError(t("ui.signOutDeviceFailed"));
     } finally {
-      setWorking(false);
+      if (attempt === authAttempt.current) setWorking(false);
     }
   }
 
-  async function performVerification(action: () => Promise<void>) {
-    if (!pendingConnection) return;
+  async function performVerification(action: () => Promise<void>, connection = pendingConnection) {
+    if (!connection) return;
+    const generation = dialogGeneration.current;
     setWorking(true);
     setError("");
     try { await action(); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : "Matrix verification failed."); }
-    finally { setWorking(false); }
+    catch (cause) {
+      const code = cause && typeof cause === "object" && "code" in cause ? String((cause as { code?: unknown }).code) : "";
+      if (generation === dialogGeneration.current && activeConnection.current === connection && code !== "UNSUPPORTED_MATRIX_CRYPTO_REQUEST") {
+        setError(verificationActionError(cause));
+      }
+    }
+    finally { if (generation === dialogGeneration.current && activeConnection.current === connection) setWorking(false); }
+  }
+
+  async function refreshDeviceTrust() {
+    const connection = pendingConnection;
+    if (!connection) return;
+    const generation = dialogGeneration.current;
+    setWorking(true);
+    setError("");
+    setManualTrustMessage("");
+    try {
+      const result = await connection.refreshDeviceTrust();
+      if (generation !== dialogGeneration.current || activeConnection.current !== connection) return;
+      if (result.state === "UNVERIFIED") setManualTrustMessage(t("ui.verificationNotDetected"));
+      else if (result.state === "UNKNOWN") setManualTrustMessage(t("ui.verificationStatusUnknown"));
+    } catch {
+      if (generation === dialogGeneration.current && activeConnection.current === connection) setManualTrustMessage(t("ui.verificationStatusUnknown"));
+    } finally { if (generation === dialogGeneration.current && activeConnection.current === connection) setWorking(false); }
   }
 
   function cancel() {
     authAttempt.current += 1;
+    dialogGeneration.current += 1;
     passwordAbort.current?.abort();
     passwordAbort.current = null;
     onCancel(pendingConnection);
+    activeConnection.current = null;
     setPendingConnection(null);
     setPassword("");
     setWorking(false);
     setError("");
+    setManualTrustMessage("");
     setStage("provider");
     setReturnStage("provider");
     setSelectedServer("");
     setCustomServer("");
     setPasswordUser("");
     setAuthCapabilities(null);
-    setDeviceIdCopied(false);
     onClose();
-  }
-
-  async function copyDeviceId() {
-    const deviceId = pendingConnection?.stored.deviceId;
-    if (!deviceId) return;
-    try {
-      await navigator.clipboard.writeText(deviceId);
-      setDeviceIdCopied(true);
-      window.setTimeout(() => setDeviceIdCopied(false), 1800);
-    } catch {
-      setError("Could not copy the Matrix device ID. Select and copy it manually.");
-    }
   }
 
   const verification = pendingConnection?.verification ?? null;
   const showingVerification = Boolean(pendingConnection);
+  const needsElementConfirmation = waitingForElement(connectionState);
+  const initializing = connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" || connectionState === "TRUST_CHECKING" || connectionState === "TRUST_UNKNOWN";
+  const showingLoginProgress = initializing
+    || connectionState === "VERIFICATION_CONFIRMING" || verification?.phase === "done";
   const canCompare = connectionState === "VERIFICATION_SAS_READY" && verification?.phase === "sas-ready";
+  const needsRelogin = connectionState === "RELOGIN_REQUIRED";
+  const incomingRequest = verification?.phase === "requested" && !verification.startedByLocus;
+  const waitingForMatrixConfirmation = verification?.phase === "requested" && verification.startedByLocus;
+  const verificationStatusReason = verificationReason(verification);
   const legacyCapabilities = authCapabilities?.mode === "legacy" ? authCapabilities : null;
   return (
-    <Modal open={open} title="Connect Matrix" onClose={cancel} footer={<>
-      <ActionButton variant="secondary" icon={X} onClick={cancel}>Cancel</ActionButton>
-      {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <ActionButton variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>Retry authorization</ActionButton>}
-      {(connectionState === "CONTROLLER_AUTHORIZATION_QUEUED" || connectionState === "CONTROLLER_AUTHORIZATION_FINALIZING" || connectionState === "CONTROLLER_AUTHORIZATION_UNKNOWN") && <ActionButton variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>Check authorization status</ActionButton>}
-      {showingVerification && verification?.phase === "requested" && !verification.startedByLocus && <ActionButton variant="primary" icon={ShieldCheck} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>Accept verification</ActionButton>}
-      {canCompare && <>
-        <ActionButton variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>They don’t match</ActionButton>
-        <ActionButton variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>They match</ActionButton>
-      </>}
-    </>}>
-      <p className="modal-lead">{showingVerification
-        ? "Verify Locus as a trusted second Matrix device in Element. A verified device signs through its device key; your cross-signing master key remains the Locus Ownership."
-        : "Use your Matrix account to control Locus through a verified Matrix device."}</p>
+    <Modal open={open} title={showingVerification
+      ? showingLoginProgress
+        ? <span className="matrix-login-title-progress"><LoaderCircle aria-hidden="true" size={22} />{text(verificationTitle(connectionState, verification))}</span>
+        : text(verificationTitle(connectionState, verification))
+      : t("ui.connectMatrix")} onClose={cancel} closeLabel={t("ui.cancelSignIn")} footer={<ActionButton variant="secondary" icon={X} onClick={cancel}>{t("common.cancel")}</ActionButton>}>
+      {!showingVerification && <p className="modal-lead">{t("ui.signInMatrix")}</p>}
       {showingVerification ? <div className="matrix-verification-flow" aria-live="polite">
         <section className="verification-card">
-          <strong>{verificationTitle(connectionState)}</strong>
-          {(connectionState === "VERIFICATION_REQUIRED" || (connectionState === "VERIFICATION_REQUESTED" && verification?.startedByLocus)) && <>
-            <p>Locus has requested verification from your other Matrix devices. On this phone, switch to Element and accept the incoming SAS request. Element is a trusted second Matrix device; it is separate from signing in to Locus.</p>
-            <ol className="matrix-verification-steps">
-              <li>Switch to Element on this phone.</li>
-              <li>Accept the incoming verification request for the new <strong>Locus</strong> device. If it is not visible, open Sessions or Security, find the Locus session, and choose Verify.</li>
-              <li>Accept SAS verification in Element, then return here and compare the emoji.</li>
-            </ol>
-            {(connectionState === "VERIFICATION_REQUIRED" || (connectionState === "VERIFICATION_REQUESTED" && verification?.startedByLocus)) && <ActionButton variant="secondary" icon={RefreshCw} fullWidth loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.requestOwnUserVerification())}>{verification?.startedByLocus ? "Retry request delivery" : "Request verification again"}</ActionButton>}
-            <details className="matrix-device-id matrix-device-id--troubleshooting">
-              <summary>Troubleshooting: device ID</summary>
-              <span>Your Locus Matrix device ID</span>
-              <code>{pendingConnection!.stored.deviceId}</code>
-              <ActionButton size="small" variant="secondary" icon={ClipboardCopy} onClick={() => void copyDeviceId()}>{deviceIdCopied ? "Copied" : "Copy device ID"}</ActionButton>
-            </details>
-          </>}
-          {connectionState === "VERIFICATION_REQUESTED" && !verification?.startedByLocus && (verification?.phase === "sas-waiting"
-            ? <p>Locus accepted the request from Element device <code>{verification.otherDeviceId}</code>. Waiting for Element to accept SAS verification…</p>
-            : <p>A verification request arrived from Element device <code>{verification?.otherDeviceId ?? "Unknown device"}</code>. Accept it here to continue.</p>)}
-          {verification?.startedByLocus && verification.phase === "sas-waiting" && <p>Verification request sent to your other Matrix devices. Accept it in Element; Locus will continue when Element responds.</p>}
-          {connectionState === "VERIFICATION_SAS_READY" && <p>Compare these emoji with the other device in Element. Confirm only when all seven match.</p>}
-          {connectionState === "VERIFICATION_CONFIRMING" && <p>Verification was confirmed. Locus is waiting for the Matrix cross-signing proof before it can authorize this device.</p>}
-          {connectionState === "VERIFIED" && <p>The public M → S → D signatures are verified. Authorizing this device for Locus…</p>}
-          {connectionState === "CONTROLLER_AUTHORIZING" && <p>Matrix verification is complete. Waiting for MiniJAM to confirm this device’s controller authorization…</p>}
-          {connectionState === "CONTROLLER_AUTHORIZATION_QUEUED" && <p>The authorization transaction is queued. Keep this window open. Locus will continue checking it in the background; do not repeat Matrix verification.</p>}
-          {connectionState === "CONTROLLER_AUTHORIZATION_FINALIZING" && <p>The authorization transaction was submitted. Waiting for MiniJAM to finalize it…</p>}
-          {connectionState === "CONTROLLER_AUTHORIZATION_UNKNOWN" && <p>The authorization transaction is still pending or its status is temporarily unavailable. Your Matrix device remains verified. Check its status here; do not repeat Matrix verification.</p>}
-          {connectionState === "CONTROLLER_AUTHORIZATION_FAILED" && <p>Matrix verification is complete, but Locus could not finish authorizing this device. The error is shown below. Retry after addressing it.</p>}
-          {connectionState === "CONTROLLER_REVOKED" && <p>This Locus Matrix controller was previously revoked. It cannot be restored. Sign out of this Matrix device and sign in again to create a new device, or reconnect using another active controller.</p>}
-          {connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ? <p>Preparing the Locus Matrix device. Keep this window open.</p> : null}
-          {canCompare && <div className="matrix-sas-emojis" aria-label="Short authentication string emojis">
-            {verification.emojis.map((emoji, index) => <span className="matrix-sas-emoji" key={`${index}-${emoji.symbol}`} title={emoji.description}><span aria-hidden="true">{emoji.symbol}</span><small>{emoji.description}</small></span>)}
-          </div>}
-          {verification?.phase === "sas-waiting" && !verification.startedByLocus && <p>Waiting for Element to accept SAS verification…</p>}
-          {verification?.phase === "confirming" && <p>Waiting for Element to confirm and publish the cross-signing proof…</p>}
-          {verification?.phase === "cancelled" && <p>The verification was cancelled. You can send a fresh request when ready.</p>}
-          {verification && verification.phase !== "done" && <ActionButton size="small" variant="tertiary" icon={X} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>Cancel verification</ActionButton>}
+          {needsRelogin ? <>
+            <p>{t("ui.signInUnavailable")}</p>
+            <ActionButton size="small" variant="primary" loading={working} disabled={working} onClick={() => void useDifferentMatrixAccount()}>{t("ui.signInAgain")}</ActionButton>
+          </> : initializing ?
+            <div className="matrix-verification-status" role="status">{t("auth.verifyingDevice")}</div> : needsElementConfirmation ? <>
+              {verification?.phase === "done" ? <p className="matrix-verification-status" role="status">{t("ui.verificationDone")}</p>
+                : verification?.phase === "confirming" ? <>
+                  <p>{t("ui.verifyDeviceHelp")}</p>
+                  <p className="matrix-verification-status" role="status">{t("ui.waitingVerification")}</p>
+                </>
+                  : verification?.phase === "unsupported" ? <>
+                    {verificationStatusReason && <p role="status">{text(verificationStatusReason)}</p>}
+                    <p>{t("ui.verifyDeviceHelp")}</p>
+                    <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>{t("ui.cancelVerification")}</ActionButton>
+              </> : incomingRequest ? <>
+                <p>{t("ui.confirmLoginHelp")}</p>
+                <div className="matrix-verification-actions">
+                  <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>{t("ui.reject")}</ActionButton>
+                  <ActionButton size="small" variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>{t("ui.accept")}</ActionButton>
+                </div>
+              </> : waitingForMatrixConfirmation ? <>
+                <p>{t("ui.confirmLoginHelp")}</p>
+                <p className="matrix-verification-status" role="status">{t("ui.waitingSignInConfirm")}</p>
+                <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>{t("ui.cancelVerification")}</ActionButton>
+              </> : canCompare ? <>
+                <p>{t("ui.checkPattern")}</p>
+                <div className="matrix-sas-emojis" aria-label={t("ui.sasPatternLabel")}>
+                  {verification.emojis.map((emoji, index) => <span className="matrix-sas-emoji" key={`${index}-${emoji.symbol}`} title={text(emoji.description)}><span aria-hidden="true">{emoji.symbol}</span><small>{text(emoji.description)}</small></span>)}
+                </div>
+                <div className="matrix-verification-actions">
+                  <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>{t("ui.patternMismatch")}</ActionButton>
+                  <ActionButton size="small" variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>{t("ui.patternMatches")}</ActionButton>
+                </div>
+              </> : <>
+                {verificationStatusReason && <p role="status">{text(verificationStatusReason)}</p>}
+                <p>{t("ui.verifyDeviceHelp")}</p>
+                {verification?.phase === "sas-waiting" && <p className="matrix-verification-status" role="status">{t("ui.anotherDeviceWait")}</p>}
+                {manualTrustMessage && <p className="matrix-verification-status" role="status">{text(manualTrustMessage)}</p>}
+                <button type="button" className="text-button matrix-check-trust" disabled={working} onClick={() => void refreshDeviceTrust()}>{t("ui.directVerifyCheck")}</button>
+              </>}
+            </> : <div className="matrix-verification-status" role="status">{t("auth.checkingDevice")}</div>}
         </section>
       </div> : <>
         {stage === "saved-account" && (() => {
@@ -327,53 +392,55 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
           return stored ? <div className="matrix-login-options">
             <div className="matrix-provider-choice">
               <span className="identity-icon-slot"><IdentityIcon kind="matrix" size={24} /></span>
-              <span className="matrix-provider-copy"><strong>{stored.userId}</strong><small>Reconnect this Matrix account with its saved Locus device</small></span>
-              <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void reconnectSavedMatrixDevice()}>Reconnect Matrix</ActionButton>
+              <span className="matrix-provider-copy"><strong>{stored.userId}</strong><small>{t("ui.reconnectSaved")}</small></span>
+              <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void reconnectSavedMatrixDevice()}>{t("ui.reconnectMatrix")}</ActionButton>
             </div>
-            <ActionButton variant="secondary" icon={ArrowRight} fullWidth disabled={working} onClick={() => void useDifferentMatrixAccount()}>Sign in with another Matrix account</ActionButton>
-            <p className="auth-caption">Using another account removes this saved Locus device. The new device will need verification.</p>
-          </div> : <div className="matrix-discovery-status" role="status">The saved Matrix session is unavailable. Choose a Matrix sign-in method.</div>;
+            <ActionButton variant="secondary" icon={ArrowRight} fullWidth disabled={working} onClick={() => void useDifferentMatrixAccount()}>{t("ui.anotherMatrix")}</ActionButton>
+            <p className="auth-caption">{t("ui.otherAccountNeedsNewVerification")}</p>
+          </div> : <div className="matrix-discovery-status" role="status">{t("ui.savedMatrixUnavailable")}</div>;
         })()}
         {stage === "provider" && <div className="matrix-login-options">
           <div className="matrix-provider-choice">
             <span className="identity-icon-slot"><IdentityIcon kind="matrix" size={24} /></span>
-            <span className="matrix-provider-copy"><strong>{DEFAULT_MATRIX_PROVIDER.label}</strong><small>Sign in with your Matrix account</small></span>
-            <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void startMatrixAuthentication(DEFAULT_MATRIX_PROVIDER.server, "provider")}>Continue with Matrix.org</ActionButton>
+            <span className="matrix-provider-copy"><strong>{DEFAULT_MATRIX_PROVIDER.label}</strong><small>{t("ui.signInOptionLead")}</small></span>
+            <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void startMatrixAuthentication(DEFAULT_MATRIX_PROVIDER.server, "provider")}>{t("ui.continueMatrix")}</ActionButton>
           </div>
-          <ActionButton variant="secondary" icon={ArrowRight} fullWidth disabled={working} onClick={() => { setError(""); setStage("custom-server"); }}>Use another Matrix server</ActionButton>
+          <ActionButton variant="secondary" icon={ArrowRight} fullWidth disabled={working} onClick={() => { setError(""); setStage("custom-server"); }}>{t("ui.useAnotherServer")}</ActionButton>
         </div>}
 
         {stage === "custom-server" && <div className="matrix-login-step">
-          <label className="matrix-id-field">Matrix server<input autoComplete="url" disabled={working} value={customServer} placeholder="example.org or https://matrix.example.org" onChange={(event) => { setCustomServer(event.target.value); setError(""); }} /></label>
-          <p className="auth-caption">Choose the Matrix server that hosts your account. You will sign in with that server next.</p>
-          <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working || !customServer.trim()} onClick={() => void startMatrixAuthentication(customServer, "custom-server")}>Continue</ActionButton>
-          <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage("provider"); setError(""); }}>Back</ActionButton>
+          <label className="matrix-id-field">{t("ui.matrixServer")}<input autoComplete="url" disabled={working} value={customServer} placeholder="example.org or https://matrix.example.org" onChange={(event) => { setCustomServer(event.target.value); setError(""); }} /></label>
+          <p className="auth-caption">{t("ui.customServerHelp")}</p>
+          <ActionButton className="matrix-auth-button" variant="primary" icon={LogIn} fullWidth loading={working} disabled={working || !customServer.trim()} onClick={() => void startMatrixAuthentication(customServer, "custom-server")}>{t("ui.continue")}</ActionButton>
+          <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage("provider"); setError(""); }}>{t("ui.back")}</ActionButton>
         </div>}
 
         {stage === "discovering" && <div className="matrix-discovery-status" role="status" aria-live="polite">
           <RefreshCw size={20} aria-hidden="true" />
-          <span>Checking sign-in options for {returnStage === "provider" ? DEFAULT_MATRIX_PROVIDER.label : customServer.trim()}…</span>
+          <span>{t("ui.checkingMatrixMethods", { server: returnStage === "provider" ? DEFAULT_MATRIX_PROVIDER.label : customServer.trim() })}</span>
         </div>}
 
         {stage === "legacy-options" && legacyCapabilities && <div className="legacy-auth-options">
-          <strong>Sign in to {new URL(selectedServer).host}</strong>
-          <p>This server does not advertise Matrix OAuth. Choose one of its supported sign-in methods.</p>
-          {legacyCapabilities.sso && <ActionButton variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void startSso()}>Continue with Matrix SSO</ActionButton>}
-          {legacyCapabilities.password && <ActionButton variant={legacyCapabilities.sso ? "secondary" : "primary"} icon={LogIn} fullWidth disabled={working} onClick={() => setStage("password")}>Use password instead</ActionButton>}
-          {!legacyCapabilities.sso && !legacyCapabilities.password && <div className="matrix-unsupported-note" role="status">This Matrix server does not advertise a supported sign-in method. Ask its administrator which methods are available.</div>}
-          <ActionButton size="small" variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(returnStage); setAuthCapabilities(null); setError(""); }}>Back</ActionButton>
+          <strong>{t("ui.signInToServer", { server: new URL(selectedServer).host })}</strong>
+          <p>{t("ui.matrixOAuthMissing")}</p>
+          {legacyCapabilities.sso && <ActionButton variant="primary" icon={LogIn} fullWidth loading={working} disabled={working} onClick={() => void startSso()}>{t("ui.continueSso")}</ActionButton>}
+          {legacyCapabilities.password && <ActionButton variant={legacyCapabilities.sso ? "secondary" : "primary"} icon={LogIn} fullWidth disabled={working} onClick={() => setStage("password")}>{t("ui.usePassword")}</ActionButton>}
+          {!legacyCapabilities.sso && !legacyCapabilities.password && <div className="matrix-unsupported-note" role="status">{t("ui.unsupportedMatrixServer")}</div>}
+          <ActionButton size="small" variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(returnStage); setAuthCapabilities(null); setError(""); }}>{t("ui.back")}</ActionButton>
         </div>}
 
         {stage === "password" && legacyCapabilities?.password && <div className="password-fallback">
-          <p>This server supports password sign-in. Your password is sent to the selected Matrix server and is never saved by Locus.</p>
-          <label className="matrix-id-field">Matrix ID or username<input autoComplete="username" disabled={working} value={passwordUser} onChange={(event) => setPasswordUser(event.target.value)} /></label>
-          <label>Password<input autoComplete="current-password" type="password" disabled={working} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
-          <ActionButton variant="primary" icon={LogIn} fullWidth loading={working} disabled={working || !passwordUser.trim() || !password} onClick={() => void passwordLogin()}>Sign in</ActionButton>
-          <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(legacyCapabilities.sso ? "legacy-options" : returnStage); setPassword(""); setError(""); }}>Back</ActionButton>
+          <p>{t("ui.passwordHelp")}</p>
+          <label className="matrix-id-field">{t("ui.matrixId")}<input autoComplete="username" disabled={working} value={passwordUser} onChange={(event) => setPasswordUser(event.target.value)} /></label>
+          <label>{t("ui.password")}<input autoComplete="current-password" type="password" disabled={working} value={password} onChange={(event) => setPassword(event.target.value)} /></label>
+          <ActionButton variant="primary" icon={LogIn} fullWidth loading={working} disabled={working || !passwordUser.trim() || !password} onClick={() => void passwordLogin()}>{t("common.signIn")}</ActionButton>
+          <ActionButton variant="tertiary" icon={ArrowLeft} disabled={working} onClick={() => { setStage(legacyCapabilities.sso ? "legacy-options" : returnStage); setPassword(""); setError(""); }}>{t("ui.back")}</ActionButton>
         </div>}
       </>}
-      {error && !(stage === "custom-server" && !customServer.trim()) && !(stage === "password" && (!passwordUser.trim() || !password)) && <div className="transaction-error" role="alert">{error}</div>}
-      <p className="modal-note">Locus never stores your Matrix password. Device verification is required before Matrix can authorize an identity.</p>
+      {error && !initializing
+        && !(stage === "custom-server" && !customServer.trim())
+        && !(stage === "password" && (!passwordUser.trim() || !password))
+        && <div className="transaction-error" role="alert">{text(error)}</div>}
     </Modal>
   );
 }

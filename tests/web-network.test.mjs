@@ -66,7 +66,7 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
   const navigationLinks = await fs.readFile(new URL("../web/src/navigation/links.ts", import.meta.url), "utf8");
   assert.match(app, /<MobileNavigation route=\{page\}/);
   assert.doesNotMatch(app + responsive, /mobile-bottom-nav/);
-  assert.match(mobileNavigation, /aria-label="Open navigation"/);
+  assert.match(mobileNavigation, /aria-label=\{t\("common\.navigate"\)\}/);
   assert.match(mobileNavigation, /aria-expanded=\{open\}/);
   assert.match(mobileNavigation, /<Dialog\.Content[^>]+mobile-navigation-dialog/);
   assert.match(mobileNavigation, /aria-modal="true"/);
@@ -74,7 +74,7 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
   assert.match(mobileNavigation, /route: "swap", label: "Swap"/);
   assert.match(mobileNavigation, /route: "liquidity", label: "Liquidity"/);
   assert.match(mobileNavigation, /route: "activity", label: "Activity"/);
-  assert.doesNotMatch(mobileNavigation, /route: "send"/);
+  assert.match(mobileNavigation, /route: "send", label: "Send"/);
   assert.match(mobileNavigation, /target="_blank" rel="noopener noreferrer"/);
   assert.match(navigationLinks, /https:\/\/x\.com\/archelabs_org/);
   assert.match(navigationLinks, /https:\/\/locus\.archelabs\.xyz/);
@@ -91,7 +91,7 @@ test("network deployment does not silently configure Testnet as Local", async ()
   assert.equal(config.networks.local.label, "MiniJAM Local / Development");
   assert.equal(config.networks.local.backendUrl, "/rpc");
   assert.equal(config.networks.local.deploymentUrl, "/deployments/local.json");
-  assert.equal(config.networks.local.matrixResolverUrl, undefined);
+  assert.equal(config.networks.local.matrixResolverUrl, "/matrix-resolver");
   assert.equal(config.networks.testnet.backendUrl, null);
   assert.equal(config.networks.testnet.deploymentUrl, null);
   assert.equal(config.networks.testnet.label, "TestNet");
@@ -524,12 +524,12 @@ test("Matrix controller authorization distinguishes JamScript fatal codes from b
   assert.equal(fatal.code, "CONTROLLER_NOT_AUTHORIZED");
   assert.match(fatal.message, /Internal JamScript runtime error/);
   assert.match(fatal.message, /FATAL_UNCAUGHT, 0x80000001/);
-  assert.doesNotMatch(fatal.message, /Locus rejected|sensitive proof details/);
+  assert.doesNotMatch(fatal.message, /Locus rejected|sensitive proof details|proof bytes/);
 
   const rejected = matrixControllerReceiptFailure(5005, "proof diagnostics");
-  assert.match(rejected.message, /Locus rejected/);
-  assert.match(rejected.message, /application error code 5005/);
-  assert.match(rejected.message, /proof diagnostics/);
+  assert.equal(rejected.code, "OWNERSHIP_PROOF_INVALID");
+  assert.match(rejected.message, /proof is invalid/);
+  assert.doesNotMatch(rejected.message, /proof diagnostics|signature|0x/);
 });
 
 test("network amounts remain exact bigint values", () => {
@@ -700,9 +700,11 @@ test("legacy password and unsupported homeservers follow advertised login flows 
     assert.deepEqual(await discoverMatrixAuthCapabilities("https://no-login.example"), { mode: "legacy", homeserver: "https://no-login.example", sso: false, password: false });
   } finally { globalThis.fetch = originalFetch; }
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  const i18n = await fs.readFile(new URL("../web/src/i18n/I18nProvider.tsx", import.meta.url), "utf8");
   assert.match(dialog, /stage === "password" && legacyCapabilities\?\.password/);
   assert.match(dialog, /legacyCapabilities\.sso &&/);
-  assert.match(dialog, /does not advertise a supported sign-in method/);
+  assert.match(dialog, /t\("ui\.unsupportedMatrixServer"\)/);
+  assert.match(i18n, /unsupportedMatrixServer: "This Matrix server does not advertise a supported sign-in method\./);
 });
 
 test("password authentication uses the selected server and trusts the login response user ID", async () => {
@@ -763,11 +765,12 @@ test("OAuth runtime errors stay actionable and do not unlock legacy fallbacks", 
   } finally { globalThis.window = originalWindow; globalThis.fetch = originalFetch; }
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(dialog, /setShowLegacy/);
-  assert.match(dialog, /setError\(cause instanceof Error \? cause\.message/);
+  assert.match(dialog, /setError\(t\("ui\.matrixSignInStartFailed"\)\)/);
 });
 
 test("Matrix login separates server selection from authenticated identity and preserves verification", async () => {
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  const i18n = await fs.readFile(new URL("../web/src/i18n/I18nProvider.tsx", import.meta.url), "utf8");
   const oauth = await fs.readFile(new URL("../web/src/matrix/MatrixOAuth.ts", import.meta.url), "utf8");
   const connector = await fs.readFile(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
   const passwordLogin = await fs.readFile(new URL("../web/src/matrix/MatrixPasswordLogin.ts", import.meta.url), "utf8");
@@ -775,9 +778,12 @@ test("Matrix login separates server selection from authenticated identity and pr
   const styles = await fs.readFile(new URL("../web/src/styles.css", import.meta.url), "utf8");
   const provider = await fs.readFile(new URL("../web/src/matrix/MatrixProvider.ts", import.meta.url), "utf8");
   const msc4108 = await fs.readFile(new URL("../docs/matrix-msc4108-feasibility.md", import.meta.url), "utf8");
-  assert.match(dialog, /Continue with Matrix\.org/);
-  assert.match(dialog, /Use another Matrix server/);
-  assert.match(dialog, /Matrix server<input/);
+  assert.match(dialog, /t\("ui\.continueMatrix"\)/);
+  assert.match(dialog, /t\("ui\.useAnotherServer"\)/);
+  assert.match(dialog, /t\("ui\.matrixServer"\)/);
+  assert.match(i18n, /continueMatrix: "Continue with Matrix\.org"/);
+  assert.match(i18n, /useAnotherServer: "Use another Matrix server"/);
+  assert.match(i18n, /matrixServer: "Matrix server"/);
   assert.doesNotMatch(dialog, /Enter a Matrix ID first/);
   assert.doesNotMatch(dialog, /const \[userId, setUserId\]/);
   assert.match(dialog, /beginMatrixOAuth\(discovered, capabilities\)/);
@@ -790,9 +796,10 @@ test("Matrix login separates server selection from authenticated identity and pr
   assert.match(oauth, /export async function beginMatrixSso\(homeserver: string, capabilities:/);
   assert.match(oauth, /export function matrixDeviceId\(\): string/);
   assert.match(connector, /const MATRIX_SESSION_KEY = "locus\.matrix\.session\.v1"/);
-  assert.match(connector, /connected\.requestOwnUserVerification\(\)/);
+  assert.match(connector, /requestOwnUserVerification: async/);
+  assert.match(connector, /createMatrixDeviceTrustMonitor\(readAndApplyTrust/);
   assert.match(dialog, /confirmVerification\(true\)/);
-  assert.match(dialog, /Copy device ID/);
+  assert.doesNotMatch(dialog, /Copy device ID|pendingConnection!\.stored\.deviceId/);
   assert.doesNotMatch(dialog, /mobile\.element\.io/);
   assert.match(responsive, /@media \(max-width: 767px\)/);
   assert.match(styles, /\.matrix-provider-choice/);
@@ -876,15 +883,22 @@ test("canceling Matrix verification clears the provisional login and closes the 
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   const connectDialog = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
   const app = await fs.readFile(new URL("../web/src/app.tsx", import.meta.url), "utf8");
-  assert.match(dialog, /onClick=\{cancel\}>Cancel/);
+  assert.match(dialog, /onClick=\{cancel\}>\{t\("common\.cancel"\)\}/);
   assert.match(dialog, /onCancel\(pendingConnection\)/);
   assert.match(dialog, /authAttempt\.current \+= 1/);
+  assert.match(dialog, /dialogGeneration\.current \+= 1/);
   assert.match(connectDialog, /onCancel=\{onCancelMatrix\}/);
   assert.match(app, /onCancelMatrix=\{cancelMatrixSignIn\}/);
   const cancelHandler = app.match(/function cancelMatrixSignIn\([\s\S]*?\n  \}/)?.[0] ?? "";
   assert.match(cancelHandler, /disconnectSession\(\)/);
   assert.match(cancelHandler, /setConnectOpen\(false\)/);
   assert.match(app, /signOutMatrixSession\(stored\)/);
+});
+
+test("Matrix login does not stack its modal over the Ownership chooser", async () => {
+  const connectDialog = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
+  assert.match(connectDialog, /useState\(Boolean\(initialMatrixConnection\)\)/);
+  assert.match(connectDialog, /open=\{open && !matrixOpen && !initialMatrixConnection\}/);
 });
 
 test("Matrix crypto WASM, store, and outgoing-request stages retain distinct safe errors", () => {

@@ -96,11 +96,32 @@ current device Ed25519 key as the controller. The web adapter uses the public
 does not call `initRustCrypto()`, access private SDK fields, persist passwords,
 or hash Matrix IDs into Ownership. `/keys/query` evidence is encoded through
 the JamScript Matrix proof codec and a recipient resolves to the master key,
-never to a device key. After Element verification, each Locus Matrix device
-submits `authorizeMatrixController(proof)` for its own `(master subject,
-device controller)` pair. Any number of cross-signing-verified devices can
-authorize independently; an active controller does not approve new Matrix
-devices. A revoked pair cannot be re-enrolled with its old proof.
+never to a device key. Login reads trust from the pinned
+`@matrix-org/matrix-sdk-crypto-wasm` `OlmMachine`: the own cross-signing
+identity must be verified and trust its current device, and the exact current
+device must be cross-signed by its owner and trusted through cross-signing.
+The generic/local device verification bit is not used. Key queries refresh the
+SDK store before this decision, while sync and foreground events trigger
+rechecks; transient or missing SDK data stays `UNKNOWN`.
+
+Only after that trust policy passes does Locus build the existing
+`MatrixControlClaimProofV1` and call `authorizeMatrixController(proof)` for
+its `(master subject, device controller)` pair. The session becomes `READY`
+only after the service reports the controller active and a final SDK trust
+read still passes. Missing or temporarily unavailable proof material,
+network errors, timeouts, and rate limits stay retryable; Locus application
+error `5005` is the definitive invalid-proof result, while
+`M_UNKNOWN_TOKEN`/OAuth `invalid_grant` are reported as expired Matrix
+sessions. Full proofs and proof bytes are not included in errors.
+
+Interactive SAS uses the SDK's own verification request and SAS objects and
+requires explicit acceptance and matching confirmation. The crypto SDK also
+has QR APIs, but this web UI currently negotiates and renders SAS only; QR
+requests receive a compatibility message. This limit is the same on all
+devices; QR is not claimed as supported until scanner/display UI and real
+interoperability checks are added. Any number of cross-signing-verified
+devices can authorize independently; active controllers do not approve new
+devices, and a revoked pair cannot be re-enrolled with its old proof.
 
 The browser stores ordinary wallet session identifiers in local storage and
 Matrix access/refresh credentials in session storage only. EVM account changes

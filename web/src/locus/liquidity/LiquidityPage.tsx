@@ -8,10 +8,12 @@ import { ConfirmationAssetList } from "../../components/ConfirmationAssetList.js
 import { ActionButton } from "../../components/ActionButton.js";
 import { Modal } from "../../components/Modal.js";
 import type { GlobalTransactionNotice } from "../../components/GlobalNotifications.js";
-import { normalizeActionError } from "../../errors/normalizeError.js";
+import { knownActionErrorMessage, normalizeActionError } from "../../errors/normalizeError.js";
 import { waitForWalletSignature, withPreparationTimeout } from "../createAssetWorkflow.js";
 import { poolPriceDisplay, proportionalAmount } from "./liquidityMath.js";
 import type { LiquidityScope } from "./liquidityTypes.js";
+import { useI18n } from "../../i18n/I18nProvider.js";
+import { AssetBalanceStatus } from "../../components/AssetBalanceStatus.js";
 import "./permissionlessLiquidity.css";
 
 type Operation = "create" | "initialize" | "add" | "remove";
@@ -53,7 +55,7 @@ function friendlyError(cause: unknown): string {
   if (/error 6011|LIQUIDITY_SLIPPAGE_EXCEEDED/i.test(normalized)) return "Pool state changed beyond your slippage tolerance. Review the updated quote.";
   if (/error 6010|INSUFFICIENT_LIQUIDITY_SHARES/i.test(normalized)) return "You do not have enough liquidity shares for this withdrawal.";
   if (/error 6008|POOL_RESERVE_LIMIT/i.test(normalized)) return "This deposit exceeds the pool reserve limit.";
-  return normalized;
+  return knownActionErrorMessage(cause) ?? "The liquidity action could not be completed.";
 }
 
 function preReceiptFailure(cause: unknown, transactionId: string): string | null {
@@ -68,7 +70,7 @@ function preReceiptFailure(cause: unknown, transactionId: string): string | null
     : "The service rejected the transaction before producing an action receipt.";
 }
 
-export function LiquidityPage({ view, initialTab, initialPair, assets, pools, poolsError, poolsLoading, locus, networkId, serviceId, sessionOwner, connectionId, networkReady, isScopeCurrent, onPoolsRefreshed, onRefreshAssets, onConnect, onNewPosition, onTabChange, onActionSuccess, onTransactionNotice, onClearTransactionNotice, onRetryPools, getBalanceState }: {
+export function LiquidityPage({ view, initialTab, initialPair, assets, pools, poolsError, poolsLoading, locus, networkId, serviceId, sessionOwner, connectionId, networkReady, canPerformAuthorizedAction, authorizationWaitMessage, isScopeCurrent, onPoolsRefreshed, onRefreshAssets, onConnect, onNewPosition, onTabChange, onActionSuccess, onTransactionNotice, onClearTransactionNotice, onRetryPools, getBalanceState }: {
   view: "home" | "new";
   initialTab: "pools" | "positions";
   initialPair: { assetA: string; assetB: string };
@@ -82,6 +84,8 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   sessionOwner: Ownership | null;
   connectionId: string | null;
   networkReady: boolean;
+  canPerformAuthorizedAction: () => boolean;
+  authorizationWaitMessage: string;
   isScopeCurrent: (scope: LiquidityScope) => boolean;
   onPoolsRefreshed: (pools: Pool[]) => void;
   onRefreshAssets: () => Promise<unknown>;
@@ -92,8 +96,9 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   onTransactionNotice: (notice: GlobalTransactionNotice) => void;
   onClearTransactionNotice: (id: string) => void;
   onRetryPools: () => void;
-  getBalanceState: (asset: AssetView) => "known" | "loading" | "unavailable";
+  getBalanceState: (asset: AssetView) => "known" | "loading" | "failed" | "signed-out";
 }) {
+  const { t, text } = useI18n();
   const [assetAId, setAssetAId] = useState("");
   const [assetBId, setAssetBId] = useState("");
   const [tab, setTab] = useState(initialTab);
@@ -104,6 +109,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   const [customWithdraw, setCustomWithdraw] = useState(false);
   const [positions, setPositions] = useState<LiquidityPosition[]>([]);
   const [positionsLoading, setPositionsLoading] = useState(false);
+  const [positionsLoaded, setPositionsLoaded] = useState(false);
   const [positionsError, setPositionsError] = useState("");
   const [positionsRefreshRevision, setPositionsRefreshRevision] = useState(0);
   const positionsScopeKey = useRef("");
@@ -241,13 +247,14 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   useEffect(() => {
     if (!locus || !sessionOwner || !networkReady) {
       positionsScopeKey.current = "";
-      setPositions([]); setPositionIndexCount(0n); setPositionCursor(0n); setPositionsLoading(false); setPositionsError(""); return;
+      setPositions([]); setPositionIndexCount(0n); setPositionCursor(0n); setPositionsLoading(false); setPositionsLoaded(false); setPositionsError(""); return;
     }
     let cancelled = false;
     const currentPositionsScopeKey = JSON.stringify(scope);
     if (positionsScopeKey.current !== currentPositionsScopeKey) {
       positionsScopeKey.current = currentPositionsScopeKey;
       setPositions([]); setPositionIndexCount(0n); setPositionCursor(0n);
+      setPositionsLoaded(false);
     }
     setPositionsLoading(true);
     setPositionsError("");
@@ -258,9 +265,13 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     ]).then(([count, next]) => {
       if (!cancelled && isScopeCurrentRef.current(scope)) {
         setPositionIndexCount(count); setPositionCursor(count > 50n ? 50n : count); setPositions(next);
+        setPositionsLoaded(true);
       }
     }).catch(() => {
-      if (!cancelled && isScopeCurrentRef.current(scope)) setPositionsError("Your positions could not be loaded. Try again when the Service is available.");
+      if (!cancelled && isScopeCurrentRef.current(scope)) {
+        setPositionsError("Your positions could not be loaded. Try again when the Service is available.");
+        setPositionsLoaded(true);
+      }
     }).finally(() => { if (!cancelled && isScopeCurrentRef.current(scope)) setPositionsLoading(false); });
     return () => { cancelled = true; };
   }, [locus, networkReady, scope, sessionOwner, positionsRefreshRevision]);
@@ -451,6 +462,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }
 
   async function submitPreview() {
+    if (!canPerformAuthorizedAction()) { setError(authorizationWaitMessage || "正在准备账户，请稍候。"); return; }
     if (!amountA.trim() || !amountB.trim()) return;
     if (!selectedA || !selectedB || selectedA.assetIdHex === selectedB.assetIdHex) { setError("Choose two different assets."); return; }
     if (selectedPoolLoading || selectedPoolError) { setError(selectedPoolError || "Pool state is still loading."); return; }
@@ -464,7 +476,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       const request: LiquidityReview = { operation, scope, assetA: selectedA, assetB: selectedB, amountA, amountB };
       setBusy(true);
       await prepareForReview(request, withdrawPercent, true);
-    } catch (cause) { setError(cause instanceof Error ? cause.message : "Enter valid amounts."); }
+    } catch { setError(t("errors.enterNonZeroAmounts")); }
     finally { setBusy(false); }
   }
 
@@ -542,6 +554,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       busy: checking,
       actionLabel: "Check status",
       onAction: () => void waitForPending(current),
+      dismissible: true,
     });
   }
 
@@ -586,7 +599,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       onClearTransactionNotice(transactionNoticeId);
       await refreshAfterApplied(expectedScope);
       setPairRefreshRevision((revision) => revision + 1);
-      if (current.action !== "Remove liquidity") onActionSuccess(current.action === "Create pool" ? "Pool created" : "Liquidity added");
+      if (current.action !== "Remove liquidity") onActionSuccess(current.action === "Create pool" ? t("liquidity.poolCreated") : t("liquidity.liquidityAdded"));
     } catch (cause) {
       if (!isScopeCurrent(expectedScope)) return;
       if (await clearPreReceiptFailure(current.transactionId, cause, expectedScope)) return;
@@ -601,6 +614,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }
 
   function confirmAction() {
+    if (!canPerformAuthorizedAction()) { setError(authorizationWaitMessage || "正在准备账户，请稍候。"); return; }
     if (!locus || !review || !preparedActionRef.current || busyOrPending || preparingAction
       || !isScopeCurrentRef.current(review.scope)) return;
 
@@ -633,6 +647,11 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       const signed = await waitForWalletSignature(signature, WALLET_SIGNATURE_TIMEOUT_MS);
       signatureReceived = true;
       if (!isScopeCurrentRef.current(request.scope)) throw new Error("The active Ownership or network changed. Check the action before continuing.");
+      if (!canPerformAuthorizedAction()) {
+        closeReview();
+        setError(`${authorizationWaitMessage || "正在准备账户，请稍候。"} No transaction was submitted.`);
+        return;
+      }
       const submitted = await locus.submitSignedOwnershipAction(signed);
       submittedId = submitted.transactionId;
       const saved: PendingAction = {
@@ -659,7 +678,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       if (request.operation !== "remove") { setAmountA(""); setAmountB(""); }
       await refreshAfterApplied(request.scope);
       setPairRefreshRevision((revision) => revision + 1);
-      if (request.operation !== "remove") onActionSuccess(request.operation === "create" ? "Pool created" : "Liquidity added");
+      if (request.operation !== "remove") onActionSuccess(request.operation === "create" ? t("liquidity.poolCreated") : t("liquidity.liquidityAdded"));
     } catch (cause) {
       if (!signatureReceived) locus.abandonPreparedOwnershipAction(prepared);
       if (!isScopeCurrentRef.current(request.scope)) return;
@@ -676,7 +695,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         ownerKey: request.scope.ownerKey!,
         createdAt: Date.now(),
       }, false);
-      else setError(`${friendlyError(cause)} No transaction ID was received; check the pair and transaction status before trying again.`);
+      else setError(t("errors.submissionOutcomeUnknown", { reason: friendlyError(cause) }));
     } finally {
       setBusy(false);
     }
@@ -746,25 +765,22 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     : null;
   const validAmounts = !!selectedAmounts && selectedAmounts.every((value) => value > 0n);
   const requiredAmountMissing = !amountA.trim() || !amountB.trim();
-  const balanceLabel = (asset: AssetView) => getBalanceState(asset) === "loading" ? "Loading…"
-    : getBalanceState(asset) === "unavailable" ? "Unavailable"
-      : formatUnits(asset.balance ?? 0n, asset.decimals);
-  const ctaLabel = !sessionOwner ? "Connect Ownership"
-    : !selectedA || !selectedB ? "Select assets"
-      : selectedA.assetIdHex === selectedB.assetIdHex ? "Choose different assets"
-        : !networkReady ? "Service unavailable"
-          : selectedPoolLoading ? "Checking pool…"
-            : selectedPoolError ? "Pool state unavailable"
-              : pending ? "Transaction pending…"
-                : busy ? "Preparing…"
-                  : selectedA.balance === null || selectedB.balance === null ? [selectedA, selectedB].some(asset => getBalanceState(asset) === "loading") ? "Loading balances…" : "Balance unavailable"
-                    : insufficientAsset ? `Insufficient ${insufficientAsset.symbol}`
-                      : !validAmounts ? requiredAmountMissing ? "Provide liquidity" : "Enter an amount"
-                        : !liquidityQuote ? "Amount outside pool limits"
-                          : "Provide liquidity";
+  const ctaLabel = !sessionOwner ? t("common.connect")
+    : !selectedA || !selectedB ? t("ui.selectAssets")
+      : selectedA.assetIdHex === selectedB.assetIdHex ? t("swap.chooseDifferent")
+        : !networkReady ? t("ui.serviceNotReady")
+          : selectedPoolLoading ? t("ui.waitingPool")
+            : selectedPoolError ? t("ui.poolStateFailed")
+              : pending ? t("ui.transactionPending")
+                : busy ? t("ui.preparing")
+                  : selectedA.balance === null || selectedB.balance === null ? [selectedA, selectedB].some(asset => getBalanceState(asset) === "loading") ? t("liquidity.loadingBalances") : t("ui.balanceUnavailable")
+                    : insufficientAsset ? t("ui.insufficient", { symbol: insufficientAsset.symbol })
+                      : !validAmounts ? requiredAmountMissing ? t("liquidity.provide") : t("ui.enterAmount")
+                        : !liquidityQuote ? t("ui.outsidePoolLimits")
+                          : t("liquidity.provide");
   const ctaDisabled = sessionOwner
     ? !networkReady || !selectedA || !selectedB || selectedA.assetIdHex === selectedB.assetIdHex || selectedPoolLoading || !!selectedPoolError
-      || busyOrPending || !!review || selectedA.balance === null || selectedB.balance === null || !validAmounts || !!insufficientAsset || !liquidityQuote
+      || busyOrPending || !!review || selectedA.balance === null || selectedB.balance === null || !validAmounts || !!insufficientAsset || !liquidityQuote || !canPerformAuthorizedAction()
     : false;
 
   function handleTabKeyDown(event: KeyboardEvent<HTMLDivElement>) {
@@ -795,48 +811,49 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }
 
   const actionStatus = <>
-    {error && !transactionId && <div className="inline-alert permissionless-liquidity-error" role="alert">{error}</div>}
+    {error && !transactionId && <div className="inline-alert permissionless-liquidity-error" role="alert">{text(error)}</div>}
   </>;
 
   return <section className={`page liquidity-page${view === "new" ? " liquidity-page--new" : ""}`}>
     {view === "home" ? <>
       <div className="liquidity-toolbar">
-        <div className="liquidity-tabs" role="tablist" aria-label="Liquidity views" onKeyDown={handleTabKeyDown}>
-          <button id="liquidity-tab-pools" type="button" role="tab" aria-selected={tab === "pools"} aria-controls="liquidity-panel-pools" tabIndex={tab === "pools" ? 0 : -1} className={tab === "pools" ? "active" : ""} onClick={() => updateTab("pools")}>Pools</button>
-          <button id="liquidity-tab-positions" type="button" role="tab" aria-selected={tab === "positions"} aria-controls="liquidity-panel-positions" tabIndex={tab === "positions" ? 0 : -1} className={tab === "positions" ? "active" : ""} onClick={() => updateTab("positions")}>My positions</button>
+        <div className="liquidity-tabs" role="tablist" aria-label={t("ui.liquidityViews")} onKeyDown={handleTabKeyDown}>
+          <button id="liquidity-tab-pools" type="button" role="tab" aria-selected={tab === "pools"} aria-controls="liquidity-panel-pools" tabIndex={tab === "pools" ? 0 : -1} className={tab === "pools" ? "active" : ""} onClick={() => updateTab("pools")}>{t("liquidity.pools")}</button>
+          <button id="liquidity-tab-positions" type="button" role="tab" aria-selected={tab === "positions"} aria-controls="liquidity-panel-positions" tabIndex={tab === "positions" ? 0 : -1} className={tab === "positions" ? "active" : ""} onClick={() => updateTab("positions")}>{t("liquidity.positions")}</button>
         </div>
-        <ActionButton variant="primary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton>
+        <ActionButton variant="primary" icon={Plus} onClick={() => onNewPosition()}>{t("liquidity.newPosition")}</ActionButton>
       </div>
       <div className="liquidity-status-messages">{actionStatus}</div>
       <section id={`liquidity-panel-${tab}`} className="liquidity-tab-panel" role="tabpanel" aria-labelledby={`liquidity-tab-${tab}`}>
         {tab === "pools" ? <>
           <div className="liquidity-pools-list">
-            {!networkReady && !poolsLoading && exploredPools.length === 0 && <p className="muted">Waiting for the Service connection…</p>}
-            {poolsLoading && exploredPools.length === 0 && <div className="liquidity-query-skeleton" aria-busy="true" aria-label="Loading pools"><span /><span /></div>}
-            {!poolsLoading && poolsError && exploredPools.length === 0 && <div className="liquidity-query-error" role="alert"><p>Pool information is unavailable right now.</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={onRetryPools}>Try again</ActionButton></div>}
-            {networkReady && !poolsLoading && !poolsError && exploredPools.length === 0 && <div className="liquidity-compact-empty"><span className="muted">No liquidity pools yet.</span><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton></div>}
+            {!networkReady && !poolsLoading && exploredPools.length === 0 && <p className="muted">{t("ui.waitingService")}</p>}
+            {poolsLoading && exploredPools.length === 0 && <div className="liquidity-query-skeleton" aria-busy="true" aria-label={t("ui.loadingPools")}><span /><span /></div>}
+            {!poolsLoading && poolsError && exploredPools.length === 0 && <div className="liquidity-query-error" role="alert"><p>{t("ui.poolUnavailable")}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={onRetryPools}>{t("ui.tryAgain")}</ActionButton></div>}
+            {networkReady && !poolsLoading && !poolsError && exploredPools.length === 0 && <div className="liquidity-compact-empty"><span className="muted">{t("ui.noPools")}</span><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>{t("ui.newPosition")}</ActionButton></div>}
             {exploredPools.map((pool) => {
               const asset0 = assets.find((asset) => asset.assetIdHex === toHex(pool.asset0).toLowerCase());
               const asset1 = assets.find((asset) => asset.assetIdHex === toHex(pool.asset1).toLowerCase());
               return <article className="liquidity-explore-card" key={`${toHex(pool.asset0)}-${toHex(pool.asset1)}`}>
                 <div className="liquidity-explore-pair"><div className="liquidity-asset-pair">{asset0 && <AssetIdentity asset={asset0} size={30} />}<span className="liquidity-pair-divider">/</span>{asset1 && <AssetIdentity asset={asset1} size={30} />}</div></div>
-                {asset0 && asset1 && <div className="liquidity-explore-balances" role="group" aria-label="Pool balances">
+                {asset0 && asset1 && <div className="liquidity-explore-balances" role="group" aria-label={t("ui.poolBalances")}>
                   <span><strong>{formatUnits(pool.reserve0, asset0.decimals)}</strong> {asset0.symbol}</span>
                   <span><strong>{formatUnits(pool.reserve1, asset1.decimals)}</strong> {asset1.symbol}</span>
                 </div>}
-                <ActionButton size="small" variant="secondary" disabled={busyOrPending || !asset0 || !asset1} onClick={() => { if (asset0 && asset1) onNewPosition(asset0.assetIdHex, asset1.assetIdHex); }}>Add</ActionButton>
+                <ActionButton size="small" variant="secondary" disabled={busyOrPending || !asset0 || !asset1} onClick={() => { if (asset0 && asset1) onNewPosition(asset0.assetIdHex, asset1.assetIdHex); }}>{t("ui.add")}</ActionButton>
               </article>;
             })}
             {poolsPageError && <div className="inline-alert" role="alert">{poolsPageError}</div>}
             {hasMorePools && <ActionButton variant="secondary" loading={poolsPageLoading} disabled={poolsPageLoading || busyOrPending} onClick={() => void loadMorePools()}>Load more pools</ActionButton>}
           </div>
         </> : <div className="liquidity-positions-list">
-          {positionsLoading && positions.length === 0 && <div className="liquidity-query-skeleton" aria-busy="true" aria-label="Loading positions"><span /><span /></div>}
-          {!positionsLoading && positionsError && <div className="liquidity-query-error" role="alert"><p>{positionsError}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={retryPositions}>Try again</ActionButton></div>}
-          {!positionsLoading && !positionsError && !sessionOwner && <div className="liquidity-compact-empty"><span className="muted">Connect to see your positions.</span><ActionButton size="small" variant="secondary" onClick={onConnect}>Connect</ActionButton></div>}
-          {!positionsLoading && !positionsError && sessionOwner && !networkReady && <p className="muted">Waiting for the Service connection…</p>}
-          {!positionsLoading && !positionsError && sessionOwner && networkReady && positions.length === 0 && positionCursor >= positionIndexCount && <div className="liquidity-compact-empty"><span className="muted">No liquidity positions yet.</span><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>New position</ActionButton></div>}
-          {!positionsLoading && !positionsError && sessionOwner && positions.length === 0 && positionCursor < positionIndexCount && <p className="muted">No active positions on this page. More positions are available.</p>}
+          {positionsLoading && !positionsLoaded && <div className="liquidity-query-skeleton" aria-busy="true" aria-label={t("ui.loadingPositions")}><span /><span /></div>}
+          {positionsLoading && positionsLoaded && <p className="muted liquidity-refreshing" role="status">{t("ui.refreshingPositions")}</p>}
+          {!positionsLoading && positionsError && <div className="liquidity-query-error" role="alert"><p>{text(positionsError)}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={retryPositions}>{t("ui.tryAgain")}</ActionButton></div>}
+          {!positionsLoading && !positionsError && !sessionOwner && <div className="liquidity-compact-empty"><span className="muted">{t("ui.connectPositions")}</span><ActionButton size="small" variant="secondary" onClick={onConnect}>{t("common.connect")}</ActionButton></div>}
+          {!positionsLoading && !positionsError && sessionOwner && !networkReady && <p className="muted">{t("ui.waitingService")}</p>}
+          {!positionsLoading && !positionsError && sessionOwner && networkReady && positions.length === 0 && positionCursor >= positionIndexCount && <div className="liquidity-compact-empty"><span className="muted">{t("ui.noPositions")}</span><ActionButton size="small" variant="secondary" icon={Plus} onClick={() => onNewPosition()}>{t("ui.newPosition")}</ActionButton></div>}
+          {!positionsLoading && !positionsError && sessionOwner && positions.length === 0 && positionCursor < positionIndexCount && <p className="muted">{t("ui.noPositionsPage")}</p>}
           {sessionOwner && positions.map((position) => {
             const asset0 = assets.find((asset) => asset.assetIdHex === toHex(position.pool.asset0).toLowerCase());
             const asset1 = assets.find((asset) => asset.assetIdHex === toHex(position.pool.asset1).toLowerCase());
@@ -853,46 +870,47 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       </section>
     </> : <>
       <header className="liquidity-new-heading">
-        <button type="button" className="liquidity-back-link" onClick={() => onTabChange("pools")}><ArrowLeft size={18} aria-hidden="true" /> Liquidity</button>
-        <h1>New position</h1>
+        <button type="button" className="liquidity-back-link" onClick={() => onTabChange("pools")}><ArrowLeft size={18} aria-hidden="true" /> {t("common.liquidity")}</button>
+        <h1>{t("liquidity.newPosition")}</h1>
       </header>
       <div className="liquidity-status-messages">{actionStatus}</div>
       <section className="liquidity-section liquidity-new-card">
         <div className="liquidity-deposit-form">
           <AssetAmountInput
             className="liquidity-amount-field"
-            selector={<AssetSelector aria-label="Token A" value={assetAId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetAId && asset.assetIdHex !== assetBId) setPair(asset.assetIdHex, assetBId, "a"); }} variant="compact" showBalance={false} disabled={formLocked} triggerClassName="liquidity-asset-selector" />}
-            label="Token A"
-            balance={sessionOwner && selectedA ? `Balance: ${balanceLabel(selectedA)} ${selectedA.symbol}` : ""}
+            selector={<AssetSelector aria-label={t("ui.tokenA")} value={assetAId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetAId && asset.assetIdHex !== assetBId) setPair(asset.assetIdHex, assetBId, "a"); }} variant="compact" showBalance={false} disabled={formLocked} triggerClassName="liquidity-asset-selector" />}
+            label={t("ui.tokenA")}
+            balance={selectedA ? <AssetBalanceStatus state={getBalanceState(selectedA)} amount={formatUnits(selectedA.balance ?? 0n, selectedA.decimals)} symbol={selectedA.symbol} /> : undefined}
             id="liquidity-amount-a"
             amount={amountA}
             onAmountChange={updateAmountA}
             onMax={() => { if (selectedA) updateAmountA(formatUnits(selectedA.balance ?? 0n, selectedA.decimals)); }}
             maxDisabled={!selectedA || selectedA.balance === null}
             disabled={formLocked}
-            ariaLabel={`${selectedA?.symbol ?? "Token A"} amount`}
+            ariaLabel={t("ui.amountFor", { token: selectedA?.symbol ?? t("ui.tokenA") })}
           />
           <AssetAmountInput
             className="liquidity-amount-field"
-            selector={<AssetSelector aria-label="Token B" value={assetBId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetBId && asset.assetIdHex !== assetAId) setPair(assetAId, asset.assetIdHex, "b"); }} variant="compact" showBalance={false} disabled={formLocked} triggerClassName="liquidity-asset-selector" />}
-            label="Token B"
-            balance={sessionOwner && selectedB ? `Balance: ${balanceLabel(selectedB)} ${selectedB.symbol}` : ""}
+            selector={<AssetSelector aria-label={t("ui.tokenB")} value={assetBId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetBId && asset.assetIdHex !== assetAId) setPair(assetAId, asset.assetIdHex, "b"); }} variant="compact" showBalance={false} disabled={formLocked} triggerClassName="liquidity-asset-selector" />}
+            label={t("ui.tokenB")}
+            balance={selectedB ? <AssetBalanceStatus state={getBalanceState(selectedB)} amount={formatUnits(selectedB.balance ?? 0n, selectedB.decimals)} symbol={selectedB.symbol} /> : undefined}
             id="liquidity-amount-b"
             amount={amountB}
             onAmountChange={updateAmountB}
             onMax={() => { if (selectedB) updateAmountB(formatUnits(selectedB.balance ?? 0n, selectedB.decimals)); }}
             maxDisabled={!selectedB || selectedB.balance === null}
             disabled={formLocked}
-            ariaLabel={`${selectedB?.symbol ?? "Token B"} amount`}
+            ariaLabel={t("ui.amountFor", { token: selectedB?.symbol ?? t("ui.tokenB") })}
           />
         </div>
         {selectedA && selectedB && <>
-          {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && <p className="liquidity-disclosure">Your deposit sets the starting price for this pool.</p>}
-          {selectedPool && !poolEmpty && <div className="liquidity-current-rate"><span>Current pool rate</span><strong>1 {selectedA.symbol} = {pairPrice(selectedA, selectedB, selectedPool)} {selectedB.symbol}</strong></div>}
-          {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && selectedAmounts && selectedAmounts[0] > 0n && selectedAmounts[1] > 0n && <div className="liquidity-current-rate"><span>Initial price</span><strong>1 {selectedA.symbol} = {initialPrice} {selectedB.symbol}</strong></div>}
+          {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && <p className="liquidity-disclosure">{t("ui.startingPriceDisclosure")}</p>}
+          {selectedPool && !poolEmpty && <div className="liquidity-current-rate"><span>{t("ui.poolRate")}</span><strong>1 {selectedA.symbol} = {pairPrice(selectedA, selectedB, selectedPool)} {selectedB.symbol}</strong></div>}
+          {!selectedPoolLoading && !selectedPoolError && (!selectedPool || poolEmpty) && selectedAmounts && selectedAmounts[0] > 0n && selectedAmounts[1] > 0n && <div className="liquidity-current-rate"><span>{t("ui.initialPrice")}</span><strong>1 {selectedA.symbol} = {initialPrice} {selectedB.symbol}</strong></div>}
         </>}
-        {selectedPoolError && <div className="liquidity-query-error" role="alert"><p>{selectedPoolError}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={() => setPairRefreshRevision((revision) => revision + 1)}>Retry pool lookup</ActionButton></div>}
+        {selectedPoolError && <div className="liquidity-query-error" role="alert"><p>{text(selectedPoolError)}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={() => setPairRefreshRevision((revision) => revision + 1)}>{t("ui.retryPoolLookup")}</ActionButton></div>}
         {positionsPageError && <div className="inline-alert" role="alert">{positionsPageError}</div>}
+        {sessionOwner && !canPerformAuthorizedAction() && <p className="account-access-status" role="status">{t("auth.accountStillAuthorizing")}</p>}
         <ActionButton variant="primary" icon={sessionOwner ? Droplets : undefined} loading={(busy && !pending) || selectedPoolLoading} fullWidth disabled={ctaDisabled} onClick={() => sessionOwner ? void submitPreview() : onConnect()}>{ctaLabel}</ActionButton>
       </section>
     </>}
@@ -901,13 +919,14 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       open={!!review}
       title={review ? operationLabel(review.operation) : "Review liquidity"}
       onClose={closeReview}
-      footer={<><ActionButton variant="secondary" onClick={closeReview}>Cancel</ActionButton><ActionButton variant="primary" loading={busy || preparingAction} disabled={busyOrPending || preparingAction || !preparedAction || (removalPosition !== null && (!removalQuote || removalQuote.shares === 0n))} onClick={confirmAction}>Confirm</ActionButton></>}
+      footer={<><ActionButton variant="secondary" onClick={closeReview}>{t("common.cancel")}</ActionButton><ActionButton variant="primary" loading={busy || preparingAction} disabled={busyOrPending || preparingAction || !preparedAction || !canPerformAuthorizedAction() || (removalPosition !== null && (!removalQuote || removalQuote.shares === 0n))} onClick={confirmAction}>{t("common.confirm")}</ActionButton></>}
     >
+      {!canPerformAuthorizedAction() && <p className="account-access-status" role="status">{authorizationWaitMessage || "正在准备账户，请稍候。"}</p>}
       {removalPosition ? <div className="liquidity-review">
         {customWithdraw
-          ? <label className="liquidity-withdraw-field"><span>Remove (%)</span><input aria-label="Custom withdrawal percentage" type="number" min="1" max="100" step="1" value={withdrawPercentText} onChange={(event) => updateCustomWithdrawPercent(event.target.value)} /></label>
+          ? <label className="liquidity-withdraw-field"><span>{t("ui.removePercent")}</span><input aria-label={t("ui.customWithdrawal")} type="number" min="1" max="100" step="1" value={withdrawPercentText} onChange={(event) => updateCustomWithdrawPercent(event.target.value)} /></label>
           : <span className="liquidity-review-caption">Remove {withdrawPercent}%</span>}
-        {error && <p className="liquidity-review-error" role="alert">{error}</p>}
+        {error && <p className="liquidity-review-error" role="alert">{text(error)}</p>}
         {removalQuote && <ConfirmationAssetList items={removalAssetLines} />}
       </div>
         : review?.operation === "create" ? <ConfirmationAssetList items={[

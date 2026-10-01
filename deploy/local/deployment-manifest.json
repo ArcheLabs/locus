@@ -2,28 +2,29 @@
   "format": 1,
   "network": "local",
   "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
-  "locusServiceId": 3362439117,
-  "locusCodeHash": "0xe8919ce6dca6b301ffa7bcf9b2d99f7174909df11f6ada6e67b0cd837fe0e110",
+  "locusServiceId": 3640358060,
+  "locusCodeHash": "0x7244d2be5d4c66cd59b186700c18e86464e0e5768cb73e64b4d03258cbd97114",
   "deployment": {
     "finalized": true,
-    "blockNumber": 16470,
-    "blockHash": "0xb8282863a12f61b0a21d22670c1fd7e147105590eddb7ba060feb665c0631fde",
-    "operationId": "0xeeb0a1eb71db108e35ccc09394de931af11373747305fd2f4a500584831f56a5"
+    "blockNumber": 22251,
+    "blockHash": "0xd8bc04975cbc7593119ed050ebbd5905afd0e17e77060b9d78c248e80e515f1d",
+    "operationId": "0x3d0b0d2e6a81ea7cecfc972d88a68adeed6a3aa0dcbf49cc5dd67e33ffb42f0d"
   },
-  "locusCommit": "f490fa6925024c7d8a3a0150614aac4c931d9871",
-  "jamscriptRelease": "v0.1.0-dev+82d2e15",
-  "backendRelease": "local-stale-context-retry-20260930",
+  "locusCommit": "5a5fcba",
+  "jamscriptRelease": "v0.1.0-dev+13db5b9",
+  "backendRelease": "local-polkadot-signraw-wrapper-20261001",
   "minijamRelease": "stage1-v0.2.0",
   "images": {
     "minijam": "sha256:9e08ccf5a0ce373860082ef79453c8f3d86c61d95af671bb0cfce19799ef3b00",
-    "backend": "sha256:463bb9b59161d9aad7e672a32848dd987e6ab4a67096a3b21f94860152f41a83"
+    "backend": "sha256:47fea9cfa38fc305f74900ac362ac11001493ed4008f27b9dedb9d8d4d5457c4"
   },
   "initializedAssetCount": 6,
   "initializedPoolCount": 0,
-  "jamscriptSourceCommit": "82d2e15f6a6f26a86ed3f0c7b3a9fa26fb88ced5",
+  "jamscriptSourceCommit": "13db5b9de941bfa739894d75fbcf0758bf35cef4",
   "jamscriptToolchainSha256": "",
   "scriptcOptimization": "release",
   "jamscriptToolchainId": "development",
   "canonicalToolchain": false,
-  "serviceArtifactDigest": "0x710fbf9896a9bc59eaf1b6a7c312bf12f5b3c3e2e17f848af760062fef9c5908"
+  "serviceArtifactDigest": "0x4f0f90942858c640ede469d9c1e589ff9fb60e1e699d0e45fb789b1d1aa19226",
+  "runtimeVerifierFixCommit": "6f20644d4c2a38d2d29d2ff4b46bda037e60ca4a"
 }

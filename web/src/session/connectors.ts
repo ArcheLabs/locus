@@ -19,6 +19,8 @@ type StandardConnectFeature = {
   connect(options?: { silent?: boolean }): Promise<{ accounts: readonly WalletAccount[] }>;
 };
 
+type SolanaSignMessageApi = SolanaSignMessageFeature[typeof SolanaSignMessage];
+
 type EventProvider = Eip1193Provider & {
   on?: (event: string, listener: (...args: unknown[]) => void) => void;
   removeListener?: (event: string, listener: (...args: unknown[]) => void) => void;
@@ -54,7 +56,7 @@ export function hasEvmWallet(): boolean {
 }
 
 export function hasSolanaWallet(): boolean {
-  return getWallets().get().some((wallet) => wallet.chains.some((chain) => chain.startsWith("solana:")) || Boolean(wallet.features[SolanaSignMessage]));
+  return solanaWallets().some((wallet) => Boolean(solanaSignMessageApi(wallet)));
 }
 
 async function evmAccounts(): Promise<BrowserAccountOption[]> {
@@ -78,6 +80,19 @@ async function polkadotAccounts(): Promise<{ account: PolkadotBrowserAccount; op
 
 function solanaWallets(): readonly Wallet[] {
   return getWallets().get().filter((wallet) => wallet.chains.some((chain) => chain.startsWith("solana:")) || Boolean(wallet.features[SolanaSignMessage]));
+}
+
+function solanaSignMessageApi(wallet: Wallet | undefined): SolanaSignMessageApi | undefined {
+  const advertised = wallet?.features[SolanaSignMessage] as SolanaSignMessageApi | SolanaSignMessageFeature | undefined;
+  if (!advertised) return undefined;
+  const api = "signMessage" in advertised
+    ? advertised
+    : advertised[SolanaSignMessage];
+  return typeof api?.signMessage === "function" ? api : undefined;
+}
+
+function signerSolanaSignMessageFeature(api: SolanaSignMessageApi): SolanaSignMessageFeature {
+  return { [SolanaSignMessage]: api };
 }
 
 function walletAccountOption(wallet: Wallet, account: WalletAccount): BrowserAccountOption {
@@ -164,9 +179,9 @@ async function connectSolana(selectedId: string): Promise<LocusWebSession> {
     account = result.accounts.find((candidate) => candidate.chains.some((chain) => chain.startsWith("solana:")));
   }
   if (!account) throw new Error("The Solana wallet did not return an account.");
-  const signMessage = wallet.features[SolanaSignMessage] as SolanaSignMessageFeature | undefined;
+  const signMessage = solanaSignMessageApi(wallet);
   if (!signMessage) throw new Error("The Solana wallet does not support message signing.");
-  const signer = new SolanaOwnershipSigner(account, signMessage);
+  const signer = new SolanaOwnershipSigner(account, signerSolanaSignMessageFeature(signMessage));
   return {
     kind: "solana",
     owner: asOwnership(await signer.getController()),
@@ -207,9 +222,9 @@ export async function restoreBrowserSession(kind: Exclude<SessionKind, "matrix">
   const requestedAddress = separator < 0 ? "" : selectedId.slice(separator + 2);
   const wallet = solanaWallets().find((candidate) => candidate.name === walletName);
   const account = wallet?.accounts.find((candidate) => candidate.address === requestedAddress);
-  const signMessage = wallet?.features[SolanaSignMessage] as SolanaSignMessageFeature | undefined;
+  const signMessage = solanaSignMessageApi(wallet);
   if (!wallet || !account || !signMessage) throw new Error("The saved Solana wallet account is not available.");
-  const signer = new SolanaOwnershipSigner(account, signMessage);
+  const signer = new SolanaOwnershipSigner(account, signerSolanaSignMessageFeature(signMessage));
   const controller = asOwnership(await signer.getController());
   return { kind: "solana", owner: controller, controller, ownershipSession: { signer, subject: controller }, label: `Solana ${shortAddress(account.address)}`, address: account.address, connectionId: selectedId };
 }

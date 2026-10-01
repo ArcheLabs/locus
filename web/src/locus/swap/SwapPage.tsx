@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDownUp, ArrowLeftRight } from "lucide-react";
+import { AlertTriangle, ArrowDownUp, ArrowLeftRight } from "lucide-react";
 import { formatUnits, minimumAmountOut, ownershipKey, parseUnits, quoteExactIn, SWAP_FEE_BPS, toHex, type LocusClient, type Ownership, type Pool } from "@archelabs/locus";
 import type { AssetView } from "../assets.js";
 import { AssetSelector } from "../../components/AssetSelector.js";
@@ -9,13 +9,15 @@ import { Modal } from "../../components/Modal.js";
 import { ConfirmationAssetList } from "../../components/ConfirmationAssetList.js";
 import { FieldMessage } from "../../forms/FieldMessage.js";
 import { FormField } from "../../forms/FormField.js";
-import { normalizeActionError } from "../../errors/normalizeError.js";
+import { knownActionErrorMessage } from "../../errors/normalizeError.js";
 import { validatePositiveAmount } from "../../forms/validation.js";
-import { parseSlippageBps } from "./swapValidation.js";
+import { isPairConfirmedUnsupported, parseSlippageBps } from "./swapValidation.js";
 import type { LiquidityScope } from "../liquidity/liquidityTypes.js";
 import { directPoolForPair } from "../pools/poolQueries.js";
 import { formatBasisPoints } from "../liquidity/liquidityMath.js";
 import type { GlobalTransactionNotice } from "../../components/GlobalNotifications.js";
+import { useI18n } from "../../i18n/I18nProvider.js";
+import { AssetBalanceStatus } from "../../components/AssetBalanceStatus.js";
 
 type Submission = "idle" | "awaiting-signature" | "submitted" | "applied" | "failed";
 type Quote = { amountIn: bigint; amountOut: bigint; minimumAmountOut: bigint; feeAmount: bigint };
@@ -23,17 +25,14 @@ type Quote = { amountIn: bigint; amountOut: bigint; minimumAmountOut: bigint; fe
 export { parseSlippageBps } from "./swapValidation.js";
 
 function friendlySwapError(cause: unknown): string {
-  const normalized = normalizeActionError(cause, "The swap could not be completed.");
-  if (normalized.includes("balance is too low")) return "Your balance is too low for this swap.";
-  if (normalized.includes("There is not enough liquidity")) return "There is not enough liquidity for this swap.";
-  return normalized;
+  return knownActionErrorMessage(cause) ?? "The swap could not be completed.";
 }
 
 function sameScope(current: ((scope: LiquidityScope) => boolean) | undefined, scope: LiquidityScope): boolean {
   return current ? current(scope) : true;
 }
 
-export function SwapPage({ networkMode, networkId, status, serviceId, locus, assets, pools, poolLoading, poolError, sessionOwner, connectionId, isScopeCurrent, onConnect, onApplied, onNotify, onTransactionNotice, onClearTransactionNotice, onRefreshAssets, onRefreshPools }: {
+export function SwapPage({ networkMode, networkId, status, serviceId, locus, assets, pools, poolLoading, poolError, sessionOwner, connectionId, isScopeCurrent, canPerformAuthorizedAction, authorizationWaitMessage, onConnect, onApplied, onNotify, onTransactionNotice, onClearTransactionNotice, onRefreshAssets, onRefreshPools, getBalanceState }: {
   networkMode: boolean;
   networkId: string;
   status: string;
@@ -46,6 +45,8 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   sessionOwner: Ownership | null;
   connectionId: string | null;
   isScopeCurrent?: (scope: LiquidityScope) => boolean;
+  canPerformAuthorizedAction: () => boolean;
+  authorizationWaitMessage: string;
   onConnect: () => void;
   onApplied: (item: { assetIn: string; assetOut: string; amountIn: string; amountOut: string; transactionId: string; networkId: string }) => void;
   onNotify: (message: string) => void;
@@ -53,6 +54,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   onClearTransactionNotice: (id: string) => void;
   onRefreshAssets: () => Promise<unknown>;
   onRefreshPools: () => Promise<unknown>;
+  getBalanceState: (asset: AssetView) => "known" | "loading" | "failed" | "signed-out";
 }) {
   const [assetInId, setAssetInId] = useState("");
   const [assetOutId, setAssetOutId] = useState("");
@@ -63,6 +65,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   const [reviewOpen, setReviewOpen] = useState(false);
   const [submission, setSubmission] = useState<Submission>("idle");
   const [actionError, setActionError] = useState("");
+  const { t, text } = useI18n();
   const busy = submission === "awaiting-signature" || submission === "submitted";
 
   useEffect(() => {
@@ -88,6 +91,16 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   const assetIn = assetById.get(assetInId.toLowerCase()) ?? null;
   const assetOut = assetById.get(assetOutId.toLowerCase()) ?? null;
   const pool = assetIn && assetOut ? directPoolForPair(pools, assetIn.assetIdHex, assetOut.assetIdHex) : null;
+  const pairUnsupported = isPairConfirmedUnsupported({
+    networkMode,
+    hasInput: Boolean(assetIn),
+    hasOutput: Boolean(assetOut),
+    sameAsset: Boolean(assetIn && assetOut && assetIn.assetIdHex === assetOut.assetIdHex),
+    loading: poolLoading,
+    error: Boolean(poolError),
+    hasPool: Boolean(pool),
+    hasReserves: Boolean(pool && pool.reserve0 > 0n && pool.reserve1 > 0n),
+  });
   const slippageBps = parseSlippageBps(slippage);
   const quote: Quote | null = useMemo(() => {
       if (!pool || !assetIn || !assetOut || !amount.trim()) return null;
@@ -146,7 +159,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
     setAmountTouched(true);
     setActionError("");
     if (!networkMode || status !== "ready" || !locus) {
-      setActionError("The selected network is unavailable. Retry the connection before swapping.");
+      setActionError(t("send.networkUnavailable"));
       return;
     }
     if (!sessionOwner) {
@@ -162,7 +175,11 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   }
 
   async function confirmSwap() {
-    if (!locus || !assetIn || !assetOut || !quote || !sessionOwner || serviceId === null) return;
+    if (!locus || !assetIn || !assetOut || !quote || !sessionOwner || serviceId === null || pairUnsupported) return;
+    if (!canPerformAuthorizedAction()) {
+      setActionError(t("auth.accountStillAuthorizing"));
+      return;
+    }
     const expectedScope: LiquidityScope = {
       networkId,
       serviceId,
@@ -221,14 +238,14 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       setAmount("");
       setAmountTouched(false);
       await Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
-      onNotify("Swap completed.");
+      onNotify(t("swap.completed"));
     } catch (cause) {
       const message = friendlySwapError(cause);
       if (submittedTransactionId) {
         onTransactionNotice({
           id: "swap-transaction",
-          title: terminalFailure ? "Swap failed" : "Swap status needs attention",
-          message: terminalFailure ? `${message} Review the current balances before retrying.` : "The final status is not available yet. Check it before retrying.",
+          title: terminalFailure ? t("ui.swapFailed") : t("ui.swapStatusAttention"),
+          message: terminalFailure ? t("ui.reviewBalancesBeforeRetry") : t("ui.finalStatusUnavailable"),
           transactionId: submittedTransactionId,
           tone: "error",
           dismissible: true,
@@ -256,15 +273,15 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
     setActionError("");
   }
 
-  return <section className="page swap-page">
+  return <section className="page page--narrow swap-page">
     <div className="card swap-card">
-      {poolLoading && <p className="muted">Checking available pairs…</p>}
-      {poolError && <div className="inline-alert" role="alert">Available pairs could not be loaded. Try again from the network controls.</div>}
+      {poolLoading && <p className="muted" role="status">{t("swap.checkingPairs")}</p>}
+      {poolError && <div className="inline-alert" role="alert"><span>{t("swap.pairsUnavailable")}</span><ActionButton size="small" variant="secondary" onClick={() => void onRefreshPools()}>{t("common.retry")}</ActionButton></div>}
       <div className="swap-amount-field">
         <AssetAmountInput
           selector={<AssetSelector aria-label="Asset to pay" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} disabled={busy} value={assetInId} assets={assets} onValueChange={(asset) => updatePair(asset.assetIdHex, assetOutId)} />}
-          label="You pay"
-          balance={`Balance: ${assetIn?.balance === null || !assetIn ? "Unavailable" : formatUnits(assetIn.balance, assetIn.decimals)} ${assetIn?.symbol ?? ""}`.trim()}
+          label={t("ui.youPay")}
+          balance={assetIn ? <AssetBalanceStatus state={getBalanceState(assetIn)} amount={formatUnits(assetIn.balance ?? 0n, assetIn.decimals)} symbol={assetIn.symbol} /> : undefined}
           id="swap-amount"
           amount={amount}
           disabled={busy}
@@ -273,60 +290,60 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
           onMax={useMax}
           maxDisabled={!assetIn || assetIn.balance === null}
           placeholder="0"
-          ariaLabel="Amount to pay"
+          ariaLabel={t("ui.amountToPay")}
           ariaInvalid={Boolean(visibleValidation)}
           ariaDescribedBy={visibleValidation ? "swap-amount-error" : undefined}
         />
         <div className={`swap-direction-row${visibleValidation ? " swap-direction-row--invalid" : ""}`}>
           {visibleValidation && <FieldMessage id="swap-amount-error" error={visibleValidation} />}
-          <button className="swap-direction" type="button" aria-label="Switch assets" disabled={busy} onClick={flipPair}><ArrowDownUp size={18} aria-hidden="true" /></button>
+          <button className="swap-direction" type="button" aria-label={t("ui.switchAssets")} disabled={busy} onClick={flipPair}><ArrowDownUp size={18} aria-hidden="true" /></button>
         </div>
       </div>
 
       <AssetAmountInput
         className="swap-amount-field"
-        selector={<AssetSelector aria-label="Asset to receive" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} disabled={busy} value={assetOutId} assets={assets} onValueChange={(asset) => updatePair(assetInId, asset.assetIdHex)} />}
-        label="You receive"
-        balance="Estimated amount"
+        selector={<AssetSelector aria-label={t("ui.assetToReceive")} triggerClassName="swap-asset-selector" variant="compact" showBalance={false} disabled={busy} value={assetOutId} assets={assets} onValueChange={(asset) => updatePair(assetInId, asset.assetIdHex)} />}
+        label={t("ui.youReceive")}
+        balance={t("ui.estimatedAmount")}
         id="swap-token-out"
         amount={quote && assetOut ? formatUnits(quote.amountOut, assetOut.decimals) : "0"}
         readOnly
-        ariaLabel="Estimated amount to receive"
+        ariaLabel={t("ui.estimatedAmountToReceive")}
       />
-      {assetIn && assetOut && assetIn.assetIdHex === assetOut.assetIdHex && <FieldMessage error="Choose two different assets." />}
-      {assetIn && assetOut && assetIn.assetIdHex !== assetOut.assetIdHex && !pool && !poolLoading && <FieldMessage>This pair is not available for swapping yet.</FieldMessage>}
-      {pool && (!pool.reserve0 || !pool.reserve1) && <p className="form-message">This pair is not available for swapping yet.</p>}
+      {assetIn && assetOut && assetIn.assetIdHex === assetOut.assetIdHex && <FieldMessage error={t("swap.chooseDifferent")} />}
+      {pairUnsupported && <p className="swap-unavailable" role="status"><AlertTriangle size={17} aria-hidden="true" />{t("swap.unsupportedPair")}</p>}
 
       {quote && assetIn && assetOut && price !== null && <p className="swap-rate">1 {assetIn.symbol} ≈ {price.toLocaleString(undefined, { maximumFractionDigits: 8 })} {assetOut.symbol}</p>}
-      {impact !== null && impact >= 5 && <p className="swap-impact-warning" role="status">High price impact: {impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</p>}
+      {impact !== null && impact >= 5 && <p className="swap-impact-warning" role="status">{t("swap.highImpact", { impact: impact.toLocaleString(undefined, { maximumFractionDigits: 2 }) })}</p>}
       <details className="swap-advanced-details" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
-        <summary>Transaction details</summary>
-        <FormField label="Slippage tolerance" htmlFor="swap-slippage" error={visibleSlippageError ? "Enter a slippage value from 0.01% to 50%." : null} errorId="swap-slippage-error" className="swap-settings-field">
+        <summary>{t("ui.transactionDetails")}</summary>
+        <FormField label={t("swap.slippage")} htmlFor="swap-slippage" error={visibleSlippageError ? t("swap.enterSlippage") : null} errorId="swap-slippage-error" className="swap-settings-field">
           <div className="swap-slippage-input"><input id="swap-slippage" inputMode="decimal" disabled={busy} value={slippage} onChange={(event) => setSlippage(event.target.value)} aria-invalid={visibleSlippageError} aria-describedby={visibleSlippageError ? "swap-slippage-error" : undefined} /><span>%</span></div>
         </FormField>
         {quote && assetOut && <dl className="swap-quote-details">
-          <div><dt>Minimum received</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
-          <div><dt>Fee</dt><dd>{feeLabel}</dd></div>
-          {impact !== null && <div><dt>Price impact</dt><dd>{impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</dd></div>}
+          <div><dt>{t("ui.minimumReceived")}</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
+          <div><dt>{t("ui.fee")}</dt><dd>{feeLabel}</dd></div>
+          {impact !== null && <div><dt>{t("ui.priceImpact")}</dt><dd>{impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</dd></div>}
         </dl>}
       </details>
 
-      {actionError && <p className="action-status action-status--error" role="alert">{actionError}</p>}
-      <ActionButton className="swap-review-action" variant="primary" icon={ArrowLeftRight} fullWidth disabled={busy || status !== "ready" || !quote || !assetIn || !assetOut || Boolean(validation) || slippageMissing || submission === "applied"} onClick={openReview}>
-        {submission === "awaiting-signature" ? "Approve in wallet…" : submission === "submitted" ? "Waiting for confirmation…" : submission === "applied" ? "Swap completed" : sessionOwner ? "Review swap" : "Connect to swap"}
+      {actionError && <p className="action-status action-status--error" role="alert">{text(actionError)}</p>}
+      <ActionButton className={`swap-review-action${pairUnsupported ? " action-button--unsupported" : ""}`} variant="primary" icon={ArrowLeftRight} fullWidth disabled={busy || status !== "ready" || poolLoading || Boolean(poolError) || pairUnsupported || !quote || !assetIn || !assetOut || Boolean(validation) || slippageMissing || submission === "applied"} onClick={openReview}>
+        {pairUnsupported ? t("swap.swapNotSupported") : submission === "awaiting-signature" ? t("send.approveWallet") : submission === "submitted" ? t("send.waitingConfirmation") : submission === "applied" ? t("swap.completed") : sessionOwner ? t("swap.reviewSwap") : t("swap.connectToSwap")}
       </ActionButton>
     </div>
 
-    {reviewOpen && quote && assetIn && assetOut && <Modal open title="Confirm swap" onClose={() => setReviewOpen(false)} footer={<><ActionButton variant="secondary" onClick={() => setReviewOpen(false)}>Cancel</ActionButton><ActionButton variant="primary" disabled={busy} onClick={() => void confirmSwap()}>Confirm</ActionButton></>}>
+    {reviewOpen && quote && assetIn && assetOut && <Modal open title={t("swap.confirmSwap")} onClose={() => setReviewOpen(false)} footer={<><ActionButton variant="secondary" onClick={() => setReviewOpen(false)}>{t("common.cancel")}</ActionButton><ActionButton variant="primary" disabled={busy || !canPerformAuthorizedAction()} onClick={() => void confirmSwap()}>{t("common.confirm")}</ActionButton></>}>
       <ConfirmationAssetList items={[
-        { asset: assetIn, amount: formatUnits(quote.amountIn, assetIn.decimals), detail: `Pay · ${assetIn.name}` },
-        { asset: assetOut, amount: `≈ ${formatUnits(quote.amountOut, assetOut.decimals)}`, detail: `Receive · ${assetOut.name}` },
+        { asset: assetIn, amount: formatUnits(quote.amountIn, assetIn.decimals), detail: `${t("ui.youPay")} · ${assetIn.name}` },
+        { asset: assetOut, amount: `≈ ${formatUnits(quote.amountOut, assetOut.decimals)}`, detail: `${t("ui.youReceive")} · ${assetOut.name}` },
       ]} />
       <dl className="review-list confirmation-details">
-        <div><dt>Minimum received</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
-        <div><dt>Fee</dt><dd>{feeLabel}</dd></div>
-        {impact !== null && impact >= 1 && <div><dt>Price impact</dt><dd>{impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</dd></div>}
+        <div><dt>{t("ui.minimumReceived")}</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
+        <div><dt>{t("ui.fee")}</dt><dd>{feeLabel}</dd></div>
+        {impact !== null && impact >= 1 && <div><dt>{t("ui.priceImpact")}</dt><dd>{impact.toLocaleString(undefined, { maximumFractionDigits: 2 })}%</dd></div>}
       </dl>
+      {!canPerformAuthorizedAction() && <p className="action-status" role="status">{t("auth.accountStillAuthorizing")}</p>}
     </Modal>}
   </section>;
 }

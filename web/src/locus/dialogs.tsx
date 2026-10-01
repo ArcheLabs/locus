@@ -9,6 +9,8 @@ import type { AssetView } from "./assets.js";
 import type { RecipientResolution } from "./recipients.js";
 import { IdentityIcon } from "../components/IdentityIcon.js";
 import { ConfirmationAssetList } from "../components/ConfirmationAssetList.js";
+import { useI18n, type TranslationKey } from "../i18n/I18nProvider.js";
+import { useGlobalNotify } from "../components/GlobalNotificationContext.js";
 import {
   createAssetPendingKey,
   OperationTimeoutError,
@@ -42,40 +44,41 @@ export function ReviewDialog({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useI18n();
   return (
     <Modal
       open={open}
-      title="Confirm transfer"
+      title={t("ui.confirmTransfer")}
       onClose={onClose}
-      footer={<><ActionButton variant="secondary" onClick={onClose}>Cancel</ActionButton><ActionButton variant="primary" disabled={!resolution.valid} onClick={onConfirm}>Confirm</ActionButton></>}
+      footer={<><ActionButton variant="secondary" onClick={onClose}>{t("common.cancel")}</ActionButton><ActionButton variant="primary" disabled={!resolution.valid} onClick={onConfirm}>{t("ui.confirm")}</ActionButton></>}
     >
       <ConfirmationAssetList items={[{ asset, amount }]} />
       <dl className="review-list confirmation-details">
-        <div><dt>To</dt><dd>{recipient}</dd></div>
+        <div><dt>{t("ui.to")}</dt><dd>{recipient}</dd></div>
       </dl>
     </Modal>
   );
 }
 
 export function ReceiveDialog({ open, asset, session, onClose }: { open: boolean; asset: Pick<AssetView, "symbol"> | { symbol: string } | null; session: LocusWebSession | null; onClose: () => void }) {
-  const [copied, setCopied] = useState(false);
+  const { t } = useI18n();
+  const notify = useGlobalNotify();
   const locusId = session ? formatLocusId(session.owner) : "";
   async function copy() {
     if (!locusId) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard access is unavailable");
       await navigator.clipboard.writeText(locusId);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1800);
-    } catch { setCopied(false); }
+      notify("Copied");
+    } catch { /* Clipboard failures stay silent; the ID remains selectable. */ }
   }
   return (
     <Modal open={open} title="Receive" onClose={onClose}>
-      <p className="modal-lead">Share this Locus ID to receive {asset?.symbol ?? "the asset"}.</p>
-      {!session ? <div className="empty-state">Connect an Ownership session before receiving. Demo Mode does not submit receive actions.</div> : <>
+      <p className="modal-lead">{t("ui.receiveShare", { asset: asset?.symbol ?? "the asset" })}</p>
+      {!session ? <div className="empty-state">{t("ui.receiveNeedsSession")}</div> : <>
         <div className="receive-code"><code>{locusId}</code></div>
-        <ActionButton variant="secondary" icon={ClipboardCopy} fullWidth onClick={copy}>{copied ? "Copied" : "Copy Locus ID"}</ActionButton>
-        <p className="modal-note">Receiving is an Ownership operation; no destination chain or bridge is involved.</p>
+        <ActionButton variant="secondary" icon={ClipboardCopy} fullWidth onClick={copy}>{t("ui.copyLocusId")}</ActionButton>
+        <p className="modal-note">{t("ui.receiveDetails")}</p>
       </>}
     </Modal>
   );
@@ -104,12 +107,12 @@ function stageLabel(stage: CreateAssetStage): string {
   }
 }
 
-function preparationPhaseMessage(phase: OwnershipPreparationPhase): string {
+function preparationPhaseKey(phase: OwnershipPreparationPhase): TranslationKey {
   switch (phase) {
-    case "VALIDATING_DEPLOYMENT": return "Validating the selected Locus deployment before the wallet opens.";
-    case "READING_FINALIZED_CONTEXT": return "Reading finalized chain context before the wallet opens.";
-    case "READING_MANAGED_STATE": return "Reading the Ownership state root before the wallet opens.";
-    case "READING_NONCE": return "Reading the Ownership nonce before the wallet opens.";
+    case "VALIDATING_DEPLOYMENT": return "ui.assetStage.phaseDeployment";
+    case "READING_FINALIZED_CONTEXT": return "ui.assetStage.phaseFinalized";
+    case "READING_MANAGED_STATE": return "ui.assetStage.phaseOwnership";
+    case "READING_NONCE": return "ui.assetStage.phaseNonce";
   }
 }
 
@@ -122,15 +125,21 @@ type CreateAssetPreparationRequest = {
   initialSupply: bigint;
 };
 
-export function CreateAssetDialog({ open, locus, session, networkId, serviceId, onClose, onCreated }: {
+type LocalizedMessageParameter = string | number | { key: TranslationKey };
+type LocalizedMessage = string | { key: TranslationKey; params?: Record<string, LocalizedMessageParameter> };
+
+export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAction, authorizationWaitMessage, networkId, serviceId, onClose, onCreated }: {
   open: boolean;
   locus: LocusClient | null;
   session: LocusWebSession | null;
+  canPerformAuthorizedAction: () => boolean;
+  authorizationWaitMessage: string;
   networkId: string;
   serviceId: number | null;
   onClose: () => void;
   onCreated: () => void;
 }) {
+  const { t, text } = useI18n();
   const [name, setName] = useState("");
   const [symbol, setSymbol] = useState("");
   const [decimals, setDecimals] = useState("0");
@@ -144,7 +153,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
   const activeResumeKeys = useRef(new Set<string>());
   const [prepareRequest, setPrepareRequest] = useState<CreateAssetPreparationRequest | null>(null);
   const [stage, setStage] = useState<CreateAssetStage>("EDITING");
-  const [stageMessage, setStageMessage] = useState("Enter the asset details to prepare the network action.");
+  const [stageMessage, setStageMessage] = useState<LocalizedMessage>("Enter the asset details to prepare the network action.");
   const [error, setError] = useState("");
   const [pending, setPending] = useState<CreateAssetPendingRecord | null>(null);
   const pendingRef = useRef<CreateAssetPendingRecord | null>(null);
@@ -180,6 +189,10 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
 
   function requestPreparation() {
     if (!locus || !session || !pendingScope || pendingRef.current || !assetDetailsComplete || draftSupply === null) return;
+    if (!canPerformAuthorizedAction()) {
+      setStageMessage(authorizationWaitMessage || "正在准备账户，请稍候。");
+      return;
+    }
     setError("");
     setStage("PREPARING");
     setStageMessage("Preparing the create action. No wallet request is open yet.");
@@ -217,7 +230,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
     if (activeResumeKeys.current.has(record.key)) return;
     activeResumeKeys.current.add(record.key);
     setStage("FINALIZING");
-    setStageMessage(`Transaction ${record.transactionId} is saved. Checking its final receipt; no new signature is needed.`);
+    setStageMessage({ key: "ui.assetStage.checkingSaved", params: { transactionId: record.transactionId } });
     setError("");
     try {
       const result = await resumeCreateAssetFinalization(
@@ -241,7 +254,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
       const message = cause instanceof Error ? cause.message : "Unable to check the saved create-asset transaction.";
       setStage("FAILED");
       setStageMessage(record.transactionId
-        ? `Transaction ${record.transactionId} is still saved. Resume finalization; do not sign this action again.`
+        ? { key: "ui.assetStage.resumeSaved", params: { transactionId: record.transactionId } }
         : "The transaction status could not be confirmed.");
       setError(message);
     } finally {
@@ -316,7 +329,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
         undefined,
         (phase) => {
           lastPhase = phase;
-          if (generation === prepareGeneration.current) setStageMessage(preparationPhaseMessage(phase));
+          if (generation === prepareGeneration.current) setStageMessage({ key: preparationPhaseKey(phase) });
         },
       );
       void withPreparationTimeout(
@@ -339,8 +352,8 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
           preparedRef.current = null;
           setStage("FAILED");
           if (cause instanceof PreparationTimeoutError) {
-            const phase = lastPhase ? preparationPhaseMessage(lastPhase) : "Preparing the Ownership controller.";
-            setStageMessage(`${phase} Preparation timed out. No signature was requested and no transaction was submitted. Refresh the page before retrying if this happens again.`);
+            const phase = { key: lastPhase ? preparationPhaseKey(lastPhase) : "ui.preparingAction" } as const;
+            setStageMessage({ key: "ui.assetStage.preparationTimeout", params: { phase } });
             setError(cause.message);
           } else {
             setStageMessage("The action was not signed or submitted. Retry preparation after checking the network connection.");
@@ -395,6 +408,10 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
 
   async function signAndCreate() {
     if (!locus || !preparedRef.current || pendingRef.current) return;
+    if (!canPerformAuthorizedAction()) {
+      setStageMessage(authorizationWaitMessage || "正在准备账户，请稍候。");
+      return;
+    }
     const preparedAction = preparedRef.current;
     preparedRef.current = null;
     setPrepared(null);
@@ -411,6 +428,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
       setStage("SIGNED");
       setStageMessage("Wallet signature received. Submitting the signed action once.");
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+      if (!canPerformAuthorizedAction()) throw new Error(`${authorizationWaitMessage || "正在准备账户，请稍候。"} No transaction was submitted.`);
 
       const assetIdHex = bytesToHex(draftAssetId);
       const recordBase: CreateAssetPendingRecord = {
@@ -438,7 +456,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
         async (submittedRecord, submitted) => {
         updatePending(submittedRecord);
         setStage("SUBMITTED");
-        setStageMessage(`Transaction ${submitted.transactionId} was received and saved. Resuming will poll this transaction, not sign again.`);
+        setStageMessage({ key: "ui.assetStage.transactionSaved", params: { transactionId: submitted.transactionId } });
         if (submissionTimedOut) void resumePending(submittedRecord);
         },
       );
@@ -479,7 +497,7 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
       } else {
         setStage("FAILED");
         setStageMessage(errorPending.transactionId
-          ? `Transaction ${errorPending.transactionId} is saved; resume finalization without signing again.`
+          ? { key: "ui.assetStage.resumeTransaction", params: { transactionId: errorPending.transactionId } }
           : "The submission outcome is unresolved. Do not sign or submit it again automatically.");
         setError(message);
       }
@@ -492,33 +510,51 @@ export function CreateAssetDialog({ open, locus, session, networkId, serviceId, 
   const stageBusy = stage === "PREPARING" || signatureInProgress || stage === "SIGNED" || stage === "SUBMITTING" || stage === "SUBMITTED" || stage === "FINALIZING";
   const canRetryPreparation = stage === "FAILED" && pending === null && assetDetailsComplete;
   const assetFieldsDisabled = pending !== null || stageBusy || signatureReady;
+  const issuerType = session?.kind === "matrix" ? t("common.matrix")
+    : session?.kind === "evm" ? t("ui.evmWallet")
+      : session?.kind === "polkadot" ? t("ui.polkadotExtension")
+        : session?.kind === "solana" ? t("ui.solanaWallet") : "";
+  const issuerName = session?.kind === "matrix" ? session.matrix?.userId ?? session.label.replace(/^Matrix\s+/, "") : session?.label;
+  const primaryButtonLoading = stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING";
+  const primaryButtonLabel = signatureReady && !canPerformAuthorizedAction() ? authorizationWaitMessage || "Preparing account…"
+    : stage === "EDITING" && (!locus || !pendingScope) ? "Waiting for network…"
+      : stage === "EDITING" && !session ? "Connect an Ownership"
+        : stage === "EDITING" || canRetryPreparation ? t("common.confirm")
+          : stage === "PREPARING" ? "Preparing…"
+            : signatureInProgress ? "Waiting for wallet…"
+              : stage === "AWAITING_WALLET" ? "Sign & Create"
+                : stage === "SIGNED" ? "Signature received"
+                  : stage === "SUBMITTING" ? "Submitting…"
+                    : stage === "SUBMITTED" ? "Submitted"
+                      : stage === "FINALIZING" ? "Finalizing…"
+                        : stage === "APPLIED" ? "Created"
+                          : "Confirm";
 
   return (
-    <Modal open={open} title="Create asset" onClose={onClose} footer={<>
-      <ActionButton variant="secondary" icon={X} onClick={onClose}>Close</ActionButton>
-      {pendingSubmitted && <ActionButton variant="secondary" icon={RefreshCw} loading={stage === "FINALIZING"} disabled={stage === "FINALIZING"} onClick={() => void resumePending(pending!)}>Resume finalization</ActionButton>}
-      {signatureReady && <ActionButton variant="tertiary" icon={X} onClick={editAssetDetails}>Edit details</ActionButton>}
-      {!pending && <ActionButton variant="primary" icon={stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING" ? RefreshCw : CirclePlus} loading={stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING"} disabled={signatureReady ? false : !locus || !session || !pendingScope || (!assetDetailsComplete && !signatureReady) || stageBusy} onClick={signatureReady ? signAndCreate : requestPreparation}>{stage === "EDITING" ? !locus || !pendingScope ? "Waiting for network…" : !session ? "Connect an Ownership" : assetDetailsComplete ? "Prepare action" : "Complete asset details" : stage === "PREPARING" ? "Preparing…" : signatureInProgress ? "Waiting for wallet…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : canRetryPreparation ? "Retry preparation" : "Complete asset details"}</ActionButton>}
+    <Modal open={open} title={t("assets.create")} onClose={onClose} footer={<>
+      {pendingSubmitted && <ActionButton variant="secondary" icon={RefreshCw} loading={stage === "FINALIZING"} disabled={stage === "FINALIZING"} onClick={() => void resumePending(pending!)}>{t("ui.resumeFinalization")}</ActionButton>}
+      {signatureReady && <ActionButton variant="tertiary" icon={X} onClick={editAssetDetails}>{t("ui.editDetails")}</ActionButton>}
+      {!pending && <ActionButton variant="primary" icon={primaryButtonLoading ? RefreshCw : stage === "EDITING" ? undefined : CirclePlus} loading={primaryButtonLoading} disabled={signatureReady ? !canPerformAuthorizedAction() : !locus || !session || !pendingScope || (!assetDetailsComplete && !signatureReady) || stageBusy} onClick={signatureReady ? signAndCreate : requestPreparation}>{primaryButtonLabel}</ActionButton>}
     </>}>
-      <p className="modal-lead">The connected Ownership becomes the issuer.</p>
-      {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><small>Owner / Issuer</small><strong>{session.label}</strong><CopyableValue value={formatLocusId(session.owner)} />{session.kind === "matrix" && <small>Controller: device {session.matrix?.deviceId}; subject is the master Ownership</small>}</span></div>}
+      {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><strong>{issuerType} · {issuerName}</strong></span></div>}
       <div className="form-grid">
-        <label>Name<input disabled={assetFieldsDisabled} value={name} placeholder="Dot Token" onChange={(event) => onAssetDetailChange(() => setName(event.target.value))} /></label>
-        <label>Symbol<input disabled={assetFieldsDisabled} value={symbol} placeholder="DOT" onChange={(event) => onAssetDetailChange(() => setSymbol(event.target.value.toUpperCase()))} /></label>
-        <label>Decimals<input disabled={assetFieldsDisabled} type="number" min="0" max="38" value={decimals} onChange={(event) => onAssetDetailChange(() => setDecimals(event.target.value))} /></label>
-        <label>Initial supply<input disabled={assetFieldsDisabled} inputMode="decimal" value={supply} placeholder="1000" onChange={(event) => onAssetDetailChange(() => setSupply(event.target.value))} /></label>
+        <label>{t("ui.assetName")}<input disabled={assetFieldsDisabled} value={name} placeholder={t("ui.assetNamePlaceholder")} onChange={(event) => onAssetDetailChange(() => setName(event.target.value))} /></label>
+        <label>{t("ui.assetSymbol")}<input disabled={assetFieldsDisabled} value={symbol} placeholder="DOT" onChange={(event) => onAssetDetailChange(() => setSymbol(event.target.value.toUpperCase()))} /></label>
+        <label>{t("ui.assetDecimals")}<input disabled={assetFieldsDisabled} type="number" min="0" max="38" value={decimals} onChange={(event) => onAssetDetailChange(() => setDecimals(event.target.value))} /></label>
+        <label>{t("ui.initialSupplyLabel")}<input disabled={assetFieldsDisabled} inputMode="decimal" value={supply} placeholder="1000" onChange={(event) => onAssetDetailChange(() => setSupply(event.target.value))} /></label>
       </div>
-      <section className={`create-asset-stage create-asset-stage--${stage.toLowerCase()}`} aria-live="polite" role="status">
-        <strong>{stageLabel(stage)}</strong>
-        <p>{stageMessage}</p>
-        {pending?.transactionId && <CopyableValue label="Transaction ID" value={pending.transactionId} />}
-      </section>
+      {(stage !== "EDITING" || error || pending) && <section className={`create-asset-stage create-asset-stage--${stage.toLowerCase()}`} aria-live="polite" aria-busy={stageBusy} role="status">
+        <strong>{text(stageLabel(stage))}</strong>
+        <p>{typeof stageMessage === "string" ? text(stageMessage) : t(stageMessage.key, Object.fromEntries(Object.entries(stageMessage.params ?? {}).map(([key, value]) => [key, typeof value === "object" ? t(value.key) : value])))}</p>
+        {pending?.transactionId && <CopyableValue label={t("common.transaction")} value={pending.transactionId} />}
+      </section>}
+      {session?.kind === "matrix" && !canPerformAuthorizedAction() && <p className="account-access-status" role="status">{authorizationWaitMessage || "正在准备账户，请稍候。"}</p>}
       {pending?.state === "submission-unknown" && <div className="create-asset-recovery">
-        <p>This signed action has no known transaction ID. Locus will not create another signature or automatically submit this payload again.</p>
-        <ActionButton variant="secondary" icon={SearchCheck} disabled={!locus} onClick={() => void checkUnknownSubmission(pending)}>Check asset state</ActionButton>
-        <ActionButton variant="tertiary" icon={X} onClick={() => dismissUnknownSubmission(pending)}>Dismiss unresolved record</ActionButton>
+        <p>{t("ui.unknownCreateSubmission")}</p>
+        <ActionButton variant="secondary" icon={SearchCheck} disabled={!locus} onClick={() => void checkUnknownSubmission(pending)}>{t("ui.checkAssetState")}</ActionButton>
+        <ActionButton variant="tertiary" icon={X} onClick={() => dismissUnknownSubmission(pending)}>{t("ui.dismissUnresolved")}</ActionButton>
       </div>}
-      {error && <div className="transaction-error">{error}</div>}
+      {error && <><p className="transaction-error" role="alert">{t("ui.actionNeedsAttention")}</p><details className="transaction-error-details"><summary>{t("ui.technicalDetails")}</summary><pre>{error}</pre></details></>}
     </Modal>
   );
 }

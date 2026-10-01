@@ -1,0 +1,83 @@
+{
+  "version": 1,
+  "network": "local",
+  "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
+  "serviceId": 895565822,
+  "assets": [
+    {
+      "key": "dot",
+      "assetId": "0xef2f434912aa4707dd59e740694904950c963f4d1824b36e9244d86a100dad70",
+      "symbol": "DOT",
+      "name": "Polkadot",
+      "decimals": 10,
+      "issuerKey": "0xfe9e26a70a646358fbc5a3efc8e13c4cd0e5bff261a8d221573f478a102d603e",
+      "class": "crypto",
+      "status": "test",
+      "icon": "dot",
+      "disclosure": "Test representation on MiniJAM. It is not native DOT and is not redeemable for DOT."
+    },
+    {
+      "key": "mini",
+      "assetId": "0x2d10367ecec45a463e0308a8ca1c8bd3606a9a613a5a0794b12ebe6e5fb76771",
+      "symbol": "MINI",
+      "name": "MiniJAM",
+      "decimals": 6,
+      "issuerKey": "0xfe9e26a70a646358fbc5a3efc8e13c4cd0e5bff261a8d221573f478a102d603e",
+      "class": "crypto",
+      "status": "test",
+      "icon": "mini",
+      "disclosure": "Development inventory for testing on MiniJAM."
+    },
+    {
+      "key": "usdt",
+      "assetId": "0x327293bf9bfc4d91a58a2aed55ca4b7f466f8b2d84773dfb2e6943a5d2be0a97",
+      "symbol": "USDT",
+      "name": "Tether USD",
+      "decimals": 6,
+      "issuerKey": "0xfe9e26a70a646358fbc5a3efc8e13c4cd0e5bff261a8d221573f478a102d603e",
+      "class": "crypto",
+      "status": "test",
+      "icon": "usdt",
+      "disclosure": "Test representation only. It is not issued or redeemable by Tether."
+    },
+    {
+      "key": "aapl",
+      "assetId": "0xdbb4e6ee50e528947bd8f2cd43c8356db25ee4da9a6bbb0550895627cfcff461",
+      "symbol": "AAPL",
+      "name": "Apple Demo Equity",
+      "decimals": 4,
+      "issuerKey": "0xfe9e26a70a646358fbc5a3efc8e13c4cd0e5bff261a8d221573f478a102d603e",
+      "class": "equity-demo",
+      "status": "demo",
+      "icon": "ticker",
+      "unit": "shares",
+      "disclosure": "Demo representation only. This asset does not represent equity ownership, voting rights, dividends, custody, or redemption rights."
+    },
+    {
+      "key": "nvda",
+      "assetId": "0x16d30b71adaba1a1bd7e16c1be20e75a144da9bb8aaa75576b102063c97521fa",
+      "symbol": "NVDA",
+      "name": "NVIDIA Demo Equity",
+      "decimals": 4,
+      "issuerKey": "0xfe9e26a70a646358fbc5a3efc8e13c4cd0e5bff261a8d221573f478a102d603e",
+      "class": "equity-demo",
+      "status": "demo",
+      "icon": "ticker",
+      "unit": "shares",
+      "disclosure": "Demo representation only. This asset does not represent equity ownership, voting rights, dividends, custody, or redemption rights."
+    },
+    {
+      "key": "tsla",
+      "assetId": "0x5d930e7cbff6dc94b4c1d651cbc15c94ee3845823b640d0ab8dc5d6a4b508aa7",
+      "symbol": "TSLA",
+      "name": "Tesla Demo Equity",
+      "decimals": 4,
+      "issuerKey": "0xfe9e26a70a646358fbc5a3efc8e13c4cd0e5bff261a8d221573f478a102d603e",
+      "class": "equity-demo",
+      "status": "demo",
+      "icon": "ticker",
+      "unit": "shares",
+      "disclosure": "Demo representation only. This asset does not represent equity ownership, voting rights, dividends, custody, or redemption rights."
+    }
+  ]
+}

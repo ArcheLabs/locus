@@ -47,20 +47,20 @@ function decodeBase64(value: string, label: string): Uint8Array {
     const normalized = value.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(value.length / 4) * 4, "=");
     return Uint8Array.from(atob(normalized), (character) => character.charCodeAt(0));
   } catch (cause) {
-    throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", `Matrix ${label} is not valid base64`, { cause });
+    throw new MatrixConnectorError("OWNERSHIP_PROOF_INVALID", `Matrix ${label} is malformed`, { cause });
   }
 }
 
 function fixedBase64(value: string, length: number, label: string): Uint8Array {
   const decoded = decodeBase64(value, label);
-  if (decoded.length !== length) throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", `Matrix ${label} must be ${length} bytes`);
+  if (decoded.length !== length) throw new MatrixConnectorError("OWNERSHIP_PROOF_INVALID", `Matrix ${label} has an invalid length`);
   return decoded;
 }
 
 function firstKey(keys: MatrixSignedKey | undefined, prefix: string, label: string): [string, string] {
   const entries = Object.entries(keys?.keys ?? {}).filter(([key]) => key.startsWith(prefix));
   if (entries.length === 0) throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", `Matrix ${label} is missing`);
-  if (entries.length !== 1) throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", `Matrix ${label} is ambiguous`);
+  if (entries.length !== 1) throw new MatrixConnectorError("OWNERSHIP_PROOF_INVALID", `Matrix ${label} is ambiguous`);
   return entries[0];
 }
 
@@ -91,11 +91,17 @@ async function matrixJson<T>(homeserver: string, accessToken: string | undefined
     throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "Matrix homeserver returned invalid JSON", { cause });
   }
   if (!response.ok) {
-    const payload = parsed && typeof parsed === "object" ? parsed as { errcode?: unknown; error?: unknown } : {};
+    const payload = parsed && typeof parsed === "object" ? parsed as { errcode?: unknown; error?: unknown; retry_after_ms?: unknown } : {};
     const errcode = typeof payload.errcode === "string" ? payload.errcode : "";
     const error = typeof payload.error === "string" ? describeMatrixCause(payload.error) : "";
     const detail = [errcode, error].filter(Boolean).join(": ");
-    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", `Matrix keys query failed with HTTP ${response.status}${detail ? ` (${detail})` : ""}.`);
+    if (response.status === 401 || errcode === "M_UNKNOWN_TOKEN" || errcode === "M_MISSING_TOKEN") {
+      throw new MatrixConnectorError("MATRIX_SESSION_INVALID", "The Matrix session is no longer valid. Sign in again.");
+    }
+    const retryAfterMs = typeof payload.retry_after_ms === "number" && Number.isFinite(payload.retry_after_ms)
+      ? Math.max(0, payload.retry_after_ms)
+      : undefined;
+    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", `Matrix keys query failed with HTTP ${response.status}${detail ? ` (${detail})` : ""}.`, { retryAfterMs });
   }
   return parsed as T;
 }
@@ -145,7 +151,7 @@ export async function queryMatrixKeys(userId: string, deviceId: string, homeserv
   const [selfKeyId, selfKeyBase64] = firstKey(selfSigning, "ed25519:", "self-signing key");
   const [deviceEdKeyId, deviceEdKeyBase64] = firstKey(device, "ed25519:", "device ed25519 key");
   const [deviceCurveKeyId, deviceCurveKeyBase64] = firstKey(device, "curve25519:", "device curve25519 key");
-  if (deviceEdKeyId !== `ed25519:${deviceId}` || deviceCurveKeyId !== `curve25519:${deviceId}`) throw new MatrixConnectorError("CROSS_SIGNING_UNAVAILABLE", "Matrix device key IDs do not match the logged-in device");
+  if (deviceEdKeyId !== `ed25519:${deviceId}` || deviceCurveKeyId !== `curve25519:${deviceId}`) throw new MatrixConnectorError("OWNERSHIP_PROOF_INVALID", "Matrix device key IDs do not match the logged-in device");
   const masterPublicKey = fixedBase64(masterKeyBase64, 32, "master public key");
   const selfSigningPublicKey = fixedBase64(selfKeyBase64, 32, "self-signing public key");
   const masterSignature = signedBy(selfSigning, userId, masterKeyId, "master to self-signing signature");

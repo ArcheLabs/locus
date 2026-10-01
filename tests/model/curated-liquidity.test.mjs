@@ -94,8 +94,11 @@ test("tracked and present worktree files contain no signer or seed filenames", (
 test("Swap uses direct pool quotes and curated demo equities disclose their limits", async () => {
   const swapSource = await fs.readFile(new URL("../../web/src/locus/swap/SwapPage.tsx", import.meta.url), "utf8");
   const assetSource = await fs.readFile(new URL("../../web/src/locus/assets.ts", import.meta.url), "utf8");
+  const translations = await fs.readFile(new URL("../../web/src/i18n/I18nProvider.tsx", import.meta.url), "utf8");
   assert.match(swapSource, /directPoolForPair\(pools, assetIn\.assetIdHex, assetOut\.assetIdHex\)/);
-  assert.match(swapSource, /This pair is not available for swapping yet\./);
+  assert.match(swapSource, /t\("swap\.unsupportedPair"\)/);
+  assert.match(translations, /unsupportedPair: "This pair is not available for swapping yet\."/);
+  assert.match(translations, /unsupportedPair: "该交易对暂不支持兑换。"/);
   assert.doesNotMatch(swapSource, /Quotes use on-chain pool reserves/);
   assert.doesNotMatch(swapSource, /No market oracle is used/);
   assert.match(assetSource, /disclosure: "Demo representation only\./);

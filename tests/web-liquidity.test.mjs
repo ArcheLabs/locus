@@ -75,21 +75,19 @@ test("Liquidity is visible to all users and positions/pools come from Service qu
   assert.match(pageSource, /locus\.listPools\(\{ offset: BigInt\(pools\.length \+ additionalPools\.length\), limit: 50 \}\)/);
   assert.match(pageSource, /Load more pools/);
   assert.match(pageSource, /locus\.getPool\(assetA\.assetId, assetB\.assetId\)/);
-  assert.match(pageSource, /asset\.catalogKey === assetA/);
-  assert.match(pageSource, /Featured pairs are unavailable/i);
+  assert.doesNotMatch(pageSource, /Featured pairs|featuredPairs/);
   assert.match(pageSource, /role="tablist"/);
   assert.match(pageSource, /aria-selected=\{tab === "positions"\}/);
-  assert.match(pageSource, /onNewPosition\(a\.assetIdHex, b\.assetIdHex\)/);
-  assert.match(pageSource, /Your initial deposit establishes this pool’s starting rate/);
+  assert.match(pageSource, /onNewPosition\(asset0\.assetIdHex, asset1\.assetIdHex\)/);
+  assert.match(pageSource, /onClick=\{\(\) => \{ if \(asset0 && asset1\) onNewPosition\(asset0\.assetIdHex, asset1\.assetIdHex\); \}\}>\{t\("ui\.add"\)\}<\/ActionButton>/);
   assert.match(pageSource, /role="alert"/);
   assert.doesNotMatch(appSource + pageSource, /isLiquidityManager|managerKey|POOL_MANAGER_REQUIRED|Connect Treasury/);
 });
 
 test("pending liquidity transactions are persisted and do not trigger automatic resubmission", () => {
   assert.match(pageSource, /locus\.liquidity\.pending\.v2/);
-  assert.match(pageSource, /Check transaction status/);
-  assert.match(pageSource, /No new action will be submitted/);
-  assert.match(pageSource, /Check its status before signing anything again/);
+  assert.match(pageSource, /actionLabel: "Check status"/);
+  assert.match(pageSource, /transaction is saved\. Check its status before signing another liquidity action/);
   assert.match(pageSource, /clearFinalizedFailure\(/);
 });
 
@@ -102,5 +100,5 @@ test("Swap continues to use only on-chain pool state and never fabricates a quot
   assert.equal(directPoolForPair([pool], toHex(asset0), toHex(asset0)), null);
   assert.deepEqual(poolListQueryKey("local", 153994977), ["locus", "pools", "local", 153994977]);
   assert.match(swapSource, /directPoolForPair\(pools, assetIn\.assetIdHex, assetOut\.assetIdHex\)/);
-  assert.match(swapSource, /This pair is not available for swapping yet/);
+  assert.match(swapSource, /t\("swap\.unsupportedPair"\)/);
 });

@@ -6,7 +6,8 @@ import { compactValue } from "../web/src/components/valueFormatting.ts";
 import { validatePositiveAmount, validateRecipientText } from "../web/src/forms/validation.ts";
 import { matrixStateRequiresUserInteraction } from "../web/src/matrix/MatrixInteraction.ts";
 import { pathForRoute, routeFromPath } from "../web/src/navigation/routes.ts";
-import { parseSlippageBps } from "../web/src/locus/swap/swapValidation.ts";
+import { isPairConfirmedUnsupported, parseSlippageBps } from "../web/src/locus/swap/swapValidation.ts";
+import { resolveAssetBalanceUiState, resolveLanguage } from "../web/src/i18n/i18nLogic.ts";
 
 test("routes support base-path candidate Liquidity while preserving direct pages", () => {
   assert.equal(pathForRoute("liquidity", "/candidate/"), "/candidate/liquidity");
@@ -18,13 +19,13 @@ test("routes support base-path candidate Liquidity while preserving direct pages
   assert.equal(routeFromPath("/activity", "/"), "activity");
 });
 
-test("Matrix restore does not open verification UI for an authorization that is already progressing", () => {
-  assert.equal(matrixStateRequiresUserInteraction("CONTROLLER_AUTHORIZING", "restore"), false);
-  assert.equal(matrixStateRequiresUserInteraction("CONTROLLER_AUTHORIZATION_QUEUED", "restore"), false);
-  assert.equal(matrixStateRequiresUserInteraction("READY", "restore"), false);
+test("Matrix sign-in requires interaction only for unknown status recovery or verification, not authorization", () => {
+  assert.equal(matrixStateRequiresUserInteraction("TRUST_CHECKING", "restore"), false);
+  assert.equal(matrixStateRequiresUserInteraction("TRUST_UNKNOWN", "restore"), true);
+  assert.equal(matrixStateRequiresUserInteraction("CONNECTED", "restore"), false);
   assert.equal(matrixStateRequiresUserInteraction("VERIFICATION_REQUIRED", "restore"), true);
   assert.equal(matrixStateRequiresUserInteraction("VERIFICATION_CONFIRMING", "fresh"), true);
-  assert.equal(matrixStateRequiresUserInteraction("VERIFICATION_CONFIRMING", "restore"), false);
+  assert.equal(matrixStateRequiresUserInteraction("VERIFICATION_CONFIRMING", "restore"), true);
 });
 
 test("amount and recipient validators reject unsafe or incomplete input", () => {
@@ -44,6 +45,31 @@ test("custom slippage is parsed as integer basis points with strict bounds", () 
   assert.equal(parseSlippageBps("0.5"), 50);
   assert.equal(parseSlippageBps("50"), 5_000);
   for (const invalid of ["0", "-1", "50.01", "abc", "Infinity", "0.001"]) assert.equal(parseSlippageBps(invalid), null);
+});
+
+test("saved language takes precedence and otherwise a supported browser language is used", () => {
+  assert.equal(resolveLanguage("en", "zh-CN"), "en");
+  assert.equal(resolveLanguage("zh-Hans", "en-US"), "zh-Hans");
+  assert.equal(resolveLanguage("unsupported", "zh-TW"), "en");
+  assert.equal(resolveLanguage(null, "fr-FR"), "en");
+});
+
+test("balance presentation distinguishes signed-out, loading, failed, and real zero balances", () => {
+  assert.equal(resolveAssetBalanceUiState({ hasSession: false, hasData: false, enabled: false, fetching: false }), "signed-out");
+  assert.equal(resolveAssetBalanceUiState({ hasSession: true, hasData: false, enabled: false, fetching: false }), "loading");
+  assert.equal(resolveAssetBalanceUiState({ hasSession: true, hasData: false, enabled: true, fetching: true }), "loading");
+  assert.equal(resolveAssetBalanceUiState({ hasSession: true, hasData: false, enabled: true, fetching: false }), "failed");
+  assert.equal(resolveAssetBalanceUiState({ hasSession: true, hasData: true, enabled: true, fetching: false }), "known");
+});
+
+test("Swap only marks a pair unsupported after a successful completed lookup", () => {
+  const base = { networkMode: true, hasInput: true, hasOutput: true, sameAsset: false, loading: false, error: false, hasPool: false, hasReserves: false };
+  assert.equal(isPairConfirmedUnsupported(base), true);
+  assert.equal(isPairConfirmedUnsupported({ ...base, loading: true }), false);
+  assert.equal(isPairConfirmedUnsupported({ ...base, error: true }), false);
+  assert.equal(isPairConfirmedUnsupported({ ...base, hasPool: true, hasReserves: true }), false);
+  assert.equal(isPairConfirmedUnsupported({ ...base, sameAsset: true }), false);
+  assert.equal(isPairConfirmedUnsupported({ ...base, networkMode: false }), false);
 });
 
 test("compact identities preserve complete values and copyable content", () => {

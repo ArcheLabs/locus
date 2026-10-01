@@ -1,14 +1,16 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowLeftRight, CheckCircle2, ChevronDown, Unplug, UserRound, X } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, Unplug, UserRound, X } from "lucide-react";
 import { formatLocusId } from "@archelabs/locus";
 import { useEffect, useRef, useState } from "react";
 import type { LocusWebSession, SessionKind } from "../session/types.js";
 import type { MatrixProfile } from "../matrix/MatrixProfile.js";
 import { loadMatrixProfile } from "../matrix/MatrixProfile.js";
 import type { SessionLifecycle } from "../session/SessionProvider.js";
+import type { AccountAuthorizationState, SessionIdentityState } from "../session/types.js";
 import { IdentityIcon } from "./IdentityIcon.js";
 import { ActionButton } from "./ActionButton.js";
 import { CopyableValue, compactValue } from "./CopyableValue.js";
+import { useI18n } from "../i18n/I18nProvider.js";
 
 type Props = {
   session: LocusWebSession | null;
@@ -20,13 +22,18 @@ type Props = {
   switchingAccount?: boolean;
   onDisconnect: () => void;
   onRemoveMatrixDevice: () => void;
+  authorizationState?: AccountAuthorizationState;
+  identityState?: SessionIdentityState;
+  authorizationError?: string;
+  onRetryAuthorization?: () => void;
 };
 
 function matrixDisplayName(profile: MatrixProfile | null, userId: string): string {
   return profile?.displayName || userId.slice(1).split(":", 1)[0] || userId;
 }
 
-export function AccountMenu({ session, lifecycle, restoreError, pendingKind = null, onConnect, onSwitchAccount, switchingAccount = false, onDisconnect, onRemoveMatrixDevice }: Props) {
+export function AccountMenu({ session, lifecycle, restoreError, pendingKind = null, onConnect, onSwitchAccount, switchingAccount = false, onDisconnect, onRemoveMatrixDevice, authorizationState = "READY", identityState = "CONNECTED", authorizationError = "", onRetryAuthorization }: Props) {
+  const { t, text } = useI18n();
   const [open, setOpen] = useState(false);
   const [removeConfirmation, setRemoveConfirmation] = useState(false);
   const [profileResult, setProfileResult] = useState<{ key: string; profile: MatrixProfile } | null>(null);
@@ -61,13 +68,13 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
   }, [accountKey]);
 
   if (!session) return <div className="disconnected-session">
-    <ActionButton variant="secondary" icon={UserRound} className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring" || pendingKind !== null} aria-label="Connect an Ownership">
-      {lifecycle === "restoring" ? "Restoring…" : pendingKind ? `Connecting…` : "Connect"}
+    <ActionButton variant="secondary" icon={UserRound} className="profile-pill profile-button" onClick={onConnect} disabled={lifecycle === "restoring" || pendingKind !== null} aria-label={t("accounts.connect")}>
+      {lifecycle === "restoring" ? t("accounts.restoring") : pendingKind ? t("common.connecting") : t("common.connect")}
     </ActionButton>
     {restoreError && <section className="session-restore-alert" role="alert">
-      <strong>Not connected</strong>
-      <p>{restoreError}</p>
-      <ActionButton size="small" variant="secondary" icon={Unplug} onClick={onConnect}>Choose a sign-in method</ActionButton>
+      <strong>{t("accounts.notConnected")}</strong>
+      <p>{text(restoreError)}</p>
+      <ActionButton size="small" variant="secondary" icon={Unplug} onClick={onConnect}>{t("accounts.chooseSignIn")}</ActionButton>
     </section>}
   </div>;
 
@@ -78,10 +85,24 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
     : compactValue(session.address || session.label);
   const matrixAvatar = session.kind === "matrix" && !avatarFailed ? matrixProfile?.avatarUrl : null;
   const signerLabel = session.kind === "matrix" ? session.matrix?.deviceId ?? session.address : session.address;
+  const matrixAuthorizationLabel = identityState !== "CONNECTED" ? t("auth.checkingDevice")
+    : authorizationState === "READY" ? t("accounts.accountReady")
+    : authorizationState === "RETRY_REQUIRED" || authorizationState === "STATUS_UNKNOWN" || authorizationState === "REVOKED" || authorizationState === "REJECTED" ? t("accounts.attention")
+      : t("accounts.accountPreparing");
+  const matrixAttention = session.kind === "matrix" && (authorizationError !== ""
+    || authorizationState === "RETRY_REQUIRED" || authorizationState === "STATUS_UNKNOWN" || authorizationState === "REVOKED" || authorizationState === "REJECTED");
+  const matrixReady = session.kind === "matrix" && identityState === "CONNECTED" && authorizationState === "READY";
+  const AccountStatusIcon = matrixAttention ? CircleAlert : session.kind === "matrix" && !matrixReady ? LoaderCircle : CheckCircle2;
+  const accountStatusLabel = matrixAttention ? t("accounts.attention")
+    : session.kind === "matrix" ? matrixReady ? t("accounts.accountReady") : t("accounts.accountPreparing")
+      : t("common.connected");
+  const accountStatusClass = matrixAttention ? "account-connection-indicator account-connection-indicator--attention"
+    : session.kind === "matrix" && !matrixReady ? "account-connection-indicator account-connection-indicator--pending"
+      : "account-connection-indicator account-connection-indicator--ready";
 
   return <Dialog.Root open={open} onOpenChange={setOpen}>
     <Dialog.Trigger asChild>
-      <button type="button" className="profile-pill profile-button identity-trigger" aria-label={`Account center, ${session.kind}`}>
+      <button type="button" className="profile-pill profile-button identity-trigger" aria-label={`${t("accounts.center")}, ${text(session.kind)}`}>
         <span className="identity-icon-slot">{matrixAvatar
           ? <img className="matrix-profile-avatar" src={matrixAvatar} alt="" aria-hidden="true" onError={() => setAvatarFailed(true)} />
           : <IdentityIcon kind={session.kind} size={26} />}</span>
@@ -93,44 +114,50 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
       <Dialog.Overlay className="account-center-backdrop" />
       <Dialog.Content className="account-center-panel" aria-describedby={undefined}>
         <header className="account-center-header">
-          <Dialog.Title>Account</Dialog.Title>
-          <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close account center"><X size={20} /></button></Dialog.Close>
+          <Dialog.Title>{t("accounts.center")}</Dialog.Title>
+          <Dialog.Close asChild><button type="button" className="icon-button" aria-label={t("accounts.closeCenter")}><X size={20} /></button></Dialog.Close>
         </header>
         <div className="account-center-body">
           <section className="account-identity-card">
             <span className="account-avatar">{matrixAvatar
               ? <img src={matrixAvatar} alt="" aria-hidden="true" onError={() => setAvatarFailed(true)} />
               : <IdentityIcon kind={session.kind} size={26} />}</span>
-            <span><strong>{displayLabel}</strong><small>Connected</small></span>
+            <span><strong>{displayLabel}</strong><small className={accountStatusClass} aria-label={accountStatusLabel} title={accountStatusLabel}><AccountStatusIcon size={16} aria-hidden="true" /></small></span>
           </section>
 
+          {session.kind === "matrix" && (authorizationState !== "READY" || identityState !== "CONNECTED") && <section className="account-center-section">
+            <h3>{t("accounts.access")}</h3>
+            <p className="account-access-status">{authorizationError ? t("auth.authorizationNeedsAction") : identityState !== "CONNECTED" ? t("auth.deviceUnknown") : matrixAuthorizationLabel}</p>
+            {(identityState === "STATUS_UNKNOWN" || authorizationState === "STATUS_UNKNOWN" || authorizationState === "RETRY_REQUIRED" || authorizationState === "REJECTED") && onRetryAuthorization
+              && <ActionButton size="small" variant="secondary" onClick={onRetryAuthorization}>{t("auth.checkStatus")}</ActionButton>}
+          </section>}
+
           <section className="account-center-section">
-            <h3>Ownership</h3>
+            <h3>{t("accounts.ownership")}</h3>
             <CopyableValue label="Locus ID" value={locusId} layout="inline" copyPlacement="left" />
             <CopyableValue label="Controller" value={formatLocusId(session.controller)} layout="inline" copyPlacement="left" />
           </section>
 
           <section className="account-center-section">
-            <h3>Connection</h3>
+            <h3>{t("accounts.connection")}</h3>
             {session.kind === "matrix" ? <>
-              <CopyableValue label="Matrix account" value={session.matrix?.userId ?? session.address} layout="inline" copyPlacement="left" />
-              <CopyableValue label="Device" value={session.matrix?.deviceId ?? "Unknown device"} layout="inline" copyPlacement="left" />
-              <div className="account-center-detail"><small>Homeserver</small><span>{session.matrix?.homeserver ?? "Matrix"}</span></div>
-              <div className="account-center-detail"><small>Verification</small><span className="account-verified-text"><CheckCircle2 size={15} aria-hidden="true" />Verified</span></div>
-            </> : <CopyableValue label={`${session.kind[0].toUpperCase()}${session.kind.slice(1)} signer`} value={signerLabel} layout="inline" copyPlacement="left" />}
+              <CopyableValue label={t("accounts.matrixAccount")} value={session.matrix?.userId ?? session.address} layout="inline" copyPlacement="left" />
+              <CopyableValue label={t("accounts.device")} value={session.matrix?.deviceId ?? t("accounts.unknownDevice")} layout="inline" copyPlacement="left" />
+              <div className="account-center-detail"><small>{t("accounts.homeserver")}</small><span>{session.matrix?.homeserver ?? "Matrix"}</span></div>
+              <div className="account-center-detail"><small>{t("accounts.verification")}</small><span className="account-verified-text"><CheckCircle2 size={15} aria-hidden="true" />{t("accounts.verified")}</span></div>
+            </> : <CopyableValue label={t("accounts.signer", { kind: text(session.kind) })} value={signerLabel} layout="inline" copyPlacement="left" />}
           </section>
 
           {session.kind === "matrix" && <section className="account-center-section account-security-section">
-            <h3>Security</h3>
+            <h3>{t("accounts.security")}</h3>
             {!removeConfirmation ? <>
-              <p>Disconnecting keeps this verified device for your next Locus session.</p>
-              <div className="account-security-action"><strong>Remove Matrix device</strong><ActionButton variant="danger" size="small" onClick={() => setRemoveConfirmation(true)}>Remove</ActionButton></div>
+              <div className="account-security-action"><strong>{t("accounts.removeDevice")}</strong><ActionButton variant="danger" size="small" onClick={() => setRemoveConfirmation(true)}>{t("common.remove")}</ActionButton></div>
             </> : <div className="remove-device-confirm" role="alertdialog" aria-labelledby="remove-device-title">
-              <strong id="remove-device-title">Remove this Matrix device?</strong>
-              <p>This removes the saved Locus Matrix device from this browser and signs it out of Matrix. The next sign-in creates a new device and requires verification in Element.</p>
+              <strong id="remove-device-title">{t("accounts.removeDeviceConfirm")}</strong>
+              <p>{t("accounts.removeDetails")}</p>
               <div className="remove-device-actions">
-                <ActionButton variant="tertiary" onClick={() => setRemoveConfirmation(false)}>Cancel</ActionButton>
-                <ActionButton variant="danger" onClick={() => { setOpen(false); onRemoveMatrixDevice(); }}>Remove device</ActionButton>
+                <ActionButton variant="tertiary" onClick={() => setRemoveConfirmation(false)}>{t("common.cancel")}</ActionButton>
+                <ActionButton variant="danger" onClick={() => { setOpen(false); onRemoveMatrixDevice(); }}>{t("accounts.removeDevice")}</ActionButton>
               </div>
             </div>}
           </section>}
@@ -139,9 +166,9 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
             {(session.kind === "evm" || session.kind === "polkadot") && <ActionButton variant="secondary" icon={ArrowLeftRight} disabled={switchingAccount} onClick={() => {
               setOpen(false);
               window.setTimeout(onSwitchAccount, 0);
-            }}>{switchingAccount ? "Switching account…" : "Switch account"}</ActionButton>}
-            <ActionButton variant="danger" icon={Unplug} onClick={() => { setOpen(false); onDisconnect(); }}>Disconnect</ActionButton>
-            <small>{session.kind === "matrix" ? "Your Matrix device and crypto store will be kept." : session.kind === "evm" || session.kind === "polkadot" ? "Disconnecting only ends the Locus session. Wallet authorization is kept." : "Only the Locus session is disconnected."}</small>
+            }}>{switchingAccount ? t("accounts.switching") : t("accounts.switchAccount")}</ActionButton>}
+            <ActionButton variant="danger" icon={Unplug} onClick={() => { setOpen(false); onDisconnect(); }}>{t("accounts.disconnected")}</ActionButton>
+            <small>{session.kind === "matrix" ? t("accounts.keepMatrix") : session.kind === "evm" || session.kind === "polkadot" ? t("accounts.keepWallet") : t("accounts.keepSession")}</small>
           </footer>
         </div>
       </Dialog.Content>

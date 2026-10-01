@@ -5,7 +5,7 @@ export const LOCUS_ERROR_MESSAGES: Readonly<Record<number, string>> = {
   5003: "This controller was revoked and can no longer authorize actions.",
   5005: "The identity authorization proof was rejected.",
   6001: "This pool could not be found.",
-  6002: "This asset pair already has a pool.",
+  6002: "A pool already exists for this asset pair.",
   6003: "A pool requires two different assets.",
   6004: "Enter valid non-zero amounts.",
   6005: "There is not enough liquidity for this action.",

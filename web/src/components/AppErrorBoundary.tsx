@@ -1,6 +1,12 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { ActionButton } from "./ActionButton.js";
 import { RefreshCw } from "lucide-react";
+import { useI18n } from "../i18n/I18nProvider.js";
+
+function ErrorFallback() {
+  const { t } = useI18n();
+  return <main className="app-error-page"><section className="card"><h1>{t("errors.pageFailed")}</h1><p>{t("errors.reloadHint")}</p><ActionButton variant="primary" icon={RefreshCw} onClick={() => window.location.reload()}>{t("common.reload")}</ActionButton></section></main>;
+}
 
 export class AppErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
   state = { failed: false };
@@ -15,7 +21,7 @@ export class AppErrorBoundary extends Component<{ children: ReactNode }, { faile
 
   render() {
     if (this.state.failed) {
-      return <main className="app-error-page"><section className="card"><h1>Something went wrong in this page.</h1><p>Reload Locus to try again.</p><ActionButton variant="primary" icon={RefreshCw} onClick={() => window.location.reload()}>Reload page</ActionButton></section></main>;
+      return <ErrorFallback />;
     }
     return this.props.children;
   }

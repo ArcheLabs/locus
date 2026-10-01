@@ -4,6 +4,7 @@
   "version": "0.2.0",
   "type": "module",
   "scripts": {
+    "test:matrix": "node --experimental-strip-types --test ../tests/web-matrix-verification.test.mjs tests/matrix-device-trust.test.mjs",
     "dev": "vite",
     "build": "tsc --noEmit && vite build && node scripts/assert-matrix-wasm.mjs && node --experimental-strip-types scripts/assert-production-network.mjs"
   },
@@ -12,6 +13,7 @@
     "@matrix-org/matrix-sdk-crypto-wasm": "18.8.0",
     "@polkadot/extension-dapp": "0.63.1",
     "@polkadot/networks": "14.0.3",
+    "@polkadot/util-crypto": "14.0.3",
     "@radix-ui/react-dialog": "^1.1.23",
     "@radix-ui/react-dropdown-menu": "^2.1.24",
     "@radix-ui/react-popover": "^1.1.23",
@@ -23,10 +25,12 @@
     "@tanstack/react-query": "^5.101.4",
     "@wallet-standard/app": "^1.1.1",
     "@wallet-standard/base": "^1.1.1",
+    "i18next": "^26.4.2",
     "lucide-react": "^1.47.0",
     "matrix-js-sdk": "42.4.0",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
+    "react-i18next": "^17.0.15",
     "react-icons": "^5.7.0",
     "react-loading-skeleton": "^3.5.0",
     "viem": "^2.55.10",

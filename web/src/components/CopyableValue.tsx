@@ -1,6 +1,8 @@
 import { Check, Copy } from "lucide-react";
 import { useEffect, useState } from "react";
 import { compactValue } from "./valueFormatting.js";
+import { useI18n } from "../i18n/I18nProvider.js";
+import { useGlobalNotify } from "./GlobalNotificationContext.js";
 
 export { compactValue } from "./valueFormatting.js";
 
@@ -11,6 +13,8 @@ export function CopyableValue({ label, value, className = "", layout = "stacked"
   layout?: "stacked" | "inline";
   copyPlacement?: "left" | "right";
 }) {
+  const { text, t } = useI18n();
+  const notify = useGlobalNotify();
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -35,16 +39,17 @@ export function CopyableValue({ label, value, className = "", layout = "stacked"
         if (!copied) throw new Error("Clipboard unavailable");
       }
       setCopied(true);
+      notify("Copied");
     } catch {
       setCopied(false);
     }
   }
 
-  const copyButton = <button type="button" className="copyable-value__button" onClick={() => void copy()} aria-label={copied ? `${label ?? "Value"} copied` : `Copy ${label ?? "value"}`} title={copied ? "Copied" : "Copy"}>
+  const copyButton = <button type="button" className="copyable-value__button" onClick={() => void copy()} aria-label={copied ? `${text(label ?? "Value")} ${t("common.copied")}` : `${t("common.copy")} ${text(label ?? "value")}`} title={t(copied ? "common.copied" : "common.copy")}>
     {copied ? <Check size={15} aria-hidden="true" /> : <Copy size={15} aria-hidden="true" />}
   </button>;
   return <span className={`copyable-value copyable-value--${layout} copyable-value--copy-${copyPlacement} ${className}`.trim()}>
-    {label && <small>{label}</small>}
+    {label && <small>{text(label)}</small>}
     <span className="copyable-value__row">
       {copyPlacement === "left" && copyButton}
       <code title={value}>{compactValue(value)}</code>

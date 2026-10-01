@@ -9,16 +9,22 @@ if [[ ! -f "${ROOT_DIR}/node_modules/typescript/bin/tsc" ]]; then
 fi
 "${NODE_BIN}" "${ROOT_DIR}/node_modules/typescript/bin/tsc" -p "${ROOT_DIR}/tsconfig.json"
 echo "SDK_TYPECHECK=PASS"
+"${NODE_BIN}" --test "${ROOT_DIR}"/tests/matrix-airdrop.test.mjs
+echo "MATRIX_AIRDROP_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/model/*.test.mjs "${ROOT_DIR}"/tests/vectors/*.test.mjs
 echo "LOCAL_MODEL_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-network.test.mjs
 echo "WEB_NETWORK_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-interaction.test.mjs
 echo "WEB_INTERACTION_TESTS=PASS"
+"${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-matrix-verification.test.mjs
+echo "WEB_MATRIX_VERIFICATION_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-liquidity.test.mjs
 echo "WEB_LIQUIDITY_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-ux-closure.test.mjs
 echo "WEB_UX_CLOSURE_TESTS=PASS"
+"${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-session-access.test.mjs
+echo "WEB_SESSION_ACCESS_TESTS=PASS"
 "${NODE_BIN}" --test "${ROOT_DIR}"/tests/web-matrix-recipient.test.mjs
 echo "WEB_MATRIX_RECIPIENT_TESTS=PASS"
 "${NODE_BIN}" --test "${ROOT_DIR}"/apps/matrix-resolver/test.mjs
