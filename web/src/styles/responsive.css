@@ -208,7 +208,7 @@ textarea {
   .mobile-header-actions { display: flex; align-items: center; }
   .mobile-header-row { justify-content: flex-start; gap: 10px; }
   .mobile-header-actions { gap: 8px; margin-left: auto; }
-  .mobile-header .brand { flex: 0 0 auto; margin: 0; font-size: 28px; line-height: 1; letter-spacing: -1.5px; }
+  .mobile-header .brand { flex: 0 0 auto; margin: 0; font-size: 28px; line-height: 1; }
   .mobile-header .profile-pill { min-height: 44px; max-width: min(48vw, 200px); padding: 6px 9px; gap: 7px; }
   .mobile-header .profile-pill > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-header-actions .network-switcher { margin: 0; }

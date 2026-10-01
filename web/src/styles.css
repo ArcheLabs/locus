@@ -33,7 +33,7 @@ button:disabled { cursor: not-allowed; }
 .activity-filter-tabs { margin-bottom: 18px; }
 .app-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; }
 .sidebar { padding: 28px 22px; border-right: 1px solid var(--border); background: var(--surface-glass); backdrop-filter: blur(14px); display: flex; flex-direction: column; }
-.brand { display: block; width: fit-content; max-width: 100%; overflow: visible; white-space: nowrap; color: var(--text); background: linear-gradient(112deg, var(--text) 16%, var(--accent) 100%); background-clip: text; -webkit-text-fill-color: transparent; font-size: 34px; font-weight: 800; letter-spacing: -2px; margin: 0 0 44px 12px; text-decoration: none; transition: transform .18s ease, filter .18s ease; }
+.brand { display: block; width: fit-content; max-width: 100%; overflow: visible; white-space: nowrap; color: var(--text); background: linear-gradient(112deg, var(--text) 16%, var(--accent) 100%); background-clip: text; -webkit-text-fill-color: transparent; font-size: 34px; font-weight: 800; margin: 0 0 44px 12px; text-decoration: none; transition: transform .18s ease, filter .18s ease; }
 .brand:hover { transform: translateY(-1px); filter: drop-shadow(0 2px 8px var(--accent-glow)); }
 .brand:focus-visible { border-radius: 4px; outline: 2px solid var(--focus-ring); outline-offset: 5px; }
 .nav-item { border: 0; background: transparent; color: var(--text); padding: 14px 16px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 12px; font-size: 17px; width: 100%; margin-bottom: 7px; }
