@@ -1,11 +1,15 @@
 export type SupportedLanguage = "en" | "zh-Hans" | "ja" | "de";
 
 export function resolveLanguage(saved: string | null | undefined, browserLanguage: string | null | undefined): SupportedLanguage {
-  if (saved === "en" || saved === "zh-Hans" || saved === "ja" || saved === "de") return saved;
-  const normalizedBrowserLanguage = browserLanguage?.toLowerCase() ?? "";
-  if (normalizedBrowserLanguage.startsWith("zh")) return "zh-Hans";
-  if (normalizedBrowserLanguage.startsWith("ja")) return "ja";
-  if (normalizedBrowserLanguage.startsWith("de")) return "de";
+  if (saved !== null && saved !== undefined && saved.trim() !== "") {
+    return saved === "en" || saved === "zh-Hans" || saved === "ja" || saved === "de" ? saved : "en";
+  }
+
+  const normalizedBrowserLanguage = browserLanguage?.trim().replaceAll("_", "-").toLowerCase() ?? "";
+  if (/^en(?:-|$)/.test(normalizedBrowserLanguage)) return "en";
+  if (/^ja(?:-|$)/.test(normalizedBrowserLanguage)) return "ja";
+  if (/^de(?:-|$)/.test(normalizedBrowserLanguage)) return "de";
+  if (/^zh(?:-hans)?(?:-|$)/.test(normalizedBrowserLanguage) && !/^zh-(?:hant|tw|hk|mo)(?:-|$)/.test(normalizedBrowserLanguage)) return "zh-Hans";
   return "en";
 }
 

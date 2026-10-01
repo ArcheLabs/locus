@@ -8,7 +8,6 @@ import { matrixStateRequiresUserInteraction } from "../web/src/matrix/MatrixInte
 import { pathForRoute, routeFromPath } from "../web/src/navigation/routes.ts";
 import { isPairConfirmedUnsupported, parseSlippageBps } from "../web/src/locus/swap/swapValidation.ts";
 import { resolveAssetBalanceUiState, resolveLanguage } from "../web/src/i18n/i18nLogic.ts";
-import { interpolateTranslation, translateSourceText } from "../web/src/i18n/translationLogic.ts";
 
 test("routes support base-path candidate Liquidity while preserving direct pages", () => {
   assert.equal(pathForRoute("liquidity", "/candidate/"), "/candidate/liquidity");
@@ -48,26 +47,11 @@ test("custom slippage is parsed as integer basis points with strict bounds", () 
   for (const invalid of ["0", "-1", "50.01", "abc", "Infinity", "0.001"]) assert.equal(parseSlippageBps(invalid), null);
 });
 
-test("language selection persists supported choices and otherwise follows browser language", () => {
+test("saved language takes precedence and otherwise a supported browser language is used", () => {
   assert.equal(resolveLanguage("en", "zh-CN"), "en");
   assert.equal(resolveLanguage("zh-Hans", "en-US"), "zh-Hans");
-  assert.equal(resolveLanguage("unsupported", "zh-TW"), "zh-Hans");
+  assert.equal(resolveLanguage("unsupported", "zh-TW"), "en");
   assert.equal(resolveLanguage(null, "fr-FR"), "en");
-});
-
-test("notification text follows the active language, including transaction placeholders", () => {
-  const en = [
-    ["auth.accountAuthorizing", "Signed in. Finishing account authorization…"],
-    ["notices.transactionSaved", "Transaction {transactionId} was received and saved."],
-  ];
-  const zh = [
-    ["auth.accountAuthorizing", "已登录，正在完成账户授权…"],
-    ["notices.transactionSaved", "已收到并保存交易 {transactionId}。"],
-  ];
-  assert.equal(translateSourceText(en[0][1], zh, [en, zh]), zh[0][1]);
-  assert.equal(translateSourceText("Transaction 0xabc was received and saved.", zh, [en, zh]), "已收到并保存交易 0xabc。");
-  assert.equal(translateSourceText("Unmapped notice", zh, [en, zh]), "Unmapped notice");
-  assert.equal(interpolateTranslation("Balance: {amount} {symbol}", { amount: "0", symbol: "DOT" }), "Balance: 0 DOT");
 });
 
 test("balance presentation distinguishes signed-out, loading, failed, and real zero balances", () => {

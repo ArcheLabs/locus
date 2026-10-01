@@ -45,8 +45,8 @@ export function SettingsFields({ mobile = false }: { mobile?: boolean }) {
     <div className="settings-field">
       <span>{t("common.language")}</span>
       <SelectField value={language} onValueChange={(value) => setLanguage(value as Language)} aria-label={t("settings.chooseLanguage")} options={[
-        { value: "zh-Hans", label: "简体中文" },
         { value: "en", label: "English" },
+        { value: "zh-Hans", label: "简体中文" },
         { value: "ja", label: "日本語" },
         { value: "de", label: "Deutsch" },
       ]} />

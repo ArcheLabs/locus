@@ -1,6 +1,9 @@
-import { createContext, useContext, useLayoutEffect, useMemo, useState, type PropsWithChildren } from "react";
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, type PropsWithChildren } from "react";
+import i18next, { type Resource } from "i18next";
+import { initReactI18next, useTranslation } from "react-i18next";
 import { resolveLanguage } from "./i18nLogic.js";
-import { interpolateTranslation, translateSourceText } from "./translationLogic.js";
+import jaLocale from "./locales/ja.json";
+import deLocale from "./locales/de.json";
 
 export type Language = "en" | "zh-Hans" | "ja" | "de";
 export const LANGUAGE_STORAGE_KEY = "locus.language.v1";
@@ -73,7 +76,7 @@ const en = {
   swap: {
     title: "Swap", swap: "Swap", connectToSwap: "Connect to swap", swapNotSupported: "Swap not supported", checkingPairs: "Checking available pairs…",
     unsupportedPair: "This pair is not available for swapping yet.",
-    unsupportedPairZh: "该交易对暂不支持兑换。", selectAssets: "Select assets", enterAmount: "Enter an amount",
+    unsupportedPairZh: "This pair is not available for swapping yet.", selectAssets: "Select assets", enterAmount: "Enter an amount",
     priceImpact: "Price impact", slippage: "Slippage tolerance", swapSettings: "Swap settings",
     quoteLoading: "Getting quote…", quoteUnavailable: "Quote temporarily unavailable. Try again.",
     insufficientBalance: "Insufficient balance", reviewSwap: "Review swap", confirmSwap: "Confirm swap",
@@ -501,31 +504,66 @@ type ResourceTree = typeof en;
 type DeepKey<T> = { [K in keyof T & string]: T[K] extends string ? K : `${K}.${DeepKey<T[K]>}` }[keyof T & string];
 export type TranslationKey = DeepKey<ResourceTree>;
 
-function getResource(language: Language, key: string): string | undefined {
-  let current: unknown = language === "zh-Hans" ? zhHans : language === "en" ? en : undefined;
-  for (const part of key.split(".")) {
-    if (!current || typeof current !== "object" || !(part in current)) return undefined;
-    current = (current as Record<string, unknown>)[part];
-  }
-  return typeof current === "string" ? current : undefined;
-}
+type FlatResources = Record<TranslationKey, string>;
+const supportedLanguages: readonly Language[] = ["en", "zh-Hans", "ja", "de"];
 
-function flatten(tree: object, prefix = "", out: Array<[string, string]> = []): Array<[string, string]> {
+function flatten(tree: object, prefix = "", out: Record<string, string> = {}): Record<string, string> {
   for (const [key, value] of Object.entries(tree)) {
     const path = prefix ? `${prefix}.${key}` : key;
-    if (typeof value === "string") out.push([path, value]);
+    if (typeof value === "string") out[path] = value;
     else if (value && typeof value === "object") flatten(value, path, out);
   }
   return out;
 }
 
-const englishTextEntries = flatten(en);
-const chineseTextEntries = flatten(zhHans);
-const englishTextKeys = new Map(englishTextEntries.map(([key, value]) => [value, key]));
-const chineseTextKeys = new Map(chineseTextEntries.map(([key, value]) => [value, key]));
-const reportedMissingSourceText = new Set<string>();
+const enFlat = flatten(en) as FlatResources;
+const zhFlat = flatten(zhHans) as FlatResources;
+const jaFlat: FlatResources = jaLocale;
+const deFlat: FlatResources = deLocale;
 
-export const i18nResourceKeys = flatten(en).map(([key]) => key);
+function sourceTextResources(target: FlatResources): Record<string, string> {
+  const aliases: Record<string, string> = {};
+  for (const [key, sourceText] of Object.entries(enFlat)) aliases[sourceText] = target[key as TranslationKey];
+  for (const [key, sourceText] of Object.entries(zhFlat)) aliases[sourceText] = target[key as TranslationKey];
+  return aliases;
+}
+
+function readStoredLanguage(): string | null {
+  try { return typeof window === "undefined" ? null : window.localStorage.getItem(LANGUAGE_STORAGE_KEY); }
+  catch { return null; }
+}
+
+function readDeviceLanguage(): string | undefined {
+  try {
+    if (typeof navigator === "undefined") return undefined;
+    return navigator.language || navigator.languages?.[0];
+  } catch { return undefined; }
+}
+
+const localeResources = { en: enFlat, "zh-Hans": zhFlat, ja: jaFlat, de: deFlat } satisfies Record<Language, FlatResources>;
+const resources: Resource = Object.fromEntries(supportedLanguages.map((language) => [language, {
+  translation: localeResources[language],
+  sourceText: sourceTextResources(localeResources[language]),
+}])) as Resource;
+
+i18next.use(initReactI18next).init({
+  lng: resolveLanguage(readStoredLanguage(), readDeviceLanguage()),
+  fallbackLng: "en",
+  supportedLngs: [...supportedLanguages],
+  load: "currentOnly",
+  defaultNS: "translation",
+  ns: ["translation", "sourceText"],
+  resources,
+  keySeparator: false,
+  nsSeparator: false,
+  interpolation: { escapeValue: false, prefix: "{", suffix: "}" },
+  returnNull: false,
+  returnEmptyString: false,
+  initAsync: false,
+  react: { useSuspense: false },
+});
+
+export const i18nResourceKeys = Object.keys(enFlat) as TranslationKey[];
 type I18nContextValue = {
   language: Language;
   setLanguage: (language: Language) => void;
@@ -534,35 +572,23 @@ type I18nContextValue = {
 };
 const I18nContext = createContext<I18nContextValue | null>(null);
 
-function readLanguage(): Language {
-  let saved: string | null = null;
-  try {
-    saved = typeof window === "undefined" ? null : window.localStorage.getItem(LANGUAGE_STORAGE_KEY);
-  } catch { /* Fall through to browser language. */ }
-  return resolveLanguage(saved, typeof navigator === "undefined" ? undefined : navigator.language);
-}
-
 export function I18nProvider({ children }: PropsWithChildren) {
-  const [language, setLanguageState] = useState<Language>(readLanguage);
-  const setLanguage = (next: Language) => {
-    setLanguageState(next);
-    try { window.localStorage.setItem(LANGUAGE_STORAGE_KEY, next); } catch { /* Selection still applies for this page. */ }
-  };
+  const { i18n } = useTranslation();
+  const currentLocale = i18n.resolvedLanguage ?? i18n.language;
+  const language: Language = supportedLanguages.includes(currentLocale as Language) ? currentLocale as Language : "en";
+  const setLanguage = useCallback((next: Language) => {
+    if (!supportedLanguages.includes(next)) return;
+    try { if (typeof window !== "undefined") window.localStorage.setItem(LANGUAGE_STORAGE_KEY, next); }
+    catch { /* The selected language still applies for this session. */ }
+    void i18n.changeLanguage(next);
+  }, [i18n]);
   useLayoutEffect(() => { document.documentElement.lang = language; }, [language]);
   const value = useMemo<I18nContextValue>(() => ({
     language,
     setLanguage,
-    t: (key, params) => interpolateTranslation(getResource(language, key) ?? getResource("en", key) ?? key, params),
-    text: (sourceText) => {
-      const targetEntries = language === "zh-Hans" ? chineseTextEntries : englishTextEntries;
-      const translated = translateSourceText(sourceText, targetEntries, [englishTextEntries, chineseTextEntries]);
-      if (translated === sourceText && !englishTextKeys.has(sourceText) && !chineseTextKeys.has(sourceText) && import.meta.env.DEV && !reportedMissingSourceText.has(sourceText)) {
-        reportedMissingSourceText.add(sourceText);
-        console.warn("[i18n] Missing translation for a visible string.", sourceText);
-      }
-      return translated;
-    },
-  }), [language]);
+    t: (key, params) => String(i18n.t(key, { ...params, ns: "translation" })),
+    text: (sourceText) => String(i18n.t(sourceText, { ns: "sourceText", keySeparator: false, defaultValue: sourceText })),
+  }), [i18n, language, setLanguage]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
 

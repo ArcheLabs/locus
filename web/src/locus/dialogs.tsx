@@ -9,7 +9,7 @@ import type { AssetView } from "./assets.js";
 import type { RecipientResolution } from "./recipients.js";
 import { IdentityIcon } from "../components/IdentityIcon.js";
 import { ConfirmationAssetList } from "../components/ConfirmationAssetList.js";
-import { useI18n } from "../i18n/I18nProvider.js";
+import { useI18n, type TranslationKey } from "../i18n/I18nProvider.js";
 import { useGlobalNotify } from "../components/GlobalNotificationContext.js";
 import {
   createAssetPendingKey,
@@ -107,12 +107,12 @@ function stageLabel(stage: CreateAssetStage): string {
   }
 }
 
-function preparationPhaseMessage(phase: OwnershipPreparationPhase): string {
+function preparationPhaseKey(phase: OwnershipPreparationPhase): TranslationKey {
   switch (phase) {
-    case "VALIDATING_DEPLOYMENT": return "Validating the selected Locus deployment before the wallet opens.";
-    case "READING_FINALIZED_CONTEXT": return "Reading finalized chain context before the wallet opens.";
-    case "READING_MANAGED_STATE": return "Reading the Ownership state root before the wallet opens.";
-    case "READING_NONCE": return "Reading the Ownership nonce before the wallet opens.";
+    case "VALIDATING_DEPLOYMENT": return "ui.assetStage.phaseDeployment";
+    case "READING_FINALIZED_CONTEXT": return "ui.assetStage.phaseFinalized";
+    case "READING_MANAGED_STATE": return "ui.assetStage.phaseOwnership";
+    case "READING_NONCE": return "ui.assetStage.phaseNonce";
   }
 }
 
@@ -124,6 +124,9 @@ type CreateAssetPreparationRequest = {
   decimals: number;
   initialSupply: bigint;
 };
+
+type LocalizedMessageParameter = string | number | { key: TranslationKey };
+type LocalizedMessage = string | { key: TranslationKey; params?: Record<string, LocalizedMessageParameter> };
 
 export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAction, authorizationWaitMessage, networkId, serviceId, onClose, onCreated }: {
   open: boolean;
@@ -150,7 +153,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
   const activeResumeKeys = useRef(new Set<string>());
   const [prepareRequest, setPrepareRequest] = useState<CreateAssetPreparationRequest | null>(null);
   const [stage, setStage] = useState<CreateAssetStage>("EDITING");
-  const [stageMessage, setStageMessage] = useState("Enter the asset details to prepare the network action.");
+  const [stageMessage, setStageMessage] = useState<LocalizedMessage>("Enter the asset details to prepare the network action.");
   const [error, setError] = useState("");
   const [pending, setPending] = useState<CreateAssetPendingRecord | null>(null);
   const pendingRef = useRef<CreateAssetPendingRecord | null>(null);
@@ -227,7 +230,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
     if (activeResumeKeys.current.has(record.key)) return;
     activeResumeKeys.current.add(record.key);
     setStage("FINALIZING");
-    setStageMessage(`Transaction ${record.transactionId} is saved. Checking its final receipt; no new signature is needed.`);
+    setStageMessage({ key: "ui.assetStage.checkingSaved", params: { transactionId: record.transactionId } });
     setError("");
     try {
       const result = await resumeCreateAssetFinalization(
@@ -251,7 +254,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
       const message = cause instanceof Error ? cause.message : "Unable to check the saved create-asset transaction.";
       setStage("FAILED");
       setStageMessage(record.transactionId
-        ? `Transaction ${record.transactionId} is still saved. Resume finalization; do not sign this action again.`
+        ? { key: "ui.assetStage.resumeSaved", params: { transactionId: record.transactionId } }
         : "The transaction status could not be confirmed.");
       setError(message);
     } finally {
@@ -326,7 +329,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
         undefined,
         (phase) => {
           lastPhase = phase;
-          if (generation === prepareGeneration.current) setStageMessage(preparationPhaseMessage(phase));
+          if (generation === prepareGeneration.current) setStageMessage({ key: preparationPhaseKey(phase) });
         },
       );
       void withPreparationTimeout(
@@ -349,8 +352,8 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
           preparedRef.current = null;
           setStage("FAILED");
           if (cause instanceof PreparationTimeoutError) {
-            const phase = lastPhase ? text(preparationPhaseMessage(lastPhase)) : t("ui.preparingAction");
-            setStageMessage(`${phase} Preparation timed out. No signature was requested and no transaction was submitted. Refresh the page before retrying if this happens again.`);
+            const phase = { key: lastPhase ? preparationPhaseKey(lastPhase) : "ui.preparingAction" } as const;
+            setStageMessage({ key: "ui.assetStage.preparationTimeout", params: { phase } });
             setError(cause.message);
           } else {
             setStageMessage("The action was not signed or submitted. Retry preparation after checking the network connection.");
@@ -453,7 +456,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
         async (submittedRecord, submitted) => {
         updatePending(submittedRecord);
         setStage("SUBMITTED");
-        setStageMessage(`Transaction ${submitted.transactionId} was received and saved. Resuming will poll this transaction, not sign again.`);
+        setStageMessage({ key: "ui.assetStage.transactionSaved", params: { transactionId: submitted.transactionId } });
         if (submissionTimedOut) void resumePending(submittedRecord);
         },
       );
@@ -494,7 +497,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
       } else {
         setStage("FAILED");
         setStageMessage(errorPending.transactionId
-          ? `Transaction ${errorPending.transactionId} is saved; resume finalization without signing again.`
+          ? { key: "ui.assetStage.resumeTransaction", params: { transactionId: errorPending.transactionId } }
           : "The submission outcome is unresolved. Do not sign or submit it again automatically.");
         setError(message);
       }
@@ -542,7 +545,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
       </div>
       {(stage !== "EDITING" || error || pending) && <section className={`create-asset-stage create-asset-stage--${stage.toLowerCase()}`} aria-live="polite" aria-busy={stageBusy} role="status">
         <strong>{text(stageLabel(stage))}</strong>
-        <p>{text(stageMessage)}</p>
+        <p>{typeof stageMessage === "string" ? text(stageMessage) : t(stageMessage.key, Object.fromEntries(Object.entries(stageMessage.params ?? {}).map(([key, value]) => [key, typeof value === "object" ? t(value.key) : value])))}</p>
         {pending?.transactionId && <CopyableValue label={t("common.transaction")} value={pending.transactionId} />}
       </section>}
       {session?.kind === "matrix" && !canPerformAuthorizedAction() && <p className="account-access-status" role="status">{authorizationWaitMessage || "正在准备账户，请稍候。"}</p>}
