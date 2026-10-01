@@ -91,7 +91,7 @@ test("network deployment does not silently configure Testnet as Local", async ()
   assert.equal(config.networks.local.label, "MiniJAM Local / Development");
   assert.equal(config.networks.local.backendUrl, "/rpc");
   assert.equal(config.networks.local.deploymentUrl, "/deployments/local.json");
-  assert.equal(config.networks.local.matrixResolverUrl, undefined);
+  assert.equal(config.networks.local.matrixResolverUrl, "/matrix-resolver");
   assert.equal(config.networks.testnet.backendUrl, null);
   assert.equal(config.networks.testnet.deploymentUrl, null);
   assert.equal(config.networks.testnet.label, "TestNet");
@@ -790,9 +790,10 @@ test("Matrix login separates server selection from authenticated identity and pr
   assert.match(oauth, /export async function beginMatrixSso\(homeserver: string, capabilities:/);
   assert.match(oauth, /export function matrixDeviceId\(\): string/);
   assert.match(connector, /const MATRIX_SESSION_KEY = "locus\.matrix\.session\.v1"/);
-  assert.match(connector, /connected\.requestOwnUserVerification\(\)/);
+  assert.match(connector, /requestOwnUserVerification: async/);
+  assert.match(connector, /createMatrixVerificationMonitor\(refreshPublishedVerification\)/);
   assert.match(dialog, /confirmVerification\(true\)/);
-  assert.match(dialog, /Copy device ID/);
+  assert.doesNotMatch(dialog, /Copy device ID|pendingConnection!\.stored\.deviceId/);
   assert.doesNotMatch(dialog, /mobile\.element\.io/);
   assert.match(responsive, /@media \(max-width: 767px\)/);
   assert.match(styles, /\.matrix-provider-choice/);
@@ -876,7 +877,7 @@ test("canceling Matrix verification clears the provisional login and closes the 
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   const connectDialog = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
   const app = await fs.readFile(new URL("../web/src/app.tsx", import.meta.url), "utf8");
-  assert.match(dialog, /onClick=\{cancel\}>Cancel/);
+  assert.match(dialog, /onClick=\{cancel\}>关闭/);
   assert.match(dialog, /onCancel\(pendingConnection\)/);
   assert.match(dialog, /authAttempt\.current \+= 1/);
   assert.match(connectDialog, /onCancel=\{onCancelMatrix\}/);

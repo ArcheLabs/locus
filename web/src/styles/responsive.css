@@ -331,10 +331,8 @@ textarea {
   .form-grid input,
   .matrix-id-field input,
   .password-fallback input { width: 100%; }
-  .matrix-verification-steps { font-size: 15px; }
-  .matrix-device-id { grid-template-columns: minmax(0, 1fr); }
-  .matrix-device-id > span { grid-column: auto; }
-  .matrix-device-id .secondary { width: 100%; justify-content: center; }
+  .matrix-verification-actions { width: 100%; }
+  .matrix-verification-actions .action-button { flex: 1; justify-content: center; }
   .matrix-auth-button,
   .legacy-auth-options .full,
   .password-fallback .full { width: 100%; min-height: 48px; justify-content: center; }

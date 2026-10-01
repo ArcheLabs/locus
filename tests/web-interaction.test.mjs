@@ -79,8 +79,8 @@ test("Matrix controller authorization restoration checks the saved transaction b
   assert.match(matrixConnectorSource, /getControllerStatus\(subject, controllerOwnership\)/);
   assert.match(matrixConnectorSource, /status === "revoked"[\s\S]*?CONTROLLER_REVOKED/);
   assert.match(matrixConnectorSource, /status === "active"[\s\S]*?removePendingMatrixControllerAuthorization[\s\S]*?return true/);
-  assert.match(matrixDialogSource, /Check authorization status/);
-  assert.match(matrixDialogSource, /do not repeat Matrix verification/);
+  assert.match(matrixDialogSource, /重新检查/);
+  assert.doesNotMatch(matrixDialogSource, /Check authorization status|do not repeat Matrix verification/);
 });
 
 test("Matrix restore UI follows current controller authorization states", () => {
@@ -98,7 +98,7 @@ test("Matrix restore UI follows current controller authorization states", () => 
   ]) {
     assert.ok(appSource.includes(state), `app.tsx must handle ${state}`);
   }
-  assert.match(appSource, /previously revoked\. Sign in as a new Matrix device/);
+  assert.match(appSource, /这台设备已无法继续连接，请重新登录/);
 });
 
 test("Account Center offers wallet switching only for EVM and Polkadot and preserves local disconnect semantics", () => {
@@ -133,26 +133,24 @@ test("network configuration stays under the Vite base path for subpath deploymen
   assert.equal(assetCatalogPath("local", "/candidate/"), "/candidate/catalogs/local.json");
 });
 
-test("mobile Matrix verification clearly separates sign-in from Element SAS and exposes the Locus device ID", async () => {
+test("mobile Matrix verification uses Element confirmation with concise copy and hidden recovery", async () => {
   const responsive = readFileSync(new URL("../web/src/styles/responsive.css", import.meta.url), "utf8");
-  assert.match(matrixDialogSource, /connectionState === "VERIFICATION_REQUIRED"/);
-  assert.match(matrixDialogSource, /Switch to Element on this phone/);
-  assert.match(matrixDialogSource, /Sessions or Security/);
-  assert.match(matrixDialogSource, /find the Locus session/);
-  assert.match(matrixDialogSource, /accept the incoming SAS request/);
+  assert.match(matrixDialogSource, /请在 Element 中确认这台新设备。完成后返回 Locus，我们会自动继续。/);
+  assert.match(matrixDialogSource, /打开 Element → 设置 → 会话，找到 “Locus” 设备并选择“验证”。/);
+  assert.match(matrixDialogSource, /正在等待确认…/);
+  assert.match(matrixDialogSource, /setTimeout\(\(\) => setShowRecovery\(true\), 20_000\)/);
+  assert.match(matrixDialogSource, /重新检查/);
   assert.match(matrixDialogSource, /requestOwnUserVerification\(\)/);
-  assert.match(matrixDialogSource, /Retry request delivery/);
-  assert.match(matrixConnectorSource, /if \(keys\.verification !== "verified"\) \{\s*void connected\.requestOwnUserVerification\(\)/);
+  assert.doesNotMatch(matrixDialogSource, /Short authentication string|Compare these emoji|device ID|Retry request delivery|Cancel verification|otherDeviceId/);
+  assert.match(matrixConnectorSource, /verificationMonitor = createMatrixVerificationMonitor\(refreshPublishedVerification\)/);
+  assert.match(matrixConnectorSource, /matrixProofIsPublished\(refreshed\)[\s\S]*?authorizeVerifiedDevice\(refreshed\)/);
+  assert.match(matrixConnectorSource, /if \(snapshot\?\.phase === "done"\) void connected\.refreshVerification\(\)/);
+  assert.doesNotMatch(matrixConnectorSource, /if \(keys\.verification !== "verified"\) \{\s*void connected\.requestOwnUserVerification\(\)/);
   assert.match(matrixDialogSource, /verification\.startedByLocus/);
-  assert.match(matrixDialogSource, /pendingConnection!\.stored\.deviceId/);
-  assert.match(matrixDialogSource, /Copy device ID/);
-  assert.match(matrixDialogSource, /navigator\.clipboard\.writeText\(deviceId\)/);
-  assert.match(matrixDialogSource, /Element is a trusted second Matrix device; it is separate from signing in to Locus/);
-  assert.match(matrixDialogSource, /matrix-device-id--troubleshooting/);
   assert.doesNotMatch(matrixDialogSource, /elementMobileLaunchUrl|mobile\.element\.io|hs_url|element:\/\//);
   assert.match(readFileSync(new URL("../web/src/matrix/MatrixCryptoDevice.ts", import.meta.url), "utf8"), /OwnUserIdentity[\s\S]*?requestVerification\(\[VerificationMethod\.SasV1\]\)/);
   assert.match(readFileSync(new URL("../web/src/matrix/MatrixCryptoDevice.ts", import.meta.url), "utf8"), /request\.weStarted\(\).*?request\.phase\(\) === VerificationRequestPhase\.Ready/s);
-  assert.match(responsive, /\.matrix-device-id \.secondary \{ width: 100%;/);
+  assert.match(responsive, /\.matrix-verification-actions \.action-button \{ flex: 1;/);
 });
 
 function memoryStorage() {

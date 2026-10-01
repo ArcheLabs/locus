@@ -91,21 +91,21 @@ function activityAmount(amount: string, asset: string): string {
 
 function matrixRestoreMessage(connected: MatrixConnected): string {
   if (connected.state === "CONTROLLER_AUTHORIZATION_QUEUED") {
-    return "Matrix verification is complete. The controller authorization is queued in MiniJAM; Locus will keep checking it. Do not repeat verification.";
+    return "设备已确认，正在完成连接。";
   }
   if (connected.state === "CONTROLLER_AUTHORIZATION_UNKNOWN") {
-    return "Matrix verification is complete. The controller authorization status is temporarily unavailable; use Check authorization status in the Matrix dialog. Do not repeat verification.";
+    return "暂时无法确认连接状态，请稍后重新检查。";
   }
   if (connected.state === "CONTROLLER_AUTHORIZING" || connected.state === "CONTROLLER_AUTHORIZATION_FINALIZING") {
-    return "Matrix verification is complete. Locus is waiting for the controller authorization transaction to finalize on MiniJAM. Keep the Matrix dialog open.";
+    return "设备已确认，正在完成连接。";
   }
   if (connected.state === "CONTROLLER_AUTHORIZATION_FAILED") {
-    return `Matrix verification is complete, but controller authorization failed. ${connected.error}`;
+    return "暂时无法完成连接，请稍后重试。";
   }
   if (connected.state === "CONTROLLER_REVOKED") {
-    return "This Locus Matrix controller was previously revoked. Sign in as a new Matrix device or use another active controller.";
+    return "这台设备已无法继续连接，请重新登录。";
   }
-  return "Matrix device keys are ready. Locus is requesting SAS verification from your other Matrix devices. Switch to Element, accept the request, then return here to compare emoji. No Locus session is connected yet.";
+  return "请在 Element 中确认这台新设备。完成后返回 Locus，我们会自动继续。";
 }
 
 function networkErrorMessage(error: Error | null, endpoint?: string): string {

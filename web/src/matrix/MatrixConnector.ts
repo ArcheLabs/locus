@@ -5,6 +5,7 @@ import type { LocusWebSession } from "../session/types.js";
 import { describeMatrixCause, matrixControllerReceiptFailure, MatrixConnectorError } from "./MatrixErrors.js";
 import { destroyMatrixCryptoStore, MatrixCryptoDevice, type MatrixVerificationSnapshot } from "./MatrixCryptoDevice.js";
 import { queryMatrixDeviceKeyParity, queryMatrixKeys, type MatrixDiscoveredKeys } from "./MatrixKeysQuery.js";
+import { createMatrixVerificationMonitor, matrixProofIsPublished } from "./MatrixVerificationMonitor.js";
 import { clearMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, committedMatrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
 import { authenticateMatrixPassword } from "./MatrixPasswordLogin.js";
 
@@ -364,6 +365,7 @@ export type MatrixConnected = {
   startVerification: () => Promise<void>;
   confirmVerification: (matches: boolean) => Promise<void>;
   cancelVerification: () => Promise<void>;
+  refreshVerification: () => Promise<boolean>;
   retryControllerAuthorization: () => Promise<void>;
 };
 
@@ -492,7 +494,8 @@ async function makeConnected(
   const currentController = await controller.getController();
   const listeners = new Set<() => void>();
   let disposed = false;
-  let checkingProof = false;
+  let verificationMonitor: ReturnType<typeof createMatrixVerificationMonitor> | null = null;
+  let controllerAuthorization: Promise<boolean> | null = null;
   let unsubscribeCrypto: () => void = () => {};
   let unsubscribeSyncError: () => void = () => {};
   const initialVerification = crypto.currentVerification;
@@ -512,6 +515,7 @@ async function makeConnected(
     cleanup: () => {
       if (disposed) return;
       disposed = true;
+      verificationMonitor?.dispose();
       unsubscribeCrypto();
       unsubscribeSyncError();
       crypto.dispose();
@@ -544,6 +548,7 @@ async function makeConnected(
       if (!connected.verification) return;
       await crypto.cancelVerification(connected.verification.flowId, authenticatedHttp(stored.homeserver, stored));
     },
+    refreshVerification: async () => verificationMonitor ? verificationMonitor.refreshNow() : refreshPublishedVerification(),
     retryControllerAuthorization: async () => {
       if (disposed) throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The Matrix session was disconnected. Reconnect before retrying authorization.");
       connected.error = "";
@@ -560,14 +565,10 @@ async function makeConnected(
           throw new MatrixConnectorError("STALE_MATRIX_DEVICE", "The Matrix device key changed during verification. Sign in again to create a new device.");
         }
         connected.keys = refreshed;
-        if (refreshed.verification !== "verified" || refreshed.selfSigningSignature === null) {
+        if (!matrixProofIsPublished(refreshed)) {
           throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Matrix has not published the completed M → S → D verification proof yet. Wait briefly, then retry.");
         }
-        const ready = await ensureMatrixController(locus, owner, controller, refreshed, stored.deviceId, setState);
-        if (!disposed) {
-          connected.error = "";
-          setState(ready ? "READY" : "CONTROLLER_AUTHORIZATION_UNKNOWN");
-        }
+        await authorizeVerifiedDevice(refreshed);
       } catch (cause) {
         if (!disposed) {
           connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
@@ -589,42 +590,68 @@ async function makeConnected(
     connected.error = message;
     notify();
   });
-  const verifyPublishedProof = async (): Promise<void> => {
-    if (checkingProof || disposed || connected.keys.verification === "verified") return;
-    checkingProof = true;
+  async function authorizeVerifiedDevice(verifiedKeys: MatrixDiscoveredKeys): Promise<boolean> {
+    if (!matrixProofIsPublished(verifiedKeys)) return false;
+    connected.keys = verifiedKeys;
+    if (controllerAuthorization) return controllerAuthorization;
+    const authorization = (async (): Promise<boolean> => {
+      if (disposed) return false;
+      connected.error = "";
+      setState("VERIFIED");
+      if (!locus) return true;
+      setState("CONTROLLER_AUTHORIZING");
+      try {
+        const ready = await ensureMatrixController(locus, owner, controller, verifiedKeys, stored.deviceId, setState);
+        if (!disposed) {
+          connected.error = "";
+          setState(ready ? "READY" : "CONTROLLER_AUTHORIZATION_UNKNOWN");
+        }
+        return true;
+      } catch (cause) {
+        if (!disposed) {
+          connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
+          setState(matrixAuthorizationFailureState(cause));
+        }
+        throw cause;
+      }
+    })();
+    controllerAuthorization = authorization;
     try {
-      for (let attempt = 0; attempt < 10 && !disposed; attempt += 1) {
-        const refreshed = await queryMatrixKeys(
-          stored.userId,
-          stored.deviceId,
-          stored.homeserver,
-          stored.accessToken,
-          (input, init) => authenticatedFetch(stored, input, init),
-        );
-        if (!sameBytes(refreshed.deviceEd25519Key, connected.keys.deviceEd25519Key)) {
-          throw new MatrixConnectorError("STALE_MATRIX_DEVICE", "The Matrix device key changed during verification. Sign in again to create a new device.");
-        }
-        connected.keys = refreshed;
-        if (refreshed.verification === "verified" && refreshed.selfSigningSignature !== null) {
-          setState("VERIFIED");
-          if (locus) {
-            connected.error = "";
-            setState("CONTROLLER_AUTHORIZING");
-            const ready = await ensureMatrixController(locus, owner, controller, refreshed, stored.deviceId, setState);
-            if (!disposed) setState(ready ? "READY" : "CONTROLLER_AUTHORIZATION_UNKNOWN");
-          }
-          return;
-        }
-        if (attempt < 9) await new Promise((resolve) => window.setTimeout(resolve, 1_500));
-      }
-      throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Element completed SAS verification, but Matrix has not published the M → S → D proof yet. Wait briefly, then retry.");
-    } catch (cause) {
-      if (!disposed) {
-        connected.error = cause instanceof Error ? cause.message : "Could not confirm the Matrix cross-signing proof.";
-        setState(matrixAuthorizationFailureState(cause));
-      }
-    } finally { checkingProof = false; }
-  };
+      return await authorization;
+    } finally {
+      if (controllerAuthorization === authorization) controllerAuthorization = null;
+    }
+  }
+
+  async function refreshPublishedVerification(): Promise<boolean> {
+    if (disposed) return false;
+    if (matrixProofIsPublished(connected.keys)) return true;
+    let refreshed: MatrixDiscoveredKeys;
+    try {
+      refreshed = await queryMatrixKeys(
+        stored.userId,
+        stored.deviceId,
+        stored.homeserver,
+        stored.accessToken,
+        (input, init) => authenticatedFetch(stored, input, init),
+      );
+    } catch {
+      // Homeserver requests can be throttled while the browser resumes. Keep
+      // waiting and let the next poll or foreground event retry.
+      return false;
+    }
+    if (disposed) return false;
+    if (!sameBytes(refreshed.deviceEd25519Key, connected.keys.deviceEd25519Key)) {
+      connected.error = "无法确认这台设备，请重新登录。";
+      notify();
+      return true;
+    }
+    connected.keys = refreshed;
+    if (!matrixProofIsPublished(refreshed)) return false;
+    try { await authorizeVerifiedDevice(refreshed); }
+    catch { /* The proof is published; the dialog exposes a separate retry for Locus setup. */ }
+    return true;
+  }
   unsubscribeCrypto = crypto.subscribeVerification((snapshot) => {
     if (disposed) return;
     connected.verification = snapshot;
@@ -639,33 +666,16 @@ async function makeConnected(
       else if (snapshot.phase === "confirming" || snapshot.phase === "done") setState("VERIFICATION_CONFIRMING");
       else if (snapshot.phase === "cancelled") setState("VERIFICATION_REQUIRED");
       else setState("VERIFICATION_REQUESTED");
-      if (snapshot?.phase === "done") void verifyPublishedProof();
+      if (snapshot?.phase === "done") void connected.refreshVerification();
     } else notify();
     notify();
   });
   options.onState?.(initialState);
   if (keys.verification === "verified" && locus) {
-    void ensureMatrixController(locus, owner, controller, keys, stored.deviceId, setState)
-      .then((ready) => {
-        if (!disposed) {
-          connected.error = "";
-          setState(ready ? "READY" : "CONTROLLER_AUTHORIZATION_UNKNOWN");
-        }
-      })
-      .catch((cause) => {
-        if (!disposed) {
-          connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
-          setState(matrixAuthorizationFailureState(cause));
-        }
-      });
+    void authorizeVerifiedDevice(keys).catch(() => {});
   }
   if (keys.verification !== "verified") {
-    void connected.requestOwnUserVerification().catch((cause) => {
-      if (!disposed) {
-        connected.error = cause instanceof Error ? cause.message : "Locus could not request verification from your other Matrix devices.";
-        notify();
-      }
-    });
+    verificationMonitor = createMatrixVerificationMonitor(refreshPublishedVerification);
   }
   return connected;
 }

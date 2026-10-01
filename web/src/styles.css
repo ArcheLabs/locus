@@ -268,13 +268,16 @@ button:disabled { cursor: not-allowed; }
 .password-fallback { margin-top: 14px; display: grid; gap: 10px; }
 .password-fallback > p { color: var(--text-secondary); font-size: 13px; line-height: 1.45; margin: 0 0 4px; }
 .advanced-toggle { display: block; margin-top: 16px; }
-.verification-card { border: 1px solid var(--warning-border); background: var(--warning-soft); border-radius: 12px; padding: 15px; color: var(--warning); }
-.verification-card p { font-size: 13px; line-height: 1.5; margin: 7px 0 0; }
-.matrix-verification-steps { display: grid; gap: 7px; margin: 12px 0; padding-left: 22px; color: var(--text); font-size: 14px; line-height: 1.45; }
-.matrix-verification-steps strong { color: var(--text); }
-.matrix-device-id--troubleshooting { display: grid; gap: 8px; margin-top: 14px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; color: var(--text-secondary); font-size: 13px; }
-.matrix-device-id--troubleshooting summary { min-height: 28px; cursor: pointer; color: var(--text-secondary); }
-.matrix-device-id--troubleshooting code { overflow-wrap: anywhere; color: var(--text); }
+.verification-card { display: grid; gap: 10px; border: 1px solid var(--border); background: var(--surface-subtle); border-radius: 12px; padding: 16px; color: var(--text); }
+.verification-card p { font-size: 14px; line-height: 1.5; margin: 0; }
+.matrix-verification-flow { display: grid; }
+.matrix-verification-status { display: flex; align-items: center; min-height: 32px; color: var(--text-secondary); font-size: 13px; }
+.matrix-recovery-details { border-top: 1px solid var(--border); padding-top: 10px; color: var(--text-secondary); font-size: 13px; }
+.matrix-recovery-details > summary { min-height: 36px; display: flex; align-items: center; cursor: pointer; color: var(--text-secondary); font-weight: 650; }
+.matrix-recovery-content { display: grid; justify-items: start; gap: 10px; padding-top: 4px; }
+.matrix-recovery-content > p, .matrix-verification-fallback > p { margin: 0; color: var(--text-secondary); line-height: 1.5; }
+.matrix-verification-fallback { display: grid; justify-items: start; gap: 9px; width: 100%; margin-top: 5px; padding-top: 12px; border-top: 1px solid var(--border); }
+.matrix-verification-actions { display: flex; gap: 8px; }
 .create-asset-stage { margin-top: 18px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle); }
 .create-asset-stage strong { display: block; color: var(--text); }
 .create-asset-stage p, .create-asset-recovery p { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }
@@ -283,10 +286,6 @@ button:disabled { cursor: not-allowed; }
 .create-asset-stage--applied { border-color: var(--success); }
 .create-asset-recovery { display: grid; gap: 8px; margin-top: 12px; }
 .create-asset-recovery .text-button { justify-self: start; }
-.matrix-device-id { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px; margin-top: 14px; padding: 12px; border: 1px solid var(--warning-border); border-radius: 10px; background: var(--surface); color: var(--text); }
-.matrix-device-id > span { grid-column: 1 / -1; color: var(--text-secondary); font-size: 12px; font-weight: 650; }
-.matrix-device-id code { min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
-.matrix-device-id .secondary { min-height: 44px; }
 .matrix-unsupported-note { margin-top: 14px; padding: 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.5; }
 .auth-capability-note { margin: 10px 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-subtle); color: var(--text-secondary); font-size: 13px; line-height: 1.45; }
 .matrix-sas-emojis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 18px 0 8px; }
