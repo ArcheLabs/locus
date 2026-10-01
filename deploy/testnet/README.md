@@ -8,11 +8,13 @@ chain-spec checksums, and Backend digest are recorded in
 
 ## Runtime shape
 
-Use the official `deploy/stage1/compose.compact.yml` from the exact
-MiniJAM release for the split Node, Worker, and Formal RPC roles. Do not
-substitute the aggregate `--dev` profile. Confirm the release compose file
-uses the three image digests in `releases.lock`, `--chain=testnet`, and the
-private Docker network `minijam-testnet-chain` before starting any role.
+[`compose.minijam.yaml`](compose.minijam.yaml) follows the split Node,
+Worker, and Formal RPC services in the official
+[`deploy/stage1/compose.compact.yml`](https://github.com/ArcheLabs/minijam-client/blob/1000bd7504a61010b5e83b1cae5a651b9373ae08/deploy/stage1/compose.compact.yml)
+at the locked release commit. It pins all three image digests, keeps
+`--chain=testnet` and the private `minijam-testnet-chain`, uses file-backed
+secrets, and bind-mounts persistent host data. The upstream environment-backed
+secret declarations are not copied into this runtime profile.
 
 The Locus Backend is a separate service in
 [`backend.compose.yaml`](backend.compose.yaml). It joins that private network,
@@ -27,12 +29,15 @@ Worker health, or Tuwunel Client API.
    is currently authoring this network.
 2. Check the release manifest and both chain-spec checksums against
    `releases.lock`. Preserve the official chain spec and its genesis.
-3. Match existing protected key files to their roles and the release's public
-   identities. Do not create replacement development keys or put secrets in
-   this repository or a shell command.
-4. Prepare persistent paths and confirm the release's actual container UID,
-   secret-file mounts, and data directories. Do not assume a Compose secret
-   mode declaration changes the host file's permissions.
+3. Match protected key files to their roles and the release's public
+   identities. For file-backed Compose secrets, place runtime copies under
+   `/etc/minijam/secrets`, owned by the image's secret-reading UID and mode
+   `0400`. The Compose file's `file:` secret mount does not rewrite host
+   ownership or permissions.
+4. Import only the canonical Aura and GRANDPA keys into the persistent Node
+   keystore with the release CLI's offline `key insert` command. Keep the
+   Node P2P key separate. Configure only the Worker registered in this
+   release's genesis; do not import unrelated generated identities.
 5. Start the official MiniJAM Node first. Check genesis and local RPC, then
    confirm both best and finalized heights advance. Start Formal RPC and the
    registered Worker only after the Node is correct; verify their published
@@ -50,20 +55,20 @@ Worker health, or Tuwunel Client API.
    deployment evidence. The Pages workflow refuses publication when this
    descriptor does not match the checked artifact metadata and locked versions.
 
-Example invocation after the release files, secret mounts, and identity checks
-are ready:
+Start the node by itself after importing the matching authority keys. The
+Node-only profile avoids requiring the still-unconfigured Formal RPC relayer
+file during this first phase. Once all three role files exist, use the full
+profile with the same Compose project name:
 
 ```sh
-docker compose -p minijam-stage1 \
-  -f /opt/minijam/releases/stage1-v0.2.1/deploy/stage1/compose.compact.yml up -d
-docker compose -p locus-stage1 \
-  -f deploy/testnet/backend.compose.yaml up -d
+docker compose -f deploy/testnet/compose.node.yaml up -d
+docker compose -f deploy/testnet/compose.minijam.yaml up -d formal-rpc worker
+docker compose -f deploy/testnet/backend.compose.yaml up -d
 ```
 
-Before using the command, confirm the official compose service names and
-network name in the downloaded release file. The Backend overlay expects
-`node`, `formal-rpc`, and `minijam-testnet-chain`. No host firewall or
-cloud firewall rules are changed by these Compose files.
+The Backend overlay expects the Node and Formal RPC services on
+`minijam-testnet-chain`. No host firewall or cloud firewall rules are
+changed by these Compose files.
 
 ## Host capacity and persistence
 

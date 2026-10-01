@@ -1,0 +1,87 @@
+# Derived from MiniJAM minijam-client commit
+# 1000bd7504a61010b5e83b1cae5a651b9373ae08; secrets are file-backed here.
+name: minijam-testnet-compact
+
+x-bounded-logs: &bounded-logs
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  node:
+    image: ghcr.io/archelabs/minijam-node@sha256:ba765011d45f6f0307328e55f3d7311ae15570baa286ef13897ed8d59d18bfa9
+    restart: unless-stopped
+    stop_grace_period: 60s
+    command:
+      - --chain=testnet
+      - --base-path=/data
+      - --node-key-file=/run/secrets/node_network_key
+      - --validator
+      - --force-authoring
+      - --unsafe-rpc-external
+      - --rpc-methods=safe
+      - --rpc-cors=all
+    ports:
+      - "127.0.0.1:9944:9944"
+    secrets:
+      - node_network_key
+    volumes:
+      - /var/lib/minijam/node:/data
+    logging: *bounded-logs
+    networks: [chain, node-edge]
+
+  worker:
+    image: ghcr.io/archelabs/minijam-worker@sha256:714bf7456ad797d8436568cfbe0375f8afbead892c7bb407fd60bb3f6ed8ac2f
+    restart: unless-stopped
+    stop_grace_period: 60s
+    command:
+      - --rpc-url=http://node:9944
+      - --worker-id=0
+      - --ipfs-gateway=http://formal-rpc:8080
+      - --health-bind=0.0.0.0:8082
+      - --submit-candidates
+      - --submit-support-votes
+    depends_on: [node, formal-rpc]
+    environment:
+      MINIJAM_WORKER_SEED_FILE: /run/secrets/worker_signing_key
+    secrets:
+      - worker_signing_key
+    volumes:
+      - /var/lib/minijam/worker:/data
+    logging: *bounded-logs
+    networks: [chain, work]
+
+  formal-rpc:
+    image: ghcr.io/archelabs/minijam-formal-rpc@sha256:6314129f900154ec2f001e73b2f09c1e4ad747bc12f972438c372f55e2210904
+    restart: unless-stopped
+    stop_grace_period: 60s
+    depends_on: [node]
+    environment:
+      MINIJAM_RPC_URL: ws://node:9944
+      MINIJAM_FORMAL_RPC_BIND: 0.0.0.0:8080
+      MINIJAM_BUNDLE_DIR: /bundles
+      MINIJAM_RELAYER_URI_FILE: /run/secrets/work_ingress_key
+    secrets:
+      - work_ingress_key
+    volumes:
+      - /var/lib/minijam/bundles:/bundles
+    ports:
+      - "127.0.0.1:8080:8080"
+    logging: *bounded-logs
+    networks: [chain, work]
+
+networks:
+  chain:
+    name: minijam-testnet-chain
+    internal: true
+  work: {}
+  node-edge: {}
+
+secrets:
+  node_network_key:
+    file: /etc/minijam/secrets/node_network_key
+  worker_signing_key:
+    file: /etc/minijam/secrets/worker_signing_key
+  work_ingress_key:
+    file: /etc/minijam/secrets/work_ingress_key

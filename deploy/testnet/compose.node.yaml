@@ -1,0 +1,42 @@
+# Phase-one Node profile derived from MiniJAM minijam-client commit
+# 1000bd7504a61010b5e83b1cae5a651b9373ae08.
+name: minijam-testnet-compact
+
+x-bounded-logs: &bounded-logs
+  driver: json-file
+  options:
+    max-size: 10m
+    max-file: "3"
+
+services:
+  node:
+    image: ghcr.io/archelabs/minijam-node@sha256:ba765011d45f6f0307328e55f3d7311ae15570baa286ef13897ed8d59d18bfa9
+    restart: unless-stopped
+    stop_grace_period: 60s
+    command:
+      - --chain=testnet
+      - --base-path=/data
+      - --node-key-file=/run/secrets/node_network_key
+      - --validator
+      - --force-authoring
+      - --unsafe-rpc-external
+      - --rpc-methods=safe
+      - --rpc-cors=all
+    ports:
+      - "127.0.0.1:9944:9944"
+    secrets:
+      - node_network_key
+    volumes:
+      - /var/lib/minijam/node:/data
+    logging: *bounded-logs
+    networks: [chain, node-edge]
+
+networks:
+  chain:
+    name: minijam-testnet-chain
+    internal: true
+  node-edge: {}
+
+secrets:
+  node_network_key:
+    file: /etc/minijam/secrets/node_network_key
