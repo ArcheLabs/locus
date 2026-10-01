@@ -9,8 +9,13 @@ const root = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, root, "");
   const locusMode = buildLocusMode(env.VITE_LOCUS_MODE, command);
+  const pagesBase = env.VITE_PAGES_BASE ?? "/";
+  if (!pagesBase.startsWith("/") || !pagesBase.endsWith("/") || pagesBase.includes("..") || /[?#]/.test(pagesBase)) {
+    throw new Error("VITE_PAGES_BASE must be a root-relative path ending in /");
+  }
 
   return {
+    base: pagesBase,
     define: { __LOCUS_MODE__: JSON.stringify(locusMode) },
     plugins: [
       react(),

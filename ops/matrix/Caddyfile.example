@@ -1,6 +1,20 @@
-# Add this site block alongside the existing locus.minijam.xyz site.
-# This intentionally exposes federation and server keys only; the public
-# Matrix Client-Server API is not routed through Caddy.
+# Public HTTPS routes for rpc-stage1.minijam.xyz.
+# The application RPC and Matrix resolver are the only routes on this host.
+rpc-stage1.minijam.xyz {
+	@rpc path /rpc /rpc/*
+	handle @rpc {
+		reverse_proxy 127.0.0.1:8090
+	}
+
+	handle_path /matrix-resolver/* {
+		reverse_proxy 127.0.0.1:8787
+	}
+
+	respond 404
+}
+
+# Matrix federation and public server keys only. The Client-Server API at
+# 127.0.0.1:8008 remains private.
 matrix.minijam.xyz {
 	@server_well_known path /.well-known/matrix/server
 	handle @server_well_known {
@@ -20,10 +34,3 @@ matrix.minijam.xyz {
 
 	respond 404
 }
-
-# Merge this route into the existing locus.minijam.xyz site without replacing
-# its current /rpc, static-file, or deployment handlers.
-#
-# handle_path /matrix-resolver/* {
-#     reverse_proxy 127.0.0.1:8787
-# }

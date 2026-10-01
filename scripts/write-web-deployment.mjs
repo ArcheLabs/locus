@@ -37,7 +37,7 @@ const descriptor = {
     locusCommit: process.env.LOCUS_COMMIT ?? "",
     jamscriptVersion: process.env.JAMSCRIPT_VERSION ?? "v0.1.0-rc.8",
     backendVersion: process.env.JAMSCRIPT_BACKEND_VERSION ?? "backend-v0.1.0-rc.8",
-    minijamVersion: process.env.MINIJAM_VERSION ?? "stage1-v0.2.0",
+    minijamVersion: process.env.MINIJAM_VERSION ?? "stage1-v0.2.1",
   },
 };
 await fs.mkdir(path.dirname(path.resolve(output)), { recursive: true });

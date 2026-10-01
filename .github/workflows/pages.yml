@@ -1,0 +1,98 @@
+name: Locus GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Enable Pages and publish the verified production artifact
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build static Locus site
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            web/package-lock.json
+
+      - name: Select GitHub Pages base path
+        env:
+          PAGES_BASE: ${{ vars.PAGES_BASE }}
+          REPOSITORY_NAME: ${{ github.event.repository.name }}
+        run: |
+          if [ -z "${PAGES_BASE}" ]; then
+            PAGES_BASE="/${REPOSITORY_NAME}/"
+          fi
+          case "${PAGES_BASE}" in
+            /*/) ;;
+            *) echo "PAGES_BASE must start and end with /" >&2; exit 1 ;;
+          esac
+          case "${PAGES_BASE}" in
+            *..*|*\?*|*\#*) echo "PAGES_BASE contains an unsafe path component" >&2; exit 1 ;;
+          esac
+          echo "VITE_PAGES_BASE=${PAGES_BASE}" >> "$GITHUB_ENV"
+          echo "VITE_LOCUS_DEFAULT_NETWORK=testnet" >> "$GITHUB_ENV"
+
+      - name: Install locked web dependencies
+        run: |
+          npm ci
+          npm --prefix web ci
+
+      - name: Verify fixed prebuilt Locus Service artifact
+        run: python3 scripts/verify-prebuilt-dist.py
+
+      - name: Build production web client
+        run: npm --prefix web run build
+
+      - name: Add GitHub Pages SPA fallback
+        run: cp web/dist/index.html web/dist/404.html
+
+      - name: Verify deployment descriptor before requested publication
+        if: github.event_name == 'workflow_dispatch' && inputs.publish == true
+        run: node scripts/assert-pages-deployment.mjs
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: web/dist
+
+  deploy:
+    name: Publish to GitHub Pages
+    if: github.event_name == 'workflow_dispatch' && inputs.publish == true && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/configure-pages@v5
+        with:
+          enablement: true
+
+      - id: deployment
+        uses: actions/deploy-pages@v5

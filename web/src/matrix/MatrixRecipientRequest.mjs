@@ -43,7 +43,7 @@ export async function requestMatrixRecipientOwnership(userId, resolverUrl, signa
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ userId }),
       credentials: "omit",
-      mode: "same-origin",
+      mode: "cors",
       redirect: "error",
       ...(signal ? { signal } : {}),
     });

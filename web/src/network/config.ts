@@ -1,8 +1,9 @@
 import { NetworkBootstrapError, type LocusNetworkId, type RuntimeNetworkConfig, type DeploymentDescriptor, type RuntimeNetwork } from "./types.js";
-import { networkConfigPath } from "./paths.js";
+import { networkConfigPath, networkDeploymentPath } from "./paths.js";
 export { selectNetwork } from "./selection.js";
 
-export const NETWORK_STORAGE_KEY = "locus.network.v1";
+export const NETWORK_STORAGE_KEY = "locus.network.v2";
+const LEGACY_NETWORK_STORAGE_KEY = "locus.network.v1";
 
 export function isNetworkId(value: unknown): value is LocusNetworkId {
   return value === "local" || value === "testnet";
@@ -13,7 +14,13 @@ export function readNetworkSelection(): LocusNetworkId | null {
   const query = new URLSearchParams(window.location.search).get("network");
   if (isNetworkId(query)) return query;
   const stored = window.localStorage.getItem(NETWORK_STORAGE_KEY);
-  return isNetworkId(stored) ? stored : null;
+  if (isNetworkId(stored)) return stored;
+
+  const legacy = window.localStorage.getItem(LEGACY_NETWORK_STORAGE_KEY);
+  if (!isNetworkId(legacy)) return null;
+  const migrated = legacy === "local" && defaultNetworkFromEnv() === "testnet" ? "testnet" : legacy;
+  window.localStorage.setItem(NETWORK_STORAGE_KEY, migrated);
+  return migrated;
 }
 
 export function defaultNetworkFromEnv(): LocusNetworkId | null {
@@ -21,7 +28,7 @@ export function defaultNetworkFromEnv(): LocusNetworkId | null {
   return isNetworkId(value) ? value : null;
 }
 
-function asRuntimeConfig(value: unknown): RuntimeNetworkConfig {
+function asRuntimeConfig(value: unknown, baseUrl: string): RuntimeNetworkConfig {
   if (!value || typeof value !== "object") throw new Error("network config must be an object");
   const record = value as Record<string, unknown>;
   if (record.version !== 1 || !isNetworkId(record.defaultNetwork)) throw new Error("unsupported network config");
@@ -39,7 +46,9 @@ function asRuntimeConfig(value: unknown): RuntimeNetworkConfig {
     result[id] = {
       label: candidate.label,
       backendUrl: candidate.backendUrl as string | null,
-      deploymentUrl: candidate.deploymentUrl as string | null,
+      deploymentUrl: typeof candidate.deploymentUrl === "string"
+        ? networkDeploymentPath(candidate.deploymentUrl, baseUrl)
+        : null,
       ...(typeof candidate.matrixResolverUrl === "string" ? { matrixResolverUrl: candidate.matrixResolverUrl } : {}),
     };
   }
@@ -54,7 +63,7 @@ export async function loadRuntimeNetworkConfig(fetchImpl: typeof fetch = fetch):
     throw new Error("Network configuration unavailable.", { cause: error });
   }
   if (!response.ok) throw new Error(`Network configuration returned HTTP ${response.status}`);
-  return asRuntimeConfig(await response.json());
+  return asRuntimeConfig(await response.json(), import.meta.env.BASE_URL);
 }
 
 function asDeployment(value: unknown): DeploymentDescriptor {

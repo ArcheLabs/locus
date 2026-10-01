@@ -1,17 +1,16 @@
 {
   "version": 1,
-  "defaultNetwork": "local",
+  "defaultNetwork": "testnet",
   "networks": {
     "local": {
       "label": "MiniJAM Local / Development",
-      "backendUrl": "/rpc",
-      "deploymentUrl": "/deployments/local.json",
-      "matrixResolverUrl": "/matrix-resolver"
-    },
-    "testnet": {
-      "label": "TestNet",
       "backendUrl": null,
       "deploymentUrl": null
+    },
+    "testnet": {
+      "label": "MiniJAM TestNet",
+      "backendUrl": "https://rpc-stage1.minijam.xyz/rpc",
+      "deploymentUrl": "deployments/testnet.json"
     }
   }
 }

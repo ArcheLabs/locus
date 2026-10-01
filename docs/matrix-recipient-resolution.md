@@ -25,12 +25,16 @@ value, browser value, network descriptor, or response field. The configured
 `MATRIX_HOMESERVER_URL` must equal `http://127.0.0.1:8008`, and redirects fail
 closed. The resolver binds only to `127.0.0.1:8787`.
 
-The browser calls `POST /matrix-resolver/v1/resolve` with only
-`{"userId":"@bob:example.org"}`. The public API accepts no URL, homeserver,
-token, authorization header, or alternate endpoint fields. It limits requests
-to 4096 bytes. `GET /healthz` reports that resolver configuration loaded;
-`GET /readyz` checks the local Tuwunel Client-Server versions endpoint without
-performing federation.
+The browser calls `POST https://rpc-stage1.minijam.xyz/matrix-resolver/v1/resolve`
+with only `{"userId":"@bob:example.org"}`. The public API accepts no URL,
+homeserver, token, authorization header, or alternate endpoint fields. It
+limits requests to 4096 bytes. For the GitHub Pages origin, set
+`MATRIX_RESOLVER_ALLOWED_ORIGINS=https://archelabs.github.io`; the resolver
+answers preflight and API requests only for exact HTTPS origins in this
+comma-separated allowlist. Responses include CORS headers on success and
+errors. Credentials are never allowed. `GET /healthz` reports that resolver
+configuration loaded; `GET /readyz` checks the local Tuwunel Client-Server
+versions endpoint without performing federation.
 
 ## Key validation and pinning
 
@@ -83,21 +87,17 @@ the `stop_grace_period` because Tuwunel may need time to finish an on-disk
 database migration during shutdown.
 
 The resolver host service template is
-`ops/matrix/locus-matrix-resolver.service.example`. It requires Node.js 22.18+
-for the SDK's TypeScript source import and writes pin state only under
-`/var/lib/locus-matrix-resolver`.
+`ops/matrix/locus-matrix-resolver.service.example`. It uses the pinned Node.js
+24.15.0 runtime for the SDK's TypeScript source import and writes pin state
+only under `/var/lib/locus-matrix-resolver`.
 
 The public Caddy site for `matrix.minijam.xyz` serves only
 `/.well-known/matrix/server`, `/_matrix/federation/*`, and `/_matrix/key/*`.
 All other paths return 404; in particular, `/_matrix/client/*` is not public.
-Merge the resolver route into the existing Locus Caddy site without replacing
-its `/rpc`, static-file, or deployment routes:
-
-```caddyfile
-handle_path /matrix-resolver/* {
-    reverse_proxy 127.0.0.1:8787
-}
-```
+The example Caddy configuration serves the application RPC and resolver on
+`rpc-stage1.minijam.xyz`, strips the `/matrix-resolver` prefix, and preserves
+the Backend's `/rpc` path. The resolver's browser URL is
+`https://rpc-stage1.minijam.xyz/matrix-resolver`.
 
 ## Activation gates
 
@@ -125,10 +125,10 @@ After the AS registration exists, the protected live probe is
 `MATRIX_TEST_MXID` set to a controlled remote account. It prints only pass/fail
 markers and never prints the token or returned key.
 
-The Local deployment has passed these gates for
-`@libingjiang:matrix.org`: its independently authenticated Locus ID matched
-the Ownership derived from the federated master key. The endpoint is enabled
-only on Local; TestNet remains unconfigured. If the DNS, protected token file,
+The existing Local deployment has passed these gates for
+`@libingjiang:matrix.org`. TestNet remains unconfigured until the new
+homeserver's federation, Application Service, remote-key, and ownership
+checks all pass. If the DNS, protected token file,
 or controlled remote Matrix test account is missing in another environment,
 leave `matrixResolverUrl` unset and do not deploy a frontend that advertises
 Matrix recipient resolution. No ordinary Matrix access token is an acceptable
