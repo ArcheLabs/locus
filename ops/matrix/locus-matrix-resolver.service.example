@@ -13,7 +13,7 @@ Environment=PORT=8787
 Environment=MATRIX_HOMESERVER_URL=http://127.0.0.1:8008
 Environment=MATRIX_HOMESERVER_AS_TOKEN_FILE=/etc/locus/matrix-resolver/as_token
 Environment=MATRIX_RESOLVER_STATE=/var/lib/locus-matrix-resolver/state.json
-Environment=MATRIX_RESOLVER_ALLOWED_ORIGINS=https://archelabs.github.io
+Environment=MATRIX_RESOLVER_ALLOWED_ORIGINS=https://locus.minijam.xyz
 ExecStart=/opt/node-v24.15.0/bin/node /opt/locus/current/apps/matrix-resolver/server.mjs
 Restart=on-failure
 RestartSec=3
