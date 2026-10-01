@@ -83,7 +83,7 @@ test("Matrix controller authorization restoration checks the saved transaction b
   assert.match(matrixConnectorSource, /getControllerStatus\(subject, controllerOwnership\)/);
   assert.match(matrixConnectorSource, /status === "revoked"[\s\S]*?CONTROLLER_REVOKED/);
   assert.match(matrixConnectorSource, /status === "active"[\s\S]*?removePendingMatrixControllerAuthorization[\s\S]*?return true/);
-  assert.match(matrixDialogSource, /t\("ui\.checkAgain"\)/);
+  assert.match(matrixDialogSource, /t\("ui\.signInAgain"\)/);
   assert.match(i18nSource, /checkAgain: "重试"/);
   assert.doesNotMatch(matrixDialogSource, /Check authorization status|do not repeat Matrix verification/);
 });
@@ -287,7 +287,7 @@ test("create-asset UI prepares before the signature gesture and exposes every ac
     assert.ok(source.includes(`case "${state}"`), `missing ${state} stage`);
   }
   assert.match(source, /CREATE_ASSET_PREPARATION_TIMEOUT_MS = 45_000/);
-  assert.match(source, /Complete asset details/);
+  assert.match(source, /Enter asset details/);
   assert.match(source, /Preparation timed out\. No signature was requested and no transaction was submitted/);
   assert.match(source, /locus\.signPreparedOwnershipAction\(preparedAction\)/);
   assert.match(source, /locus\.abandonPreparedOwnershipAction\(preparedAction\)/);
