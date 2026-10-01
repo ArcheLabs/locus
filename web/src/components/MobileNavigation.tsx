@@ -29,14 +29,14 @@ export function MobileNavigation({ route, children, homeHref, onHome, onNavigate
   return <Dialog.Root open={open} onOpenChange={(nextOpen) => { setOpen(nextOpen); if (!nextOpen) setShowSettings(false); }}>
     <header className="mobile-header">
       <div className="mobile-header-row">
-        <Dialog.Close asChild>
-          <a href={homeHref} className="brand brand--mobile" aria-label={t("common.home")} onClick={(event) => { event.preventDefault(); setShowSettings(false); onHome(); }}>locus</a>
-        </Dialog.Close>
         <Dialog.Trigger asChild>
           <button type="button" className="mobile-menu-trigger" aria-label={t("common.navigate")} aria-expanded={open} aria-controls="mobile-navigation-dialog">
             <Menu size={23} aria-hidden="true" />
           </button>
         </Dialog.Trigger>
+        <Dialog.Close asChild>
+          <a href={homeHref} className="brand brand--mobile" aria-label={t("common.home")} onClick={(event) => { event.preventDefault(); setShowSettings(false); onHome(); }}>Locus</a>
+        </Dialog.Close>
         <div className="mobile-header-actions">{children}</div>
       </div>
     </header>
@@ -66,7 +66,7 @@ export function MobileNavigation({ route, children, homeHref, onHome, onNavigate
         {!showSettings && <footer className="mobile-navigation-footer" aria-label={t("common.links")}>
           <a href={LOCUS_GITHUB_URL} target="_blank" rel="noopener noreferrer" aria-label={t("common.github")}><SiGithub size={18} aria-hidden="true" /></a>
           <a href={ARCHELABS_X_URL} target="_blank" rel="noopener noreferrer" aria-label={t("common.onX")}><span aria-hidden="true">𝕏</span></a>
-          <a href={MINI_GENESIS_URL} target="_blank" rel="noopener noreferrer" aria-label={t("common.mini")}><span className="mobile-navigation-mini-mark" aria-hidden="true">$</span><small>MINI</small></a>
+          <a href={MINI_GENESIS_URL} target="_blank" rel="noopener noreferrer" aria-label={t("common.mini")}><span className="mobile-navigation-mini-mark">$MINI</span></a>
         </footer>}
       </Dialog.Content>
     </Dialog.Portal>

@@ -806,8 +806,10 @@ async function makeConnected(
     if (connected.state !== "CONNECTED") setState("CONNECTED");
     else notify();
     if (adopted && currentScope) {
-      const authorization = authorizationByScope.get(currentScope.key)?.authorization;
-      void runAuthorization(currentScope, authorization === "READY");
+      // Trust refreshes are frequent (SDK changes, foreground resume, and a
+      // low-frequency fallback poll). They must not force a completed account
+      // authorization through PREPARING -> READY again.
+      void runAuthorization(currentScope);
     }
   }
 

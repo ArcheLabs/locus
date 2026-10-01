@@ -207,9 +207,9 @@ textarea {
   .mobile-menu-trigger { display: inline-grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); color: var(--text); }
   .mobile-header-row,
   .mobile-header-actions { display: flex; align-items: center; }
-  .mobile-header-row { justify-content: space-between; gap: 10px; }
-  .mobile-header-actions { gap: 8px; }
-  .mobile-header .brand { margin: 0; font-size: 28px; line-height: 1; letter-spacing: -1.5px; }
+  .mobile-header-row { justify-content: flex-start; gap: 10px; }
+  .mobile-header-actions { gap: 8px; margin-left: auto; }
+  .mobile-header .brand { flex: 0 0 auto; margin: 0; font-size: 28px; line-height: 1; letter-spacing: -1.5px; }
   .mobile-header .profile-pill { min-height: 44px; max-width: min(48vw, 200px); padding: 6px 9px; gap: 7px; }
   .mobile-header .profile-pill > span:nth-child(2) { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-header-actions .network-switcher { margin: 0; }
@@ -382,9 +382,9 @@ textarea {
 .mobile-navigation-footer small { font-size: 12px; }
 .mobile-navigation-settings { display: grid; align-content: start; gap: 14px; padding: 8px 0 calc(20px + env(safe-area-inset-bottom)); }
 .mobile-navigation-back { display: inline-flex; width: fit-content; min-height: 44px; align-items: center; gap: 8px; border: 0; border-radius: 9px; background: transparent; color: var(--text-secondary); font: inherit; }
-.mobile-navigation-settings .settings-field select { min-height: 52px; font-size: 16px; }
+.mobile-navigation-settings .settings-field .select-field__trigger { min-height: 52px; font-size: 16px; }
 .mobile-navigation-footer a { min-width: 64px; }
-.mobile-navigation-mini-mark { font-weight: 750; }
+.mobile-navigation-footer a > .mobile-navigation-mini-mark { font-size: 13px; font-weight: 750; white-space: nowrap; }
 @keyframes mobile-navigation-fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes mobile-navigation-slide-in { from { opacity: .8; transform: translateY(18px); } to { opacity: 1; transform: translateY(0); } }
 

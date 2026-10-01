@@ -240,9 +240,9 @@ test("connector uses trust before proof and never treats SAS done or server proo
   assert.match(i18n, /directVerifyCheck: "已在 Matrix 设备直接验证"/);
   assert.match(i18n, /verificationDone: "验证操作已完成，正在确认设备状态。"/);
   assert.doesNotMatch(dialog, /正在准备登录信息|正在完成账户授权|账户授权已提交/);
-  assert.match(app, /t\("auth\.accountAuthorizing"\)/);
-  assert.match(app, /t\("auth\.accountStillAuthorizing"\)/);
-  assert.match(app, /t\("auth\.accountReady"\)/);
+  assert.doesNotMatch(app, /t\("auth\.(?:accountAuthorizing|accountStillAuthorizing|accountReady)"\)/);
+  assert.match(connector, /void runAuthorization\(currentScope\);/);
+  assert.doesNotMatch(connector, /void runAuthorization\(currentScope, authorization === "READY"\)/);
   assert.match(i18n, /accountAuthorizing: "已登录，正在完成账户授权…"/);
   assert.match(i18n, /accountStillAuthorizing: "账户授权仍在处理中，你可以继续浏览。"/);
   assert.match(i18n, /accountReady: "账户已就绪。"/);

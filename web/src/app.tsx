@@ -125,18 +125,15 @@ export function App() {
   const ephemeralNoticeSequence = useRef(0);
   const [transactionNotices, setTransactionNotices] = useState<GlobalTransactionNotice[]>([]);
   const dismissedAuthorizationNotices = useRef(new Set<string>());
-  const shownAuthorizationProgress = useRef(new Set<string>());
-  const authorizationNoticeTimer = useRef<number | null>(null);
-  const authorizationLongWaitTimer = useRef<number | null>(null);
-  const currentAccessRef = useRef(access);
-  currentAccessRef.current = access;
   const currentAuthorizationNoticeId = useRef("");
   const lastAuthorizationNoticeState = useRef("");
   const publishTransactionNotice = useCallback((notice: GlobalTransactionNotice) => {
     setTransactionNotices((current) => [...current.filter((item) => item.id !== notice.id), notice]);
   }, []);
   const clearTransactionNotice = useCallback((id: string) => {
-    setTransactionNotices((current) => current.filter((item) => item.id !== id));
+    setTransactionNotices((current) => current.some((item) => item.id === id)
+      ? current.filter((item) => item.id !== id)
+      : current);
   }, []);
   const dismissGlobalNotice = useCallback((id: string) => {
     if (id.startsWith("matrix-account-authorization:")) dismissedAuthorizationNotices.current.add(id);
@@ -594,10 +591,6 @@ export function App() {
     const previousId = currentAuthorizationNoticeId.current;
     if (previousId !== id) {
       if (previousId) clearTransactionNotice(previousId);
-      if (authorizationNoticeTimer.current !== null) window.clearTimeout(authorizationNoticeTimer.current);
-      if (authorizationLongWaitTimer.current !== null) window.clearTimeout(authorizationLongWaitTimer.current);
-      authorizationNoticeTimer.current = null;
-      authorizationLongWaitTimer.current = null;
       currentAuthorizationNoticeId.current = id;
       lastAuthorizationNoticeState.current = "";
     }
@@ -606,12 +599,17 @@ export function App() {
       clearTransactionNotice(id);
       return;
     }
+    const stateKey = `${access.identity}:${access.authorization}:${access.error ?? ""}`;
+    const changed = stateKey !== lastAuthorizationNoticeState.current;
+    lastAuthorizationNoticeState.current = stateKey;
     if (access.identity === "STATUS_UNKNOWN") {
-      if (authorizationNoticeTimer.current !== null) window.clearTimeout(authorizationNoticeTimer.current);
-      if (authorizationLongWaitTimer.current !== null) window.clearTimeout(authorizationLongWaitTimer.current);
-      authorizationNoticeTimer.current = null;
-      authorizationLongWaitTimer.current = null;
-      if (!dismissedAuthorizationNotices.current.has(id)) {
+      // During first connection this is an expected loading state. Only surface
+      // a notice after a trust read has produced an actual recoverable error.
+      if (!access.error) {
+        clearTransactionNotice(id);
+        return;
+      }
+      if (changed && !dismissedAuthorizationNotices.current.has(id)) {
         publishTransactionNotice({
           id,
           title: t("notices.deviceStatusUnavailable"),
@@ -624,45 +622,17 @@ export function App() {
       return;
     }
     if (access.identity !== "CONNECTED") {
+      dismissedAuthorizationNotices.current.delete(id);
       clearTransactionNotice(id);
       return;
     }
     const status = access.authorization;
-    const changed = status !== lastAuthorizationNoticeState.current;
-    lastAuthorizationNoticeState.current = status;
-    const progressStates = ["PREPARING", "SUBMITTING", "QUEUED", "CONFIRMING", "STATUS_UNKNOWN"];
-    const clearTimers = () => {
-      if (authorizationNoticeTimer.current !== null) window.clearTimeout(authorizationNoticeTimer.current);
-      if (authorizationLongWaitTimer.current !== null) window.clearTimeout(authorizationLongWaitTimer.current);
-      authorizationNoticeTimer.current = null;
-      authorizationLongWaitTimer.current = null;
-    };
-    const publishProgress = (message: string) => {
-      shownAuthorizationProgress.current.add(id);
-      publishTransactionNotice({ id, title: t("notices.accountAuthorization"), message, busy: true, dismissible: true });
-    };
-    const scheduleLongWaitNotice = () => {
-      if (authorizationLongWaitTimer.current !== null) window.clearTimeout(authorizationLongWaitTimer.current);
-      authorizationLongWaitTimer.current = window.setTimeout(() => {
-        authorizationLongWaitTimer.current = null;
-        const current = currentAccessRef.current;
-        if (currentAuthorizationNoticeId.current === id && !dismissedAuthorizationNotices.current.has(id)
-          && current?.identity === "CONNECTED"
-          && ["PREPARING", "SUBMITTING", "QUEUED", "CONFIRMING"].includes(current.authorization)) {
-          publishProgress(t("auth.accountStillAuthorizing"));
-        }
-      }, 12_000);
-    };
     if (status === "READY") {
-      clearTimers();
-      if (shownAuthorizationProgress.current.has(id)) {
-        dismissedAuthorizationNotices.current.delete(id);
-        publishTransactionNotice({ id, title: t("auth.accountReady"), tone: "success", dismissible: true, autoDismissMs: 3_500 });
-      } else clearTransactionNotice(id);
+      dismissedAuthorizationNotices.current.delete(id);
+      clearTransactionNotice(id);
       return;
     }
     if (["RETRY_REQUIRED", "REJECTED", "REVOKED"].includes(status)) {
-      clearTimers();
       if (!changed) return;
       dismissedAuthorizationNotices.current.delete(id);
       const message = status === "RETRY_REQUIRED" ? t("auth.authorizationNeedsAction")
@@ -678,15 +648,8 @@ export function App() {
       });
       return;
     }
-    if (!progressStates.includes(status)) {
-      clearTimers();
-      return;
-    }
-    if (dismissedAuthorizationNotices.current.has(id)) return;
-    if (status === "QUEUED" || status === "CONFIRMING" || status === "STATUS_UNKNOWN") {
-      clearTimers();
-      if (status === "STATUS_UNKNOWN") {
-        shownAuthorizationProgress.current.add(id);
+    if (status === "STATUS_UNKNOWN") {
+      if (changed && !dismissedAuthorizationNotices.current.has(id)) {
         publishTransactionNotice({
           id,
           title: t("auth.authorizationNeedsAction"),
@@ -695,27 +658,14 @@ export function App() {
           onAction: () => { void retryAuthorization(); },
           dismissible: true,
         });
-      } else {
-        publishProgress(t("auth.accountAuthorizing"));
-        scheduleLongWaitNotice();
       }
       return;
     }
-    if (authorizationNoticeTimer.current !== null) return;
-    authorizationNoticeTimer.current = window.setTimeout(() => {
-      authorizationNoticeTimer.current = null;
-      if (currentAuthorizationNoticeId.current !== id || dismissedAuthorizationNotices.current.has(id)) return;
-      const current = currentAccessRef.current?.authorization;
-      if (currentAccessRef.current?.identity !== "CONNECTED" || (current !== "PREPARING" && current !== "SUBMITTING")) return;
-      publishProgress(t("auth.accountAuthorizing"));
-      scheduleLongWaitNotice();
-    }, 1_800);
+    // Authorization is tracked in session state. Keep normal preparing/queued/confirming
+    // transitions quiet; only a state that needs user attention creates a notice.
+    dismissedAuthorizationNotices.current.delete(id);
+    clearTransactionNotice(id);
   }, [access?.authorization, access?.error, access?.identity, access?.scopeKey, clearTransactionNotice, currentAuthorizationScopeKey, matrixAuthorizationNoticeId, publishTransactionNotice, retryAuthorization, session?.kind, t]);
-
-  useEffect(() => () => {
-    if (authorizationNoticeTimer.current !== null) window.clearTimeout(authorizationNoticeTimer.current);
-    if (authorizationLongWaitTimer.current !== null) window.clearTimeout(authorizationLongWaitTimer.current);
-  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -1059,7 +1009,7 @@ export function App() {
     <GlobalNotificationProvider onNotify={notify}>
     <div className="app-shell" data-locus-mode={network.mode}>
       <aside className="sidebar">
-        <a className="brand" href={pathForRoute("assets", import.meta.env.BASE_URL)} aria-label={t("common.home")} onClick={(event) => { event.preventDefault(); navigateToPage("assets"); }}>locus</a>
+        <a className="brand" href={pathForRoute("assets", import.meta.env.BASE_URL)} aria-label={t("common.home")} onClick={(event) => { event.preventDefault(); navigateToPage("assets"); }}>Locus</a>
         <nav aria-label={t("common.primaryNavigation")}>
           {visibleRoutes.map((entry) => (
             <button type="button" className={page === entry || (entry === "liquidity" && page === "liquidity-new") ? "nav-item active" : "nav-item"} key={entry} aria-current={page === entry || (entry === "liquidity" && page === "liquidity-new") ? "page" : undefined} onClick={() => navigateToPage(entry)}>
@@ -1072,7 +1022,7 @@ export function App() {
             <nav className="sidebar-social-links" aria-label={t("common.links")}>
               <a href={LOCUS_GITHUB_URL} target="_blank" rel="noopener noreferrer" aria-label={t("common.github")} title={t("common.github")}><SiGithub size={18} aria-hidden="true" /></a>
               <a href={ARCHELABS_X_URL} target="_blank" rel="noopener noreferrer" aria-label={t("common.onX")} title={t("common.onX")}><span aria-hidden="true">𝕏</span></a>
-              <a href={MINI_GENESIS_URL} target="_blank" rel="noopener noreferrer" aria-label={t("common.mini")} title={t("common.mini")}><span className="sidebar-mini-mark">$</span></a>
+              <a className="sidebar-mini-link" href={MINI_GENESIS_URL} target="_blank" rel="noopener noreferrer" aria-label={t("common.mini")} title={t("common.mini")}><span className="sidebar-mini-mark">$MINI</span></a>
             </nav>
             <SettingsButton />
           </div>

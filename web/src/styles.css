@@ -44,14 +44,14 @@ button:disabled { cursor: not-allowed; }
 .sidebar-social-links { display: flex; min-width: 0; align-items: center; gap: 8px; }
 .sidebar-social-links a { display: grid; width: 38px; height: 38px; place-items: center; border: 1px solid transparent; border-radius: 10px; color: var(--text-secondary); text-decoration: none; }
 .sidebar-social-links a:hover { border-color: var(--border); background: var(--surface-hover); color: var(--text); }
-.sidebar-mini-mark { font-size: 17px; font-weight: 800; }
+.sidebar-mini-link { width: auto !important; padding-inline: 6px; }
+.sidebar-mini-mark { font-size: 13px; font-weight: 800; letter-spacing: -.2px; white-space: nowrap; }
 .settings-trigger { display: inline-flex; min-width: 44px; min-height: 44px; flex: 0 0 auto; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); color: var(--text); }
 .settings-trigger > span { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .settings-trigger:hover { background: var(--surface-hover); }
 .settings-fields { display: grid; gap: 18px; }
 .settings-field { display: grid; gap: 8px; color: var(--text); font-size: 14px; font-weight: 650; }
-.settings-field select { width: 100%; min-height: 48px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 11px; background: var(--surface); color: var(--text); }
-.settings-field select:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.settings-field .select-field__trigger { min-height: 48px; font-size: 14px; }
 .demo-footer { padding: 12px; color: var(--text-secondary); font-size: 13px; display: flex; align-items: center; gap: 8px; }
 .main { padding: 26px 42px 48px; }
 .topbar { display: flex; justify-content: flex-end; gap: 12px; align-items: center; margin-bottom: 28px; }
