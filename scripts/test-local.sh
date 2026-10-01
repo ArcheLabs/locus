@@ -9,6 +9,8 @@ if [[ ! -f "${ROOT_DIR}/node_modules/typescript/bin/tsc" ]]; then
 fi
 "${NODE_BIN}" "${ROOT_DIR}/node_modules/typescript/bin/tsc" -p "${ROOT_DIR}/tsconfig.json"
 echo "SDK_TYPECHECK=PASS"
+"${NODE_BIN}" --test "${ROOT_DIR}"/tests/matrix-airdrop.test.mjs
+echo "MATRIX_AIRDROP_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/model/*.test.mjs "${ROOT_DIR}"/tests/vectors/*.test.mjs
 echo "LOCAL_MODEL_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-network.test.mjs

@@ -1,0 +1,6 @@
+{
+  "room": "!replace-with-room-id:minijam.xyz",
+  "asset": "0xef2f434912aa4707dd59e740694904950c963f4d1824b36e9244d86a100dad70",
+  "amount": "100000000000",
+  "state": "./scripts/matrix-airdrop/state"
+}
