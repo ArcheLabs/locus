@@ -22,7 +22,7 @@ services:
       - locus-local
 
   backend:
-    image: locus-backend:local-stale-context-retry-20260930
+    image: locus-backend:local-polkadot-signraw-wrapper-20261001
     container_name: locus-backend
     restart: unless-stopped
     depends_on:

@@ -11,16 +11,16 @@
     "operationId": "0x6d9102277b8bb01f4b0afe0b58c821b95fe4f5b8cfa36a70f439a18296d3bd6d"
   },
   "locusCommit": "870fca7",
-  "jamscriptRelease": "v0.1.0-dev+6f20644",
-  "backendRelease": "local-stale-context-retry-20260930",
+  "jamscriptRelease": "v0.1.0-dev+13db5b9",
+  "backendRelease": "local-polkadot-signraw-wrapper-20261001",
   "minijamRelease": "stage1-v0.2.0",
   "images": {
     "minijam": "sha256:9e08ccf5a0ce373860082ef79453c8f3d86c61d95af671bb0cfce19799ef3b00",
-    "backend": "sha256:463bb9b59161d9aad7e672a32848dd987e6ab4a67096a3b21f94860152f41a83"
+    "backend": "sha256:47fea9cfa38fc305f74900ac362ac11001493ed4008f27b9dedb9d8d4d5457c4"
   },
   "initializedAssetCount": 6,
   "initializedPoolCount": 0,
-  "jamscriptSourceCommit": "6f20644d4c2a38d2d29d2ff4b46bda037e60ca4a",
+  "jamscriptSourceCommit": "13db5b9de941bfa739894d75fbcf0758bf35cef4",
   "jamscriptToolchainSha256": "",
   "scriptcOptimization": "release",
   "jamscriptToolchainId": "development",

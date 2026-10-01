@@ -29,10 +29,12 @@ remains immutable with its rollback descriptor and catalog preserved at
 The HTTPS `/rpc` route validated the new descriptor and Backend service state.
 All six curated asset creation actions finalized, and their full initial
 supplies were verified at Treasury on the new Service.
-The Local backend now runs `locus-backend:local-stale-context-retry-20260930`.
-It retries a batch only when MiniJAM explicitly rejects the preflight context
-as stale, rebuilding the batch from the latest finalized context. The prior
-`backend-v0.1.0-rc.8` image remains available locally for rollback.
+The Local backend now runs
+`locus-backend:local-polkadot-signraw-wrapper-20261001`. It accepts the
+standard `<Bytes>...</Bytes>` message wrapper used by Polkadot extension
+`signRaw` signatures and retries a batch only when MiniJAM explicitly rejects
+the preflight context as stale, rebuilding the batch from the latest finalized
+context. The prior backend image remains available locally for rollback.
 The on-chain Matrix adapter bootstrap, controller grant, authorized action, and
 client reconstruction/restore check passed using the adapter's valid local
 proof fixture. This was not a real Matrix OAuth/SAS session; interactive
