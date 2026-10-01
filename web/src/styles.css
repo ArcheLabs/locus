@@ -10,6 +10,7 @@ body { margin: 0; background: radial-gradient(circle at 88% 12%, var(--accent-gl
 button, input { font: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; }
+.react-loading-skeleton { --base-color: var(--surface-hover); --highlight-color: var(--border); }
 .select-field__trigger { display: flex; width: 100%; min-width: 0; min-height: 46px; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface); color: var(--text); font: inherit; font-size: 16px; line-height: 1.25; text-align: left; cursor: pointer; }
 .select-field__trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .select-field__trigger[data-disabled] { cursor: not-allowed; opacity: .58; }
@@ -354,7 +355,6 @@ button:disabled { cursor: not-allowed; }
 .asset-row-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .asset-row-balance { font-weight: 700; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .asset-list-skeleton .asset-row { cursor: default; }
-.asset-list-skeleton .react-loading-skeleton { --base-color: var(--surface-hover); --highlight-color: var(--border); }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
 .swap-page { max-width: var(--content-width-narrow); }
 .swap-card { padding: 24px; }
