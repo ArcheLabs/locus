@@ -1,0 +1,12 @@
+{
+  "release_channel": "testnet-developer-preview",
+  "language": "0.3",
+  "signed_action": "SignedActionV1",
+  "signedActionVersion": 1,
+  "application_abi": 1,
+  "managed_state_protocol": 1,
+  "managed_state_layout": 1,
+  "runtimeRefineInputVersion": 1,
+  "recovery_format": 1,
+  "builder_artifact": 1
+}
