@@ -1,6 +1,8 @@
 import { createServer } from "node:http";
+import { realpathSync } from "node:fs";
 import { chmod, mkdir, open, readFile, rename, rm, stat } from "node:fs/promises";
 import { dirname } from "node:path";
+import { pathToFileURL } from "node:url";
 import { formatLocusId, matrixOwnership } from "../../sdk/src/ownership.ts";
 
 export const TUWUNEL_ORIGIN = "http://127.0.0.1:8008";
@@ -380,7 +382,13 @@ export async function createResolverServer({
   return server;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// Node resolves a symlinked entry point to its real path for import.meta.url.
+// Resolve argv[1] the same way so this starts when launched through /opt/locus/current.
+const invokedPath = process.argv[1];
+const isMainModule = invokedPath !== undefined
+  && import.meta.url === pathToFileURL(realpathSync(invokedPath)).href;
+
+if (isMainModule) {
   createResolverServer().then((server) => {
     const address = server.address();
     console.log(`Matrix resolver listening on http://127.0.0.1:${typeof address === "object" ? address.port : address}`);
