@@ -112,6 +112,8 @@ export class MatrixCryptoDevice {
   private readonly startedSasFlows = new Set<string>();
   private activeFlowId: string | null = null;
   private ownVerificationInFlight: Promise<void> | null = null;
+  private initialSyncComplete = false;
+  private initialSyncFailure: MatrixDeviceTrustSnapshot | null = null;
   private expectedMasterKey: string | null = null;
   private expectedDeviceKey: string | null = null;
   readonly machine: OlmMachine;
@@ -181,6 +183,8 @@ export class MatrixCryptoDevice {
   /** Refresh SDK-owned trust state from a new signed keys/query response. */
   async refreshDeviceTrust(http: MatrixHttp): Promise<MatrixDeviceTrustSnapshot> {
     if (this.disposed) return { state: "UNKNOWN", reason: "crypto-device-disposed" };
+    if (this.initialSyncFailure) return this.initialSyncFailure;
+    if (!this.initialSyncComplete) return { state: "UNKNOWN", reason: "initial-sync-pending" };
     try {
       const user = new UserId(this.userId);
       let request: KeysQueryRequest;
@@ -589,11 +593,16 @@ export class MatrixCryptoDevice {
           since = payload.next_batch;
           await this.refreshVerificationRequests(http);
           await this.flush(http);
+          this.initialSyncComplete = true;
           for (const listener of this.trustListeners) listener();
         } catch (error) {
           if (abort.signal.aborted) return;
+          if (error instanceof MatrixConnectorError && error.code === "MATRIX_SESSION_INVALID") {
+            this.initialSyncFailure = { state: "SESSION_INVALID", reason: "matrix-session-expired" };
+            for (const listener of this.trustListeners) listener();
+            return;
+          }
           for (const listener of this.syncErrorListeners) listener(error);
-          if (error instanceof MatrixConnectorError && error.code === "MATRIX_SESSION_INVALID") return;
           await new Promise((resolve) => window.setTimeout(resolve, 2_000));
         }
       }

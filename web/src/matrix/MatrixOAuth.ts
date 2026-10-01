@@ -370,7 +370,13 @@ export async function revokeMatrixOAuthSession(stored: MatrixOAuthSession, clear
     const response = await fetch(`${stored.homeserver.replace(/\/$/, "")}/_matrix/client/v3/logout`, {
       method: "POST", headers: { authorization: `Bearer ${stored.accessToken}` },
     });
-    if (!response.ok) failures.push(`Matrix device logout failed (HTTP ${response.status})`);
+    if (!response.ok) {
+      const payload = await response.clone().json().catch(() => ({})) as { errcode?: unknown };
+      const alreadyLoggedOut = response.status === 401
+        || payload.errcode === "M_UNKNOWN_TOKEN"
+        || payload.errcode === "M_MISSING_TOKEN";
+      if (!alreadyLoggedOut) failures.push(`Matrix device logout failed (HTTP ${response.status})`);
+    }
   } catch (cause) { failures.push(`Matrix device logout failed: ${cause instanceof Error ? cause.message : "network error"}`); }
 
   if (stored.authType === "oauth" && stored.revocationEndpoint && stored.refreshToken && stored.clientId) {

@@ -73,6 +73,18 @@ function matrixAuthorizationFailureState(cause: unknown): MatrixConnectionState 
   return "CONTROLLER_AUTHORIZATION_FAILED";
 }
 
+function matrixReloginMessage(cause: unknown): string {
+  if (!(cause instanceof MatrixConnectorError)) return "当前 Matrix 登录状态不可用，请重新登录。";
+  switch (cause.code) {
+    case "MATRIX_SESSION_INVALID": return "Matrix 登录已过期，请重新登录。";
+    case "MATRIX_IDENTITY_CHANGED": return "Matrix 主密钥已更改，请重新登录。";
+    case "MATRIX_DEVICE_REVOKED": return "此 Matrix 设备已被移除或撤销，请重新登录。";
+    case "OWNERSHIP_PROOF_INVALID": return "Matrix 设备授权证明无效，请重新登录。";
+    case "CONTROLLER_REVOKED": return "此 Matrix 设备已断开授权，请重新登录。";
+    default: return "当前 Matrix 登录状态不可用，请重新登录。";
+  }
+}
+
 function readPendingMatrixControllerAuthorizations(): PendingMatrixControllerAuthorization[] {
   const value = window.localStorage.getItem(MATRIX_AUTHORIZATION_PENDING_KEY);
   if (!value) return [];
@@ -445,15 +457,15 @@ async function connectStoredMatrixSession(
       throwIfAborted(options.signal);
       device.setExpectedTrustKeys(keys.masterPublicKey, keys.deviceEd25519Key);
       options.onState?.("DEVICE_KEYS_READY");
+      // Start SDK sync before the trust monitor's first read. Trust must be
+      // based on SDK state after the initial sync has been applied.
+      device.startSync(homeserver, authFetch, cryptoHttp);
       return { device, keys };
     });
     cryptoSetupCommitted = true;
     throwIfAborted(options.signal);
     const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => device.sign(message) });
-    const connected = await makeConnected(stored, client, device, keys, controller, options.locus, options, freshDevice);
-    throwIfAborted(options.signal);
-    device.startSync(homeserver, authFetch, cryptoHttp);
-    return connected;
+    return await makeConnected(stored, client, device, keys, controller, options.locus, options, freshDevice);
   } catch (cause) {
     try { cryptoDevice.current?.dispose(); } catch { /* Preserve the original connection error. */ }
     client.stopClient();
@@ -513,7 +525,7 @@ async function makeConnected(
       homeserver: stored.homeserver,
       subscribeSecurity: (listener) => {
         securityListeners.add(listener);
-        if (connected?.state === "RELOGIN_REQUIRED") listener(securityMessage);
+        if (connected?.state === "RELOGIN_REQUIRED") listener(connected.error || securityMessage);
         return () => { securityListeners.delete(listener); };
       },
     },
@@ -574,17 +586,17 @@ async function makeConnected(
     options.onState?.(state);
     notify();
   };
-  const requireRelogin = () => {
+  const requireRelogin = (message = securityMessage) => {
     if (disposed || connected.state === "RELOGIN_REQUIRED") return;
     const wasReady = connected.state === "READY";
-    connected.error = securityMessage;
+    connected.error = message;
     setState("RELOGIN_REQUIRED");
     trustMonitor?.dispose();
     unsubscribeVerification();
     unsubscribeSyncError();
     crypto.dispose();
     client.stopClient();
-    if (wasReady) for (const listener of securityListeners) listener(securityMessage);
+    if (wasReady) for (const listener of securityListeners) listener(message);
   };
   const mapVerificationState = (snapshot: MatrixVerificationSnapshot | null): MatrixConnectionState => {
     if (!snapshot || snapshot.phase === "cancelled") return "VERIFICATION_REQUIRED";
@@ -596,7 +608,10 @@ async function makeConnected(
     if (disposed) return;
     trustSnapshot = snapshot;
     if (snapshot.state === "SESSION_INVALID" || snapshot.state === "IDENTITY_CHANGED" || snapshot.state === "DEVICE_REVOKED") {
-      requireRelogin();
+      const message = snapshot.state === "SESSION_INVALID" ? "Matrix 登录已过期，请重新登录。"
+        : snapshot.state === "IDENTITY_CHANGED" ? "Matrix 主密钥已更改，请重新登录。"
+          : "此 Matrix 设备已被移除或撤销，请重新登录。";
+      requireRelogin(message);
       return;
     }
     if (snapshot.state === "UNKNOWN") {
@@ -690,7 +705,7 @@ async function makeConnected(
         if (disposed || context !== attemptId) return;
         const failureClass = classifyMatrixProofFailure(cause);
         if (failureClass === "INVALID" || failureClass === "SESSION_INVALID" || failureClass === "RELOGIN_REQUIRED") {
-          requireRelogin();
+          requireRelogin(matrixReloginMessage(cause));
           return;
         }
         finalizationPaused = true;

@@ -68,7 +68,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
       setConnectionState(initialConnection.state);
       setSelectedServer(initialConnection.stored.homeserver);
       setStage("verification");
-      setError(initialConnection.error ? "暂时无法完成登录，请稍后重新检查。" : "");
+      setError(initialConnection.error || "");
       return;
     }
     setPendingConnection(null);
@@ -81,7 +81,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     if (!pendingConnection) return;
     const refresh = () => {
       setConnectionState(pendingConnection.state);
-      setError(pendingConnection.error ? "暂时无法完成登录，请稍后重新检查。" : "");
+      setError(pendingConnection.error || "");
       refreshConnection((value) => value + 1);
       if (pendingConnection.state === "READY") {
         const connected = pendingConnection;
@@ -164,7 +164,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
       setPendingConnection(connected);
       setStage("verification");
       setConnectionState(connected.state);
-      setError(connected.error ? "暂时无法完成登录，请稍后重新检查。" : "");
+      setError(connected.error || "");
       setPassword("");
     } catch (cause) {
       if (attempt === authAttempt.current) setError(cause instanceof Error ? cause.message : "Matrix sign-in failed.");
@@ -199,7 +199,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
       setConnectionState(connected.state);
       setSelectedServer(stored.homeserver);
       setStage("verification");
-      setError(connected.error ? "暂时无法完成登录，请稍后重新检查。" : "");
+      setError(connected.error || "");
     } catch (cause) {
       if (attempt === authAttempt.current) {
         setStage(readStoredMatrixSession() ? "saved-account" : "provider");
@@ -223,7 +223,12 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
       setPendingConnection(null);
       setStage("provider");
     } catch (cause) {
-      setStage(readStoredMatrixSession() ? "saved-account" : "provider");
+      const localSessionStillExists = readStoredMatrixSession() !== null;
+      if (!localSessionStillExists) {
+        pendingConnection?.session.cleanup?.();
+        setPendingConnection(null);
+      }
+      setStage(localSessionStillExists ? "saved-account" : "provider");
       setError(cause instanceof Error ? cause.message : "Could not sign out of the saved Matrix device.");
     } finally {
       setWorking(false);
