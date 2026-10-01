@@ -508,10 +508,6 @@ async function makeConnected(
   const initialState: MatrixConnectionState = "TRUST_CHECKING";
   const securityMessage = "当前 Matrix 登录状态不可用，请重新登录。";
   let connected: MatrixConnected;
-  const isVerificationInteraction = () => connected.state === "VERIFICATION_REQUIRED"
-    || connected.state === "VERIFICATION_REQUESTED"
-    || connected.state === "VERIFICATION_SAS_READY"
-    || connected.state === "VERIFICATION_CONFIRMING";
   const session: LocusWebSession = {
     kind: "matrix",
     owner,
@@ -605,6 +601,8 @@ async function makeConnected(
     if (snapshot.phase === "confirming" || snapshot.phase === "done") return "VERIFICATION_CONFIRMING";
     return "VERIFICATION_REQUESTED";
   };
+  const hasActiveVerificationRequest = (snapshot: MatrixVerificationSnapshot | null): boolean => Boolean(snapshot
+    && ["requested", "unsupported", "sas-waiting", "sas-ready", "confirming"].includes(snapshot.phase));
   function applyTrustSnapshot(snapshot: MatrixDeviceTrustSnapshot): void {
     if (disposed) return;
     trustSnapshot = snapshot;
@@ -637,7 +635,7 @@ async function makeConnected(
             : "暂时无法确认设备状态，请重试。";
       if (connected.state === "READY") notify();
       else if (["CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) setState("CONTROLLER_AUTHORIZATION_UNKNOWN");
-      else if (isVerificationInteraction()) notify();
+      else if (hasActiveVerificationRequest(connected.verification)) setState(mapVerificationState(connected.verification));
       else setState("TRUST_UNKNOWN");
       return;
     }
@@ -754,7 +752,7 @@ async function makeConnected(
     if (connected.state === "READY") { notify(); return; }
     if (["CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) return;
     connected.error = "暂时无法确认设备状态，请重试。";
-    if (isVerificationInteraction()) notify();
+    if (hasActiveVerificationRequest(connected.verification) || trustSnapshot.state === "UNVERIFIED") notify();
     else setState("TRUST_UNKNOWN");
   });
   unsubscribeVerification = crypto.subscribeVerification((snapshot) => {
@@ -764,8 +762,12 @@ async function makeConnected(
       notify();
       return;
     }
-    if (trustSnapshot.state === "UNVERIFIED") setState(mapVerificationState(snapshot));
-    else notify();
+    if (trustSnapshot.state === "UNVERIFIED" || hasActiveVerificationRequest(snapshot)) {
+      setState(mapVerificationState(snapshot));
+    } else if (trustSnapshot.state === "UNKNOWN" && (snapshot === null || snapshot.phase === "cancelled" || snapshot.phase === "done")) {
+      connected.error = trustSnapshot.reason === "initial-sync-pending" ? "" : "暂时无法确认设备状态，请重试。";
+      setState(trustSnapshot.reason === "initial-sync-pending" ? "TRUST_CHECKING" : "TRUST_UNKNOWN");
+    } else notify();
     if (snapshot?.phase === "done" || snapshot?.phase === "cancelled") void trustMonitor?.refreshNow();
   });
   options.onState?.(initialState);
