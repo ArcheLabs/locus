@@ -85,16 +85,16 @@ test("responsive shell covers mobile, tablet, safe areas, dialogs, and AppKit th
   assert.equal(JSON.parse(await fs.readFile(new URL("../web/package.json", import.meta.url), "utf8")).dependencies["@mui/material"], undefined);
 });
 
-test("network deployment does not silently configure Testnet as Local", async () => {
+test("production network config defaults to TestNet without pointing at Local services", async () => {
   const config = JSON.parse(await fs.readFile(new URL("../web/public/locus-networks.json", import.meta.url), "utf8"));
-  assert.equal(config.defaultNetwork, "local");
+  assert.equal(config.defaultNetwork, "testnet");
   assert.equal(config.networks.local.label, "MiniJAM Local / Development");
-  assert.equal(config.networks.local.backendUrl, "/rpc");
-  assert.equal(config.networks.local.deploymentUrl, "/deployments/local.json");
-  assert.equal(config.networks.local.matrixResolverUrl, "/matrix-resolver");
-  assert.equal(config.networks.testnet.backendUrl, null);
-  assert.equal(config.networks.testnet.deploymentUrl, null);
-  assert.equal(config.networks.testnet.label, "TestNet");
+  assert.equal(config.networks.local.backendUrl, null);
+  assert.equal(config.networks.local.deploymentUrl, null);
+  assert.equal("matrixResolverUrl" in config.networks.local, false);
+  assert.equal(config.networks.testnet.backendUrl, "https://rpc-stage1.minijam.xyz/rpc");
+  assert.equal(config.networks.testnet.deploymentUrl, "deployments/testnet.json");
+  assert.equal(config.networks.testnet.label, "MiniJAM TestNet");
 });
 
 test("Matrix provider selection resolves a server name without asking for a user ID", async () => {
