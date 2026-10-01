@@ -2,7 +2,7 @@
   "version": 1,
   "network": "local",
   "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
-  "serviceId": 3640358060,
+  "serviceId": 895565822,
   "assets": [
     {
       "key": "dot",

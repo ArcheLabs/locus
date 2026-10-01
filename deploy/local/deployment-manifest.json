@@ -2,15 +2,15 @@
   "format": 1,
   "network": "local",
   "genesisHash": "0xe8fdc80f81a93509206c712d1f6363e8df0672ec5425ebb54c90c4988a661e67",
-  "locusServiceId": 895565822,
-  "locusCodeHash": "0xda1f479c6a6a52d47ae747ac1c63f37a66f5516d53e0c769a89a2945a1ef7d57",
+  "locusServiceId": 3640358060,
+  "locusCodeHash": "0x7244d2be5d4c66cd59b186700c18e86464e0e5768cb73e64b4d03258cbd97114",
   "deployment": {
     "finalized": true,
-    "blockNumber": 17570,
-    "blockHash": "0xa46b062975bc1dac16ede325a7fae9689cc1e9aef512f01de57970f9efef5309",
-    "operationId": "0x6d9102277b8bb01f4b0afe0b58c821b95fe4f5b8cfa36a70f439a18296d3bd6d"
+    "blockNumber": 22251,
+    "blockHash": "0xd8bc04975cbc7593119ed050ebbd5905afd0e17e77060b9d78c248e80e515f1d",
+    "operationId": "0x3d0b0d2e6a81ea7cecfc972d88a68adeed6a3aa0dcbf49cc5dd67e33ffb42f0d"
   },
-  "locusCommit": "870fca7",
+  "locusCommit": "5a5fcba",
   "jamscriptRelease": "v0.1.0-dev+13db5b9",
   "backendRelease": "local-polkadot-signraw-wrapper-20261001",
   "minijamRelease": "stage1-v0.2.0",
@@ -25,5 +25,6 @@
   "scriptcOptimization": "release",
   "jamscriptToolchainId": "development",
   "canonicalToolchain": false,
-  "serviceArtifactDigest": "0xa0b4a72af24f7a13025bb647ae9e6f617b9e2a4c191484bcfc377125a90d43f1"
+  "serviceArtifactDigest": "0x4f0f90942858c640ede469d9c1e589ff9fb60e1e699d0e45fb789b1d1aa19226",
+  "runtimeVerifierFixCommit": "6f20644d4c2a38d2d29d2ff4b46bda037e60ca4a"
 }

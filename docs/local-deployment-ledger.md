@@ -1,44 +1,43 @@
 # MiniJAM Local deployment ledger
 
 The production web app targets **MiniJAM Local / Development**. Its active
-immutable Locus Service is `3362439117`, finalized at block `16470`, with code
+immutable Locus Service is `3640358060`, finalized at block `22251`, with code
 hash
-`0xe8919ce6dca6b301ffa7bcf9b2d99f7174909df11f6ada6e67b0cd837fe0e110`.
-It was built from Locus commit `f490fa6` with JamScript CLI `v0.1.0-dev` from
-source commit `82d2e15f6a6f26a86ed3f0c7b3a9fa26fb88ced5`. This Local deployment
-uses the development toolchain (`canonical_toolchain=false`), Clang 20.1.8,
-and release optimization under the existing 5M PVM action budget. The artifact
-contains the 512 KiB guest arena fix and passed the real Matrix transfer,
-createPool, and swap PVM regression checks.
+`0x7244d2be5d4c66cd59b186700c18e86464e0e5768cb73e64b4d03258cbd97114`.
+It was built from Locus commit `5a5fcba` with JamScript source commit
+`13db5b9de941bfa739894d75fbcf0758bf35cef4`; its runtime includes the
+Polkadot `signRaw` byte-wrapper verifier fix from
+`6f20644d4c2a38d2d29d2ff4b46bda037e60ca4a`. The Local build uses the
+source development toolchain, Clang 20.1.8, and release optimization.
 
-The HTTPS `/` deployment and Local catalog both target Service `3362439117`.
-Its state was initialized from scratch: six curated assets have their complete
-initial supply at Treasury, and `poolCount=0`. No state or balances were
-migrated. Former Service `3389972726` remains immutable with its prior state;
-its rollback descriptor and catalog are preserved at
-`web/public/deployments/local-rollback-3389972726.json` and
-`web/public/catalogs/local-3389972726.json`. Former production Service
-`4209643396` remains immutable with its prior state; its rollback descriptor and catalog are preserved at
-`web/public/deployments/local-rollback-4209643396.json` and
-`web/public/catalogs/local-4209643396.json`. Former Service `4062826813` also
-remains immutable with its rollback descriptor and catalog preserved at
-`web/public/deployments/local-rollback-4062826813.json` and
-`web/public/catalogs/local-4062826813.json`. `2323996321`, `797069104`,
-`3083943385`, and `3302613027` are older historical deployments.
+The HTTPS `/` deployment and Local catalog target Service `3640358060`.
+It was initialized from scratch with six curated assets and the full initial
+supply of each asset at Treasury. `poolCount=0`; no state, balances, or pool
+positions were migrated. Former Service `895565822` remains immutable with its
+previous state and is preserved as a rollback target in
+`web/public/deployments/local-rollback-895565822.json` and
+`web/public/catalogs/local-895565822.json`. Its predecessor Service
+`3362439117` remains immutable as well. Earlier rollback descriptors and
+catalogs for `3389972726`, `4209643396`, and `4062826813` remain preserved at
+their existing paths. `2323996321`, `797069104`, `3083943385`, and
+`3302613027` are older historical deployments.
 
-The HTTPS `/rpc` route validated the new descriptor and Backend service state.
-All six curated asset creation actions finalized, and their full initial
-supplies were verified at Treasury on the new Service.
-The Local backend now runs
-`locus-backend:local-polkadot-signraw-wrapper-20261001`. It accepts the
-standard `<Bytes>...</Bytes>` message wrapper used by Polkadot extension
+The Local backend registered the new Service after finalized deployment.
+The six asset creation actions finalized and each full initial supply was
+confirmed at Treasury. The backend runs
+`locus-backend:local-polkadot-signraw-wrapper-20261001`; it accepts the
+standard `<Bytes>...</Bytes>` message wrapper produced by Polkadot extension
 `signRaw` signatures and retries a batch only when MiniJAM explicitly rejects
 the preflight context as stale, rebuilding the batch from the latest finalized
-context. The prior backend image remains available locally for rollback.
-The on-chain Matrix adapter bootstrap, controller grant, authorized action, and
-client reconstruction/restore check passed using the adapter's valid local
-proof fixture. This was not a real Matrix OAuth/SAS session; interactive
-browser verification remains a human check.
+context. The preceding backend image remains available locally for rollback.
+
+
+## Earlier deployment records
+
+The previous Local deployment on Service `895565822` is preserved by the
+rollback descriptor and catalog above. Earlier immutable services include
+`3389972726`, `4209643396`, `4062826813`, and `3362439117`; their existing
+rollback files remain available.
 
 Service `615639671` is an unused finalized candidate that reused the live
 service key and therefore could not register in the production Backend. It is
@@ -48,7 +47,7 @@ cutover.
 Service `102670611` is another unused finalized deployment. It reused the
 registered Service key for `3083943385`, so Backend registration correctly
 failed the one-Service-per-key invariant. No assets were bootstrapped into it;
-keep its deployment receipt as an unregistered orphan.
+keep its receipt as an unregistered orphan.
 
 Service `153994977` is the preserved v1 multi-controller candidate. It remains
 registered in the Local Backend with its existing state, including one
@@ -69,10 +68,9 @@ positions or arbitrary user balances.
 
 The separate candidate frontend remains available at
 `https://locus.minijam.xyz/candidate/` and targets Service `2915918722`. Its
-catalog and state are independent of production and are not part of this
-cutover. Candidate rollback builds remain at
-`/var/www/locus-candidate-v1-153994977-before-v2-20260928T130431Z` and
-`/var/www/locus-candidate-v1-live-rollback-20260928T130431Z`.
+catalog and state are independent of production. Candidate rollback builds
+remain at `/var/www/locus-candidate-v1-153994977-before-v2-20260928T130431Z`
+and `/var/www/locus-candidate-v1-live-rollback-20260928T130431Z`.
 
 Finalized deployments `2262072784` and `2671640402` are unused historical
 deployments. They are not registered as active services, are not present in the
