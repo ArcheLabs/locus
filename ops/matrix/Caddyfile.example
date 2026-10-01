@@ -3,6 +3,7 @@
 rpc-stage1.minijam.xyz {
 	@rpc path /rpc /rpc/*
 	handle @rpc {
+		uri strip_prefix /rpc
 		reverse_proxy 127.0.0.1:8090
 	}
 

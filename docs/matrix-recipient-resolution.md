@@ -28,8 +28,8 @@ closed. The resolver binds only to `127.0.0.1:8787`.
 The browser calls `POST https://rpc-stage1.minijam.xyz/matrix-resolver/v1/resolve`
 with only `{"userId":"@bob:example.org"}`. The public API accepts no URL,
 homeserver, token, authorization header, or alternate endpoint fields. It
-limits requests to 4096 bytes. For the GitHub Pages origin, set
-`MATRIX_RESOLVER_ALLOWED_ORIGINS=https://archelabs.github.io`; the resolver
+limits requests to 4096 bytes. For the deployed custom-domain Pages origin, set
+`MATRIX_RESOLVER_ALLOWED_ORIGINS=https://locus.minijam.xyz`; the resolver
 answers preflight and API requests only for exact HTTPS origins in this
 comma-separated allowlist. Responses include CORS headers on success and
 errors. Credentials are never allowed. `GET /healthz` reports that resolver
