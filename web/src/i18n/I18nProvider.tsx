@@ -2,7 +2,7 @@ import { createContext, useContext, useLayoutEffect, useMemo, useState, type Pro
 import { resolveLanguage } from "./i18nLogic.js";
 import { interpolateTranslation, translateSourceText } from "./translationLogic.js";
 
-export type Language = "en" | "zh-Hans";
+export type Language = "en" | "zh-Hans" | "ja" | "de";
 export const LANGUAGE_STORAGE_KEY = "locus.language.v1";
 
 const en = {
@@ -19,8 +19,7 @@ const en = {
     assetOrPair: "Asset / Pair", signIn: "Sign in", home: "Home", navigate: "Navigate", back: "Back", primaryNavigation: "Primary navigation", links: "Links",
     github: "GitHub", website: "Website", onX: "ArcheLabs on X", mini: "$MINI", notifications: "Notifications",
     dismissNotification: "Dismiss notification", copyValue: "Copy value", copiedValue: "Copied to clipboard", shares: "shares",
-    online: "Connected", balance: "Balance", signInToViewBalance: "Sign in to view balance",
-    loadingBalance: "Loading balance", retryBalance: "Could not load balance. Retry",
+    online: "Connected", balance: "Balance", loadingBalance: "Loading balance",
   },
   settings: {
     title: "Settings", chooseTheme: "Choose theme", chooseNetwork: "Choose network", chooseLanguage: "Choose language",
@@ -35,18 +34,17 @@ const en = {
     center: "Account", access: "Account access", ownership: "Ownership", connection: "Connection", security: "Security",
     closeCenter: "Close account center", verification: "Verification", verified: "Verified", matrixAccount: "Matrix account",
     device: "Device", unknownDevice: "Unknown device", homeserver: "Homeserver",
-    removeHelp: "Disconnecting keeps this verified device for your next Locus session.",
     removeDetails: "This removes the saved Locus Matrix device from this browser and signs it out of Matrix. The next sign-in creates a new device and requires verification in Element.",
     keepMatrix: "Your Matrix device and crypto store will be kept.", keepWallet: "Disconnecting only ends the Locus session. Wallet authorization is kept.",
-    keepSession: "Only the Locus session is disconnected.", switching: "Switching account…", connectedLabel: "Connected · {status}",
+    keepSession: "Only the Locus session is disconnected.", switching: "Switching account…",
     restoring: "Restoring…", notConnected: "Not connected", chooseSignIn: "Choose a sign-in method", signer: "{kind} signer",
   },
   assets: {
     title: "Assets", searchPlaceholder: "Search assets...", filter: "Filter assets", create: "Create asset",
     featured: "Featured Assets", noMatches: "No matching assets on this network.", noDemoAssets: "No demo assets found.",
     curatedEmpty: "Curated test assets will appear after their catalog and on-chain metadata match.",
-    loading: "Loading assets", loadingBalance: "Loading balance", balanceUnavailable: "Could not load balance. Retry",
-    signInBalance: "Sign in to view balance", details: "{symbol} details", demoData: "Demo data",
+    loading: "Loading assets", loadingBalance: "Loading balance",
+    details: "{symbol} details", demoData: "Demo data",
     decimals: "Decimals", totalSupply: "Total supply", value: "Value", assetClass: "Asset class", issuer: "Issuer",
     assetId: "Asset ID", unableDetails: "Unable to load asset details.", balanceRetry: "Retry balance", search: "Search assets", detailsMore: "More", openDetails: "Open {symbol} details",
     testAsset: "Test asset", demoEquity: "Demo equity", classCrypto: "Crypto", classEquity: "Demo equity", classCustom: "Custom",
@@ -100,7 +98,7 @@ const en = {
   },
   auth: {
     matrixSavedUnavailable: "The saved Matrix session is unavailable. Choose a Matrix sign-in method.",
-    checkingDevice: "Checking device status…", loggingIn: "Signing in…", signOutCleanup: "Matrix sign-out cleanup needs attention.",
+    checkingDevice: "Checking device status…", loggingIn: "Signing in…", verifyingDevice: "Verifying device…", signOutCleanup: "Matrix sign-out cleanup needs attention.",
     deviceUnknown: "Device status is temporarily unavailable. Sensitive actions are paused.",
     accountAuthorizing: "Signed in. Finishing account authorization…", accountStillAuthorizing: "Account authorization is still processing. You can keep browsing.",
     accountReady: "Account is ready.", authorizationNeedsAction: "Account authorization needs attention", securitySessionEnded: "Matrix security state changed. This session was disconnected.",
@@ -268,8 +266,7 @@ const zhHans: DeepTranslation<typeof en> = {
     assetOrPair: "资产 / 交易对", signIn: "登录", home: "首页", navigate: "导航", back: "返回", primaryNavigation: "主导航", links: "链接",
     github: "GitHub", website: "网站", onX: "ArcheLabs 在 X 上", mini: "$MINI", notifications: "通知",
     dismissNotification: "关闭通知", copyValue: "复制内容", copiedValue: "已复制到剪贴板", shares: "份",
-    online: "已连接", balance: "余额", signInToViewBalance: "登录后查看余额",
-    loadingBalance: "正在读取余额", retryBalance: "暂时无法获取余额，点击重试",
+    online: "已连接", balance: "余额", loadingBalance: "正在读取余额",
   },
   settings: {
     title: "设置", chooseTheme: "选择风格", chooseNetwork: "选择网络", chooseLanguage: "选择语言",
@@ -284,18 +281,17 @@ const zhHans: DeepTranslation<typeof en> = {
     center: "账户", access: "账户权限", ownership: "Ownership", connection: "连接", security: "安全",
     closeCenter: "关闭账户面板", verification: "设备验证", verified: "已验证", matrixAccount: "Matrix 账户",
     device: "设备", unknownDevice: "未知设备", homeserver: "Homeserver",
-    removeHelp: "断开连接后，此已验证设备仍可用于下次登录 Locus。",
     removeDetails: "此操作会从浏览器移除已保存的 Locus Matrix 设备，并退出 Matrix。下次登录会创建新设备，需要在 Element 中完成验证。",
     keepMatrix: "Matrix 设备和加密存储将保留。", keepWallet: "仅断开 Locus 会话，钱包授权会保留。",
-    keepSession: "仅断开 Locus 会话。", switching: "正在切换账户…", connectedLabel: "已连接 · {status}",
+    keepSession: "仅断开 Locus 会话。", switching: "正在切换账户…",
     restoring: "正在恢复…", notConnected: "未连接", chooseSignIn: "选择登录方式", signer: "{kind} 签名账户",
   },
   assets: {
     title: "资产", searchPlaceholder: "搜索资产…", filter: "筛选资产", create: "创建资产",
     featured: "精选资产", noMatches: "此网络上没有符合条件的资产。", noDemoAssets: "没有找到演示资产。",
     curatedEmpty: "资产目录与链上元数据匹配后，精选测试资产将在此显示。",
-    loading: "正在加载资产", loadingBalance: "正在读取余额", balanceUnavailable: "暂时无法获取余额，点击重试",
-    signInBalance: "登录后查看余额", details: "{symbol} 详情", demoData: "演示数据",
+    loading: "正在加载资产", loadingBalance: "正在读取余额",
+    details: "{symbol} 详情", demoData: "演示数据",
     decimals: "精度", totalSupply: "总供应量", value: "价值", assetClass: "资产类型", issuer: "发行方",
     assetId: "资产 ID", unableDetails: "暂时无法读取资产详情。", balanceRetry: "重试读取余额", search: "搜索资产", detailsMore: "更多", openDetails: "打开 {symbol} 详情",
     testAsset: "测试资产", demoEquity: "演示股票", classCrypto: "加密资产", classEquity: "演示股票", classCustom: "自定义",
@@ -349,7 +345,7 @@ const zhHans: DeepTranslation<typeof en> = {
   },
   auth: {
     matrixSavedUnavailable: "已保存的 Matrix 会话不可用。请选择 Matrix 登录方式。",
-    checkingDevice: "正在检查设备状态…", loggingIn: "正在登录…", signOutCleanup: "Matrix 退出登录清理需要处理。",
+    checkingDevice: "正在检查设备状态…", loggingIn: "正在登录…", verifyingDevice: "正在验证设备…", signOutCleanup: "Matrix 退出登录清理需要处理。",
     deviceUnknown: "暂时无法读取设备状态，敏感操作已暂停。",
     accountAuthorizing: "已登录，正在完成账户授权…", accountStillAuthorizing: "账户授权仍在处理中，你可以继续浏览。",
     accountReady: "账户已就绪。", authorizationNeedsAction: "账户授权需要处理", securitySessionEnded: "Matrix 安全状态已变化，当前会话已断开。",
@@ -506,7 +502,7 @@ type DeepKey<T> = { [K in keyof T & string]: T[K] extends string ? K : `${K}.${D
 export type TranslationKey = DeepKey<ResourceTree>;
 
 function getResource(language: Language, key: string): string | undefined {
-  let current: unknown = language === "en" ? en : zhHans;
+  let current: unknown = language === "zh-Hans" ? zhHans : language === "en" ? en : undefined;
   for (const part of key.split(".")) {
     if (!current || typeof current !== "object" || !(part in current)) return undefined;
     current = (current as Record<string, unknown>)[part];
@@ -552,13 +548,14 @@ export function I18nProvider({ children }: PropsWithChildren) {
     setLanguageState(next);
     try { window.localStorage.setItem(LANGUAGE_STORAGE_KEY, next); } catch { /* Selection still applies for this page. */ }
   };
-  useLayoutEffect(() => { document.documentElement.lang = language === "zh-Hans" ? "zh-Hans" : "en"; }, [language]);
+  useLayoutEffect(() => { document.documentElement.lang = language; }, [language]);
   const value = useMemo<I18nContextValue>(() => ({
     language,
     setLanguage,
     t: (key, params) => interpolateTranslation(getResource(language, key) ?? getResource("en", key) ?? key, params),
     text: (sourceText) => {
-      const translated = translateSourceText(sourceText, language === "en" ? englishTextEntries : chineseTextEntries, [englishTextEntries, chineseTextEntries]);
+      const targetEntries = language === "zh-Hans" ? chineseTextEntries : englishTextEntries;
+      const translated = translateSourceText(sourceText, targetEntries, [englishTextEntries, chineseTextEntries]);
       if (translated === sourceText && !englishTextKeys.has(sourceText) && !chineseTextKeys.has(sourceText) && import.meta.env.DEV && !reportedMissingSourceText.has(sourceText)) {
         reportedMissingSourceText.add(sourceText);
         console.warn("[i18n] Missing translation for a visible string.", sourceText);

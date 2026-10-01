@@ -281,7 +281,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
         <AssetAmountInput
           selector={<AssetSelector aria-label="Asset to pay" triggerClassName="swap-asset-selector" variant="compact" showBalance={false} disabled={busy} value={assetInId} assets={assets} onValueChange={(asset) => updatePair(asset.assetIdHex, assetOutId)} />}
           label={t("ui.youPay")}
-          balance={assetIn ? <AssetBalanceStatus state={getBalanceState(assetIn)} amount={formatUnits(assetIn.balance ?? 0n, assetIn.decimals)} symbol={assetIn.symbol} onRetry={() => void onRefreshAssets()} /> : undefined}
+          balance={assetIn ? <AssetBalanceStatus state={getBalanceState(assetIn)} amount={formatUnits(assetIn.balance ?? 0n, assetIn.decimals)} symbol={assetIn.symbol} /> : undefined}
           id="swap-amount"
           amount={amount}
           disabled={busy}

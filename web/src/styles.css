@@ -14,7 +14,7 @@ button:disabled { cursor: not-allowed; }
 .select-field__trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .select-field__trigger[data-disabled] { cursor: not-allowed; opacity: .58; }
 .select-field__icon { display: grid; flex: 0 0 auto; color: var(--text-secondary); }
-.select-field__content { z-index: 120; width: var(--radix-select-trigger-width); max-height: min(360px, var(--radix-select-content-available-height)); overflow: hidden; }
+.select-field__content { z-index: 140; width: var(--radix-select-trigger-width); max-height: min(360px, var(--radix-select-content-available-height)); overflow: hidden; }
 .select-field__viewport { width: 100%; padding: 4px; }
 .select-field__item { position: relative; display: flex; min-height: 44px; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 34px 9px 10px; border-radius: 8px; color: var(--text); font: inherit; font-size: 14px; line-height: 1.35; outline: none; cursor: pointer; }
 .select-field__item[data-highlighted] { background: var(--surface-hover); }
@@ -31,9 +31,9 @@ button:disabled { cursor: not-allowed; }
 .responsive-select__tabs { margin: 0; }
 .swap-product-tabs { margin-bottom: 16px; }
 .activity-filter-tabs { margin-bottom: 18px; }
-.app-shell { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; min-height: 100dvh; }
+.app-shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); min-height: 100vh; min-height: 100dvh; }
 .sidebar { padding: 28px 22px; border-right: 1px solid var(--border); background: var(--surface-glass); backdrop-filter: blur(14px); display: flex; flex-direction: column; }
-.brand { display: block; width: fit-content; color: var(--text); background: linear-gradient(112deg, var(--text) 16%, var(--accent) 100%); background-clip: text; -webkit-text-fill-color: transparent; font-size: 34px; font-weight: 800; letter-spacing: -2px; margin: 0 0 44px 12px; text-decoration: none; transition: transform .18s ease, filter .18s ease; }
+.brand { display: block; width: fit-content; max-width: 100%; overflow: visible; white-space: nowrap; color: var(--text); background: linear-gradient(112deg, var(--text) 16%, var(--accent) 100%); background-clip: text; -webkit-text-fill-color: transparent; font-size: 34px; font-weight: 800; letter-spacing: -2px; margin: 0 0 44px 12px; text-decoration: none; transition: transform .18s ease, filter .18s ease; }
 .brand:hover { transform: translateY(-1px); filter: drop-shadow(0 2px 8px var(--accent-glow)); }
 .brand:focus-visible { border-radius: 4px; outline: 2px solid var(--focus-ring); outline-offset: 5px; }
 .nav-item { border: 0; background: transparent; color: var(--text); padding: 14px 16px; border-radius: 12px; text-align: left; display: flex; align-items: center; gap: 12px; font-size: 17px; width: 100%; margin-bottom: 7px; }
@@ -240,7 +240,9 @@ button:disabled { cursor: not-allowed; }
 .account-picker .primary { margin-top: 4px; font-size: 14px; padding: 12px; }
 .issuer-card { display: flex; align-items: center; gap: 12px; padding: 13px; border: 1px solid var(--border-strong); border-radius: 12px; background: var(--surface-subtle); margin-bottom: 18px; }
 .issuer-card > span:last-child { display: grid; gap: 3px; min-width: 0; }
-.issuer-card strong { font-size: 14px; }
+.issuer-card strong { font-size: 14px; overflow-wrap: anywhere; }
+.form-grid input { background: var(--surface); color: var(--text); }
+.form-grid input::placeholder { color: var(--text-tertiary); opacity: 1; }
 .issuer-card code { color: var(--text-secondary); font-size: 11px; overflow-wrap: anywhere; }
 .page-heading .secondary { white-space: nowrap; }
 .account-menu { min-width: 280px; padding: 8px; }
@@ -256,8 +258,11 @@ button:disabled { cursor: not-allowed; }
 .account-action-copy small { color: var(--text-secondary); font-size: 12px; line-height: 1.35; white-space: normal; }
 .account-action.danger .account-action-copy small { color: var(--text-secondary); }
 .text-button { border: 0; background: transparent; color: var(--accent); padding: 0; font-weight: 650; }
-.latest-assets h2 { margin: 2px 0 14px; font-size: 20px; letter-spacing: -.3px; }
+.latest-assets h2 { display: flex; align-items: center; gap: 8px; margin: 2px 0 14px; font-size: 20px; letter-spacing: -.3px; }
+.latest-assets h2 svg { flex: 0 0 auto; color: var(--accent); }
 .latest-list { overflow: hidden; }
+.latest-list-skeleton .latest-asset { pointer-events: none; }
+.latest-list-skeleton .latest-asset > span:nth-child(2) { gap: 6px; }
 .latest-asset { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px 16px; border: 0; border-top: 1px solid var(--border); background: var(--surface); text-align: left; }
 .latest-asset:first-child { border-top: 0; }
 .latest-asset:hover { background: var(--surface-subtle); }
@@ -406,6 +411,11 @@ button:disabled { cursor: not-allowed; }
 .account-identity-card > span:nth-child(2) { display: grid; min-width: 0; gap: 4px; }
 .account-identity-card > span:nth-child(2) strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .account-identity-card > span:nth-child(2) small { color: var(--success); font-size: 12px; }
+.account-connection-indicator { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: flex-start; }
+.account-connection-indicator--ready { color: var(--success); }
+.account-connection-indicator--attention { color: var(--danger-strong); }
+.account-connection-indicator--pending { color: var(--accent); }
+.account-connection-indicator--pending svg { animation: action-button-spin 1s linear infinite; }
 .account-center-section { display: grid; gap: 12px; padding-bottom: 18px; border-bottom: 1px solid var(--border); }
 .account-center-section h3 { margin: 0; color: var(--text-secondary); font-size: 13px; font-weight: 600; }
 .account-access-status { margin: 0; color: var(--text-secondary); font-size: 13px; line-height: 1.45; }

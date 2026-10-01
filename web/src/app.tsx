@@ -3,7 +3,7 @@ import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import Skeleton from "react-loading-skeleton";
 import "react-loading-skeleton/dist/skeleton.css";
 import { formatLocusId, formatUnits, ownershipKey, parseUnits, toHex, type LocusClient, type Ownership } from "@archelabs/locus";
-import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CirclePlus, Coins, Droplets, History, List, ListFilter, RefreshCw, Search, Send, Shapes, TrendingUp, X } from "lucide-react";
+import { ArrowDownLeft, ArrowLeftRight, ArrowUpRight, CirclePlus, Coins, Droplets, History, List, ListFilter, RefreshCw, Search, Send, Shapes, Sparkles, TrendingUp, X } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useNetwork } from "./network/NetworkProvider.js";
 import { loadAssetBalance, loadAssetIds, loadAssetMetadataForId, loadCuratedCatalog, displayAmount, displayAssetAmount, formatAssetListAmount, type AssetMetadata, type AssetView, type CuratedCatalog } from "./locus/assets.js";
@@ -40,7 +40,7 @@ import { AssetAmountInput } from "./components/AssetAmountInput.js";
 import { AssetBalanceStatus } from "./components/AssetBalanceStatus.js";
 import { CopyableValue } from "./components/CopyableValue.js";
 import { pathForRoute, routeFromPath, type AppRoute } from "./navigation/routes.js";
-import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, signOutMatrixSession, type MatrixConnected } from "./matrix/MatrixConnector.js";
+import { readStoredMatrixSession, restoreMatrixSession, connectMatrixTokenSession, signOutMatrixSession, type MatrixConnected, type MatrixConnectionState } from "./matrix/MatrixConnector.js";
 import { matrixStateRequiresUserInteraction } from "./matrix/MatrixInteraction.js";
 import { resolveMatrixRecipient } from "./matrix/MatrixRecipientResolver.js";
 import { completeMatrixAuthCallback, hasMatrixAuthCallback, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./matrix/MatrixOAuth.js";
@@ -97,7 +97,7 @@ function activityAmount(amount: string, asset: string): string {
 
 function matrixRestoreMessage(connected: MatrixConnected): string {
   if (connected.state === "TRUST_CHECKING" || connected.state === "AUTHENTICATED" || connected.state === "DEVICE_KEYS_READY") return "Signing in.";
-  if (connected.state === "TRUST_UNKNOWN") return "Matrix device status is temporarily unavailable. Retry.";
+  if (connected.state === "TRUST_UNKNOWN") return "Verifying device…";
   if (connected.state === "RELOGIN_REQUIRED") return "The Matrix session must be signed in again.";
   return "Verify this device from a Matrix device where you are already signed in.";
 }
@@ -465,7 +465,9 @@ export function App() {
       else {
         setPendingMatrixConnection(connected);
         setConnectOpen(true);
-        finishRestore(matrixRestoreMessage(connected));
+        if (!(["AUTHENTICATED", "DEVICE_KEYS_READY", "TRUST_CHECKING", "TRUST_UNKNOWN"] as MatrixConnectionState[]).includes(connected.state)) {
+          finishRestore(matrixRestoreMessage(connected));
+        }
       }
     }).catch(() => {
       if (abortController.signal.aborted) return;
@@ -560,9 +562,9 @@ export function App() {
         finishRestore();
         return;
       }
-      if (["AUTHENTICATED", "DEVICE_KEYS_READY", "TRUST_CHECKING"].includes(pending.state)) return;
+      if (["AUTHENTICATED", "DEVICE_KEYS_READY", "TRUST_CHECKING", "TRUST_UNKNOWN"].includes(pending.state)) return;
       if (pending.state === "RELOGIN_REQUIRED") finishRestore(matrixRestoreMessage(pending));
-      else if (pending.state === "TRUST_UNKNOWN" || pending.state.startsWith("VERIFICATION_")) finishRestore(matrixRestoreMessage(pending));
+      else if (pending.state.startsWith("VERIFICATION_")) finishRestore(matrixRestoreMessage(pending));
     };
     const unsubscribe = pending.subscribe(settleRestore);
     settleRestore();
@@ -1051,7 +1053,7 @@ export function App() {
           </section>
         )}
 
-        {page === "send" && <SendPage networkMode={networkMode} status={network.status} hasSession={Boolean(sessionOwner)} balanceState={currentNetworkAsset ? getAssetBalanceState(currentNetworkAsset) : sessionOwner ? "loading" : "signed-out"} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} recipientError={recipientFieldError} recipientMessage={recipient.trim() && (resolvedRecipient.valid || matrixResolutionPending) ? resolvedRecipient.message : ""} amount={amount} amountError={amountFieldError} formError={sendFormError} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={(value) => { updateRecipient(value); setRecipientTouched(false); }} onRecipientBlur={() => setRecipientTouched(true)} onAmount={updateAmount} onAmountBlur={() => setAmountTouched(true)} onMax={() => { updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : ""); setAmountTouched(true); }} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} onRetryBalance={() => void refreshAssets()} />}
+        {page === "send" && <SendPage networkMode={networkMode} status={network.status} hasSession={Boolean(sessionOwner)} balanceState={currentNetworkAsset ? getAssetBalanceState(currentNetworkAsset) : sessionOwner ? "loading" : "signed-out"} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} recipientError={recipientFieldError} recipientMessage={recipient.trim() && (resolvedRecipient.valid || matrixResolutionPending) ? resolvedRecipient.message : ""} amount={amount} amountError={amountFieldError} formError={sendFormError} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={(value) => { updateRecipient(value); setRecipientTouched(false); }} onRecipientBlur={() => setRecipientTouched(true)} onAmount={updateAmount} onAmountBlur={() => setAmountTouched(true)} onMax={() => { updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : ""); setAmountTouched(true); }} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
         {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} getBalanceState={getAssetBalanceState} onRetry={() => void refreshAssets()} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} />}
         {page === "swap" && <>
           <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} canPerformAuthorizedAction={canPerformAuthorizedAction} authorizationWaitMessage={authorizationWaitMessage()} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onTransactionNotice={publishTransactionNotice} onClearTransactionNotice={clearTransactionNotice} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} getBalanceState={getAssetBalanceState} />
@@ -1079,13 +1081,13 @@ export function App() {
       {networkMode && currentNetworkAsset && <ReviewDialog open={reviewOpen} asset={currentNetworkAsset} amount={amount} recipient={recipient} resolution={resolvedRecipient} onClose={() => setReviewOpen(false)} onConfirm={confirmSend} />}
       <ReceiveDialog open={receiveAsset !== null} asset={receiveAsset} session={session} onClose={() => setReceiveAsset(null)} />
       <CreateAssetDialog open={createAssetOpen} locus={networkMode ? locus : null} session={session} canPerformAuthorizedAction={canPerformAuthorizedAction} authorizationWaitMessage={authorizationWaitMessage()} networkId={network.networkId} serviceId={network.deployment?.serviceId ?? null} onClose={() => setCreateAssetOpen(false)} onCreated={() => void refreshAssets()} />
-      <AssetDetailModal asset={detailAsset} networkMode={networkMode} getBalanceState={getAssetBalanceState} onRetry={() => void refreshAssets()} onClose={() => setDetailAsset(null)} onReceive={(asset) => { setDetailAsset(null); setReceiveAsset(asset); }} onSend={(asset) => { setDetailAsset(null); if (networkMode && "assetId" in asset) chooseNetworkAsset(asset); else { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); navigateToPage("send"); } }} />
+      <AssetDetailModal asset={detailAsset} networkMode={networkMode} getBalanceState={getAssetBalanceState} onClose={() => setDetailAsset(null)} onReceive={(asset) => { setDetailAsset(null); setReceiveAsset(asset); }} onSend={(asset) => { setDetailAsset(null); if (networkMode && "assetId" in asset) chooseNetworkAsset(asset); else { setDemoAssetIndex(demoAssets.indexOf(asset as DemoAsset)); navigateToPage("send"); } }} />
     </div>
     </GlobalNotificationProvider>
   );
 }
 
-function SendPage({ networkMode, status, hasSession, balanceState, asset, assets, assetSearch, assetPickerOpen, recipientType, recipient, recipientError, recipientMessage, amount, amountError, formError, typeOpen, resolution, sendState, onSearchAssets, onToggleAssets, onSelectAsset, onChooseType, onToggleTypes, onRecipient, onRecipientBlur, onAmount, onAmountBlur, onMax, onContinue, onCycleDemo, onClear, onRetryBalance }: {
+function SendPage({ networkMode, status, hasSession, balanceState, asset, assets, assetSearch, assetPickerOpen, recipientType, recipient, recipientError, recipientMessage, amount, amountError, formError, typeOpen, resolution, sendState, onSearchAssets, onToggleAssets, onSelectAsset, onChooseType, onToggleTypes, onRecipient, onRecipientBlur, onAmount, onAmountBlur, onMax, onContinue, onCycleDemo, onClear }: {
   networkMode: boolean;
   status: string;
   hasSession: boolean;
@@ -1117,7 +1119,6 @@ function SendPage({ networkMode, status, hasSession, balanceState, asset, assets
   onContinue: () => void;
   onCycleDemo: () => void;
   onClear: () => void;
-  onRetryBalance: () => void;
 }) {
   const { t, text } = useI18n();
   const decimals = asset?.decimals ?? 0;
@@ -1134,7 +1135,7 @@ function SendPage({ networkMode, status, hasSession, balanceState, asset, assets
           className="send-asset-amount"
           selector={<AssetPicker networkMode={networkMode} asset={asset} assets={assets} search={assetSearch} open={assetPickerOpen} onOpenChange={onToggleAssets} onSearch={onSearchAssets} onSelect={onSelectAsset} onCycleDemo={onCycleDemo} variant="compact" />}
           label="Amount to send"
-          balance={<AssetBalanceStatus state={!networkMode ? "known" : !hasSession ? "signed-out" : balanceState} amount={displayAmount(balance, decimals)} symbol={asset?.symbol ?? ""} onRetry={onRetryBalance} />}
+          balance={<AssetBalanceStatus state={!networkMode ? "known" : !hasSession ? "signed-out" : balanceState} amount={displayAmount(balance, decimals)} symbol={asset?.symbol ?? ""} />}
           id="send-amount"
           amount={amount}
           disabled={busy}
@@ -1189,12 +1190,10 @@ function AssetsPage({ networkMode, loading, error, assets, featuredAssets, searc
           </button>
           <span className="asset-row-balance">{!networkMode ? <strong>{amountText}</strong>
             : balanceStatus === "loading" ? <Skeleton width={82} height={17} aria-label={t("common.loadingBalance")} />
-              : balanceStatus === "signed-out" ? <span className="asset-balance-state"><strong>—</strong><small>{t("assets.signInBalance")}</small></span>
-                : balanceStatus === "failed" ? <span className="asset-balance-state asset-balance-state--failed"><strong>—</strong><small>{t("assets.balanceUnavailable")}</small><button type="button" className="text-button" onClick={onRetry}>{t("common.retry")}</button></span>
-                  : <strong>{amountText}</strong>}</span>
+              : balanceStatus === "known" ? <strong>{amountText}</strong> : null}</span>
         </div>;
       })}</div>}
-    </div><aside className="latest-assets"><h2>{t("assets.featured")}</h2><div className="card latest-list">{featuredAssets.length === 0 ? <div className="empty-state">{t("assets.curatedEmpty")}</div> : featuredAssets.map((asset) => <button type="button" className="latest-asset" key={asset.assetIdHex} onClick={() => onOpenDetail(asset)}><AssetIcon asset={asset} size={36} /><span><strong>{asset.symbol}</strong><small>{asset.name} · {text(asset.presentation.badge)}</small></span><span className="latest-chevron">›</span></button>)}</div></aside></div>
+    </div><aside className="latest-assets"><h2><Sparkles size={18} aria-hidden="true" />{t("assets.featured")}</h2>{loading && featuredAssets.length === 0 ? <FeaturedAssetsSkeleton /> : <div className="card latest-list">{featuredAssets.length === 0 ? <div className="empty-state">{t("assets.curatedEmpty")}</div> : featuredAssets.map((asset) => <button type="button" className="latest-asset" key={asset.assetIdHex} onClick={() => onOpenDetail(asset)}><AssetIcon asset={asset} size={36} /><span><strong>{asset.symbol}</strong><small>{asset.name} · {text(asset.presentation.badge)}</small></span><span className="latest-chevron">›</span></button>)}</div>}</aside></div>
   </section>;
 }
 
@@ -1203,22 +1202,25 @@ function AssetListSkeleton() {
   return <div className="card asset-list asset-list-skeleton" aria-label={t("assets.loading")} aria-busy="true">{Array.from({ length: 5 }, (_, index) => <div className="asset-row" key={index}><Skeleton circle width={40} height={40} /><span className="asset-row-info"><Skeleton width="58%" height={18} /></span><span className="asset-row-balance"><Skeleton width={90} height={18} /></span></div>)}</div>;
 }
 
-function AssetDetailModal({ asset, networkMode, getBalanceState, onRetry, onClose, onReceive, onSend }: { asset: AssetView | DemoAsset | null; networkMode: boolean; getBalanceState: (asset: AssetView) => "known" | "loading" | "failed" | "signed-out"; onRetry: () => void; onClose: () => void; onReceive: (asset: AssetView | DemoAsset) => void; onSend: (asset: AssetView | DemoAsset) => void }) {
+function FeaturedAssetsSkeleton() {
+  const { t } = useI18n();
+  return <div className="card latest-list latest-list-skeleton" aria-label={t("assets.loading")} aria-busy="true">{Array.from({ length: 3 }, (_, index) => <div className="latest-asset" key={index} aria-hidden="true"><Skeleton circle width={36} height={36} /><span><Skeleton width={58} height={14} /><Skeleton width="76%" height={12} /></span><Skeleton width={12} height={20} /></div>)}</div>;
+}
+
+function AssetDetailModal({ asset, networkMode, getBalanceState, onClose, onReceive, onSend }: { asset: AssetView | DemoAsset | null; networkMode: boolean; getBalanceState: (asset: AssetView) => "known" | "loading" | "failed" | "signed-out"; onClose: () => void; onReceive: (asset: AssetView | DemoAsset) => void; onSend: (asset: AssetView | DemoAsset) => void }) {
   const { t } = useI18n();
   if (!asset) return null;
   const isNetworkAsset = "assetIdHex" in asset;
   const balanceState = isNetworkAsset ? getBalanceState(asset) : "known";
   const totalSupply = isNetworkAsset ? (asset.presentation.unit === "shares" ? `${formatUnits(asset.totalSupply, asset.decimals)} ${t("common.shares")}` : `${formatUnits(asset.totalSupply, asset.decimals)} ${asset.symbol}`) : t("assets.demoData");
   const balance = !isNetworkAsset ? `${displayAmount(asset.balance, asset.decimals)} ${asset.symbol}`
-    : balanceState === "known" ? displayAssetAmount(asset) : balanceState === "loading" ? t("common.loadingBalance") : "—";
+    : balanceState === "known" ? displayAssetAmount(asset) : balanceState === "loading" ? t("common.loadingBalance") : "";
   return <Modal open title={t("assets.details", { symbol: asset.symbol })} onClose={onClose} footer={<><ActionButton variant="secondary" icon={ArrowDownLeft} onClick={() => onReceive(asset)}>{t("common.receive")}</ActionButton><ActionButton variant="primary" icon={Send} onClick={() => onSend(asset)}>{t("common.send")}</ActionButton></>}>
     <div className="detail-modal">
       <div className="asset-detail-icon">{isNetworkAsset ? <AssetIcon asset={asset} size={64} /> : <span className="coin detail-coin" style={{ background: asset.color }}>{asset.symbol[0]}</span>}</div>
       <h2>{asset.name}</h2>
       <p className="muted">{asset.symbol}{isNetworkAsset && ` · ${asset.presentation.badge}`}</p>
       <div className="asset-detail-balance"><small>{t("common.balance")}</small><strong>{balance}</strong>
-        {balanceState === "signed-out" && <small>{t("assets.signInBalance")}</small>}
-        {balanceState === "failed" && <small className="asset-balance-state--failed">{t("assets.balanceUnavailable")} <button type="button" className="text-button" onClick={onRetry}>{t("common.retry")}</button></small>}
       </div>
       <details className="asset-detail-more">
         <summary>{t("assets.detailsMore")}</summary>

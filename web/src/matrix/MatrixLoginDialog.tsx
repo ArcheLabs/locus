@@ -295,10 +295,10 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     try {
       const result = await connection.refreshDeviceTrust();
       if (generation !== dialogGeneration.current || activeConnection.current !== connection) return;
-      if (result.state === "UNVERIFIED") setManualTrustMessage("Verification has not been detected yet. Waiting for an update.");
-      else if (result.state === "UNKNOWN") setManualTrustMessage("Device status is temporarily unavailable. Waiting for an update.");
+      if (result.state === "UNVERIFIED") setManualTrustMessage(t("ui.verificationNotDetected"));
+      else if (result.state === "UNKNOWN") setManualTrustMessage(t("ui.verificationStatusUnknown"));
     } catch {
-      if (generation === dialogGeneration.current && activeConnection.current === connection) setManualTrustMessage("Device status is temporarily unavailable. Waiting for an update.");
+      if (generation === dialogGeneration.current && activeConnection.current === connection) setManualTrustMessage(t("ui.verificationStatusUnknown"));
     } finally { if (generation === dialogGeneration.current && activeConnection.current === connection) setWorking(false); }
   }
 
@@ -326,8 +326,8 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   const verification = pendingConnection?.verification ?? null;
   const showingVerification = Boolean(pendingConnection);
   const needsElementConfirmation = waitingForElement(connectionState);
-  const initializing = connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" || connectionState === "TRUST_CHECKING";
-  const showingLoginProgress = initializing || connectionState === "TRUST_UNKNOWN"
+  const initializing = connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" || connectionState === "TRUST_CHECKING" || connectionState === "TRUST_UNKNOWN";
+  const showingLoginProgress = initializing
     || connectionState === "VERIFICATION_CONFIRMING" || verification?.phase === "done";
   const canCompare = connectionState === "VERIFICATION_SAS_READY" && verification?.phase === "sas-ready";
   const needsRelogin = connectionState === "RELOGIN_REQUIRED";
@@ -340,7 +340,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
       ? showingLoginProgress
         ? <span className="matrix-login-title-progress"><LoaderCircle aria-hidden="true" size={22} />{text(verificationTitle(connectionState, verification))}</span>
         : text(verificationTitle(connectionState, verification))
-      : t("ui.connectMatrix")} onClose={cancel} preventOutsideDismiss={working || showingVerification} preventEscapeDismiss={working || showingVerification} closeLabel={t("ui.cancelSignIn")} footer={<ActionButton variant="secondary" icon={X} onClick={cancel}>{t("ui.cancelSignIn")}</ActionButton>}>
+      : t("ui.connectMatrix")} onClose={cancel} closeLabel={t("ui.cancelSignIn")} footer={<ActionButton variant="secondary" icon={X} onClick={cancel}>{t("ui.cancelSignIn")}</ActionButton>}>
       {!showingVerification && <p className="modal-lead">{t("ui.signInMatrix")}</p>}
       {showingVerification ? <div className="matrix-verification-flow" aria-live="polite">
         <section className="verification-card">
@@ -348,11 +348,7 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
             <p>{t("ui.signInUnavailable")}</p>
             <ActionButton size="small" variant="primary" loading={working} disabled={working} onClick={() => void useDifferentMatrixAccount()}>{t("ui.signInAgain")}</ActionButton>
           </> : initializing ?
-            <div className="matrix-verification-status" role="status">{t("auth.loggingIn")}</div> : connectionState === "TRUST_UNKNOWN" ? <>
-              {verificationStatusReason && <p role="status">{text(verificationStatusReason)}</p>}
-              <p role="status">{t("auth.deviceUnknown")}</p>
-              <ActionButton size="small" variant="secondary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void refreshDeviceTrust()}>{t("ui.checkAgain")}</ActionButton>
-            </> : needsElementConfirmation ? <>
+            <div className="matrix-verification-status" role="status">{connectionState === "TRUST_UNKNOWN" ? t("auth.verifyingDevice") : t("auth.loggingIn")}</div> : needsElementConfirmation ? <>
               {verification?.phase === "done" ? <p className="matrix-verification-status" role="status">{t("ui.verificationDone")}</p>
                 : verification?.phase === "confirming" ? <>
                   <p>{t("ui.verifyDeviceHelp")}</p>

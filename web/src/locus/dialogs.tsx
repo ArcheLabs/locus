@@ -507,27 +507,44 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
   const stageBusy = stage === "PREPARING" || signatureInProgress || stage === "SIGNED" || stage === "SUBMITTING" || stage === "SUBMITTED" || stage === "FINALIZING";
   const canRetryPreparation = stage === "FAILED" && pending === null && assetDetailsComplete;
   const assetFieldsDisabled = pending !== null || stageBusy || signatureReady;
+  const issuerType = session?.kind === "matrix" ? t("common.matrix")
+    : session?.kind === "evm" ? t("ui.evmWallet")
+      : session?.kind === "polkadot" ? t("ui.polkadotExtension")
+        : session?.kind === "solana" ? t("ui.solanaWallet") : "";
+  const issuerName = session?.kind === "matrix" ? session.matrix?.userId ?? session.label.replace(/^Matrix\s+/, "") : session?.label;
+  const primaryButtonLoading = stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING";
+  const primaryButtonLabel = signatureReady && !canPerformAuthorizedAction() ? authorizationWaitMessage || "Preparing account…"
+    : stage === "EDITING" && (!locus || !pendingScope) ? "Waiting for network…"
+      : stage === "EDITING" && !session ? "Connect an Ownership"
+        : stage === "EDITING" || canRetryPreparation ? t("common.confirm")
+          : stage === "PREPARING" ? "Preparing…"
+            : signatureInProgress ? "Waiting for wallet…"
+              : stage === "AWAITING_WALLET" ? "Sign & Create"
+                : stage === "SIGNED" ? "Signature received"
+                  : stage === "SUBMITTING" ? "Submitting…"
+                    : stage === "SUBMITTED" ? "Submitted"
+                      : stage === "FINALIZING" ? "Finalizing…"
+                        : stage === "APPLIED" ? "Created"
+                          : "Confirm";
 
   return (
     <Modal open={open} title={t("assets.create")} onClose={onClose} footer={<>
-      <ActionButton variant="secondary" icon={X} onClick={onClose}>{t("common.close")}</ActionButton>
       {pendingSubmitted && <ActionButton variant="secondary" icon={RefreshCw} loading={stage === "FINALIZING"} disabled={stage === "FINALIZING"} onClick={() => void resumePending(pending!)}>{t("ui.resumeFinalization")}</ActionButton>}
       {signatureReady && <ActionButton variant="tertiary" icon={X} onClick={editAssetDetails}>{t("ui.editDetails")}</ActionButton>}
-      {!pending && <ActionButton variant="primary" icon={stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING" ? RefreshCw : CirclePlus} loading={stage === "PREPARING" || signatureInProgress || stage === "SUBMITTING" || stage === "FINALIZING"} disabled={signatureReady ? !canPerformAuthorizedAction() : !locus || !session || !pendingScope || (!assetDetailsComplete && !signatureReady) || stageBusy} onClick={signatureReady ? signAndCreate : requestPreparation}>{signatureReady && !canPerformAuthorizedAction() ? authorizationWaitMessage || "Preparing account…" : stage === "EDITING" ? !locus || !pendingScope ? "Waiting for network…" : !session ? "Connect an Ownership" : assetDetailsComplete ? "Prepare action" : "Complete asset details" : stage === "PREPARING" ? "Preparing…" : signatureInProgress ? "Waiting for wallet…" : stage === "AWAITING_WALLET" ? "Sign & Create" : stage === "SIGNED" ? "Signature received" : stage === "SUBMITTING" ? "Submitting…" : stage === "SUBMITTED" ? "Submitted" : stage === "FINALIZING" ? "Finalizing…" : stage === "APPLIED" ? "Created" : canRetryPreparation ? "Retry preparation" : "Complete asset details"}</ActionButton>}
+      {!pending && <ActionButton variant="primary" icon={primaryButtonLoading ? RefreshCw : stage === "EDITING" ? undefined : CirclePlus} loading={primaryButtonLoading} disabled={signatureReady ? !canPerformAuthorizedAction() : !locus || !session || !pendingScope || (!assetDetailsComplete && !signatureReady) || stageBusy} onClick={signatureReady ? signAndCreate : requestPreparation}>{primaryButtonLabel}</ActionButton>}
     </>}>
-      <p className="modal-lead">{t("ui.createAssetIssuerHelp")}</p>
-      {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><small>{t("ui.ownerIssuer")}</small><strong>{session.label}</strong><CopyableValue value={formatLocusId(session.owner)} />{session.kind === "matrix" && <small>{t("ui.matrixControllerOwnership", { deviceId: session.matrix?.deviceId ?? "" })}</small>}</span></div>}
+      {session && <div className="issuer-card"><span className="identity-icon-slot"><IdentityIcon kind={session.kind} size={24} /></span><span><strong>{issuerType} · {issuerName}</strong></span></div>}
       <div className="form-grid">
         <label>{t("ui.assetName")}<input disabled={assetFieldsDisabled} value={name} placeholder={t("ui.assetNamePlaceholder")} onChange={(event) => onAssetDetailChange(() => setName(event.target.value))} /></label>
         <label>{t("ui.assetSymbol")}<input disabled={assetFieldsDisabled} value={symbol} placeholder="DOT" onChange={(event) => onAssetDetailChange(() => setSymbol(event.target.value.toUpperCase()))} /></label>
         <label>{t("ui.assetDecimals")}<input disabled={assetFieldsDisabled} type="number" min="0" max="38" value={decimals} onChange={(event) => onAssetDetailChange(() => setDecimals(event.target.value))} /></label>
         <label>{t("ui.initialSupplyLabel")}<input disabled={assetFieldsDisabled} inputMode="decimal" value={supply} placeholder="1000" onChange={(event) => onAssetDetailChange(() => setSupply(event.target.value))} /></label>
       </div>
-      <section className={`create-asset-stage create-asset-stage--${stage.toLowerCase()}`} aria-live="polite" aria-busy={stageBusy} role="status">
+      {(stage !== "EDITING" || error || pending) && <section className={`create-asset-stage create-asset-stage--${stage.toLowerCase()}`} aria-live="polite" aria-busy={stageBusy} role="status">
         <strong>{text(stageLabel(stage))}</strong>
         <p>{text(stageMessage)}</p>
         {pending?.transactionId && <CopyableValue label={t("common.transaction")} value={pending.transactionId} />}
-      </section>
+      </section>}
       {session?.kind === "matrix" && !canPerformAuthorizedAction() && <p className="account-access-status" role="status">{authorizationWaitMessage || "正在准备账户，请稍候。"}</p>}
       {pending?.state === "submission-unknown" && <div className="create-asset-recovery">
         <p>{t("ui.unknownCreateSubmission")}</p>

@@ -1,5 +1,5 @@
 import * as Dialog from "@radix-ui/react-dialog";
-import { ArrowLeftRight, CheckCircle2, ChevronDown, Unplug, UserRound, X } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, ChevronDown, CircleAlert, LoaderCircle, Unplug, UserRound, X } from "lucide-react";
 import { formatLocusId } from "@archelabs/locus";
 import { useEffect, useRef, useState } from "react";
 import type { LocusWebSession, SessionKind } from "../session/types.js";
@@ -89,6 +89,16 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
     : authorizationState === "READY" ? t("accounts.accountReady")
     : authorizationState === "RETRY_REQUIRED" || authorizationState === "STATUS_UNKNOWN" || authorizationState === "REVOKED" || authorizationState === "REJECTED" ? t("accounts.attention")
       : t("accounts.accountPreparing");
+  const matrixAttention = session.kind === "matrix" && (authorizationError !== ""
+    || authorizationState === "RETRY_REQUIRED" || authorizationState === "STATUS_UNKNOWN" || authorizationState === "REVOKED" || authorizationState === "REJECTED");
+  const matrixReady = session.kind === "matrix" && identityState === "CONNECTED" && authorizationState === "READY";
+  const AccountStatusIcon = matrixAttention ? CircleAlert : session.kind === "matrix" && !matrixReady ? LoaderCircle : CheckCircle2;
+  const accountStatusLabel = matrixAttention ? t("accounts.attention")
+    : session.kind === "matrix" ? matrixReady ? t("accounts.accountReady") : t("accounts.accountPreparing")
+      : t("common.connected");
+  const accountStatusClass = matrixAttention ? "account-connection-indicator account-connection-indicator--attention"
+    : session.kind === "matrix" && !matrixReady ? "account-connection-indicator account-connection-indicator--pending"
+      : "account-connection-indicator account-connection-indicator--ready";
 
   return <Dialog.Root open={open} onOpenChange={setOpen}>
     <Dialog.Trigger asChild>
@@ -112,7 +122,7 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
             <span className="account-avatar">{matrixAvatar
               ? <img src={matrixAvatar} alt="" aria-hidden="true" onError={() => setAvatarFailed(true)} />
               : <IdentityIcon kind={session.kind} size={26} />}</span>
-            <span><strong>{displayLabel}</strong><small>{session.kind === "matrix" ? t("accounts.connectedLabel", { status: matrixAuthorizationLabel }) : t("common.connected")}</small></span>
+            <span><strong>{displayLabel}</strong><small className={accountStatusClass} aria-label={accountStatusLabel} title={accountStatusLabel}><AccountStatusIcon size={16} aria-hidden="true" /></small></span>
           </section>
 
           {session.kind === "matrix" && (authorizationState !== "READY" || identityState !== "CONNECTED") && <section className="account-center-section">
@@ -141,7 +151,6 @@ export function AccountMenu({ session, lifecycle, restoreError, pendingKind = nu
           {session.kind === "matrix" && <section className="account-center-section account-security-section">
             <h3>{t("accounts.security")}</h3>
             {!removeConfirmation ? <>
-              <p>{t("accounts.removeHelp")}</p>
               <div className="account-security-action"><strong>{t("accounts.removeDevice")}</strong><ActionButton variant="danger" size="small" onClick={() => setRemoveConfirmation(true)}>{t("common.remove")}</ActionButton></div>
             </> : <div className="remove-device-confirm" role="alertdialog" aria-labelledby="remove-device-title">
               <strong id="remove-device-title">{t("accounts.removeDeviceConfirm")}</strong>

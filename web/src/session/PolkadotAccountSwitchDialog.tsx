@@ -58,7 +58,7 @@ export function PolkadotAccountSwitchDialog({ open, currentAccount, onClose, onS
     }
   }
 
-  return <Modal open={open} title={t("ui.switchAccount")} onClose={() => { if (!switching) onClose(); }} preventOutsideDismiss={switching}>
+  return <Modal open={open} title={t("ui.switchAccount")} onClose={() => { if (!switching) onClose(); }}>
     <p className="modal-lead">{t("ui.choosePolkadotAccount")}</p>
     {loading && <div className="account-switch-status" role="status" aria-busy="true"><LoaderCircle size={18} className="action-button__icon--loading" aria-hidden="true" /> {t("ui.loadingAccounts")}</div>}
     {!loading && accounts.length === 0 && !error && <p className="account-switch-empty">{t("ui.noPolkadotAccounts")}</p>}

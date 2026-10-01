@@ -167,7 +167,7 @@ textarea {
 .page p { overflow-wrap: anywhere; }
 
 @media (min-width: 768px) and (max-width: 1024px) {
-  .app-shell { grid-template-columns: 220px minmax(0, 1fr); }
+  .app-shell { grid-template-columns: 240px minmax(0, 1fr); }
   .sidebar { padding: 24px 14px; }
   .brand { margin-left: 8px; font-size: 30px; }
   .nav-item { padding: 12px; font-size: 15px; }

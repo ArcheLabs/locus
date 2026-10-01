@@ -42,7 +42,7 @@ export function MobileNavigation({ route, children, homeHref, onHome, onNavigate
     </header>
     <Dialog.Portal>
       <Dialog.Overlay className="mobile-navigation-backdrop" />
-      <Dialog.Content id="mobile-navigation-dialog" className="mobile-navigation-sheet" aria-modal="true" aria-describedby={undefined}>
+      <Dialog.Content id="mobile-navigation-dialog" className="mobile-navigation-sheet" aria-modal="true" aria-describedby={undefined} onInteractOutside={(event) => event.preventDefault()} onEscapeKeyDown={(event) => event.preventDefault()}>
         <div className="mobile-navigation-handle" aria-hidden="true"><span /></div>
         <div className="mobile-navigation-heading">
           <Dialog.Title className="mobile-navigation-title">{showSettings ? t("settings.title") : t("common.navigate")}</Dialog.Title>

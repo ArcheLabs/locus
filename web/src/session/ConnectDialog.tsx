@@ -255,7 +255,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
 
   return (
     <>
-    <Modal open={open && !matrixOpen && !initialMatrixConnection} title={t("common.connect")} onClose={closeConnectDialog} preventOutsideDismiss={waitingForEvm}>
+    <Modal open={open && !matrixOpen && !initialMatrixConnection} title={t("common.connect")} onClose={closeConnectDialog}>
       <p className="modal-lead">{t("ui.chooseOwnership")}</p>
       <div className="connect-options">
         {displayOptions.map((entry) => (

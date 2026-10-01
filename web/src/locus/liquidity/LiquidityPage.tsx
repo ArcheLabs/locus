@@ -880,7 +880,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
             className="liquidity-amount-field"
             selector={<AssetSelector aria-label={t("ui.tokenA")} value={assetAId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetAId && asset.assetIdHex !== assetBId) setPair(asset.assetIdHex, assetBId, "a"); }} variant="compact" showBalance={false} disabled={formLocked} triggerClassName="liquidity-asset-selector" />}
             label={t("ui.tokenA")}
-            balance={selectedA ? <AssetBalanceStatus state={getBalanceState(selectedA)} amount={formatUnits(selectedA.balance ?? 0n, selectedA.decimals)} symbol={selectedA.symbol} onRetry={() => void onRefreshAssets()} /> : undefined}
+            balance={selectedA ? <AssetBalanceStatus state={getBalanceState(selectedA)} amount={formatUnits(selectedA.balance ?? 0n, selectedA.decimals)} symbol={selectedA.symbol} /> : undefined}
             id="liquidity-amount-a"
             amount={amountA}
             onAmountChange={updateAmountA}
@@ -893,7 +893,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
             className="liquidity-amount-field"
             selector={<AssetSelector aria-label={t("ui.tokenB")} value={assetBId} assets={assets} onValueChange={(asset) => { if (asset.assetIdHex !== assetBId && asset.assetIdHex !== assetAId) setPair(assetAId, asset.assetIdHex, "b"); }} variant="compact" showBalance={false} disabled={formLocked} triggerClassName="liquidity-asset-selector" />}
             label={t("ui.tokenB")}
-            balance={selectedB ? <AssetBalanceStatus state={getBalanceState(selectedB)} amount={formatUnits(selectedB.balance ?? 0n, selectedB.decimals)} symbol={selectedB.symbol} onRetry={() => void onRefreshAssets()} /> : undefined}
+            balance={selectedB ? <AssetBalanceStatus state={getBalanceState(selectedB)} amount={formatUnits(selectedB.balance ?? 0n, selectedB.decimals)} symbol={selectedB.symbol} /> : undefined}
             id="liquidity-amount-b"
             amount={amountB}
             onAmountChange={updateAmountB}
