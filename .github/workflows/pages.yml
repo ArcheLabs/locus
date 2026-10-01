@@ -41,7 +41,7 @@ jobs:
           PAGES_BASE: /
         run: |
           case "${PAGES_BASE}" in
-            /*/) ;;
+            /|/*/) ;;
             *) echo "PAGES_BASE must start and end with /" >&2; exit 1 ;;
           esac
           case "${PAGES_BASE}" in
