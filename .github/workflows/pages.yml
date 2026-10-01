@@ -39,10 +39,10 @@ jobs:
       - name: Select GitHub Pages base path
         env:
           PAGES_BASE: ${{ vars.PAGES_BASE }}
-          REPOSITORY_NAME: ${{ github.event.repository.name }}
         run: |
           if [ -z "${PAGES_BASE}" ]; then
-            PAGES_BASE="/${REPOSITORY_NAME}/"
+            # This repository is served from its configured custom-domain root.
+            PAGES_BASE="/"
           fi
           case "${PAGES_BASE}" in
             /*/) ;;
