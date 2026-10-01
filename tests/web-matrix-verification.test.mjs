@@ -125,6 +125,7 @@ test("trust monitor refreshes on sync and foreground, but its fallback poll is l
   documentTarget.visibilityState = "hidden";
   const windowTarget = new FakeEventTarget();
   let refreshCount = 0;
+  let resumeCount = 0;
   let poll;
   let changes;
   const monitor = createMatrixDeviceTrustMonitor(async () => {
@@ -134,6 +135,7 @@ test("trust monitor refreshes on sync and foreground, but its fallback poll is l
     documentTarget,
     windowTarget,
     subscribeToChanges: (listener) => { changes = listener; return () => { changes = null; }; },
+    onResume: () => { resumeCount += 1; },
     scheduleInterval: (callback) => { poll = callback; return 1; },
     clearScheduledInterval: () => {},
   });
@@ -151,6 +153,7 @@ test("trust monitor refreshes on sync and foreground, but its fallback poll is l
   windowTarget.emit("focus");
   await settle();
   assert.equal(refreshCount, 4);
+  assert.equal(resumeCount, 2, "foreground restoration refreshes both SDK verification and trust state");
   assert.equal(MATRIX_TRUST_POLL_INTERVAL_MS, 30_000);
   monitor.dispose();
   assert.equal(documentTarget.count("visibilitychange"), 0);
@@ -202,6 +205,8 @@ test("connector uses trust before proof and never treats SAS done or server proo
   const connector = await readFile(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
   const crypto = await readFile(new URL("../web/src/matrix/MatrixCryptoDevice.ts", import.meta.url), "utf8");
   const dialog = await readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
+  const modal = await readFile(new URL("../web/src/components/Modal.tsx", import.meta.url), "utf8");
+  const responsive = await readFile(new URL("../web/src/styles/responsive.css", import.meta.url), "utf8");
   assert.match(crypto, /this\.machine\.queryKeysForUsers\(\[user\]\)/);
   assert.match(crypto, /identity\.trustsOurOwnDevice\(\)/);
   assert.match(crypto, /matrixMasterPublicKeyFromSdk\(identity\.masterKey, this\.userId\)/);
@@ -213,15 +218,36 @@ test("connector uses trust before proof and never treats SAS done or server proo
   assert.match(connector, /const finalTrust = await connected\.refreshDeviceTrust\(\)/);
   assert.doesNotMatch(connector, /matrixProofIsPublished|keys\.verification === "verified"/);
   assert.match(connector, /else if \(hasActiveVerificationRequest\(connected\.verification\)\) setState\(mapVerificationState\(connected\.verification\)\)/);
+  assert.match(connector, /\["requested", "unsupported", "sas-waiting", "sas-ready", "confirming", "done"\]/);
+  assert.match(connector, /revisionAtStart !== trustRevision\) return trustSnapshot/);
   assert.match(connector, /if \(snapshot\?\.phase === "done" \|\| snapshot\?\.phase === "cancelled"\) void trustMonitor\?\.refreshNow\(\)/);
-  assert.match(dialog, /我已完成验证/);
+  assert.match(connector, /onResume: \(\) => \{[\s\S]*crypto\.refreshCurrentVerification/);
+  assert.match(connector, /onResume: \(\) => \{\s*crypto\.resumeSync\(\)/);
+  assert.match(crypto, /async refreshCurrentVerification\(/);
+  assert.match(crypto, /resumeSync\(\): void \{[\s\S]*this\.syncResumeRequested = true;[\s\S]*this\.syncRequestAbort\?\.abort\(\)/);
+  assert.match(crypto, /request\.timedOut\(\)[\s\S]*reason: "timed-out"/);
+  assert.match(crypto, /cancelInfo\.cancelCode\(\)/);
+  assert.match(crypto, /reason: "unsupported-method"/);
+  assert.match(dialog, /请在已登录的 Matrix 设备中确认此次登录。/);
+  assert.match(dialog, /请在已登录的 Matrix 设备中完成此设备的验证。/);
+  assert.match(dialog, /尚未检测到验证完成，正在等待更新/);
+  assert.match(dialog, /已在 Matrix 设备直接验证/);
+  assert.match(dialog, /验证操作已完成，正在确认设备状态。/);
+  assert.match(dialog, /设备已验证，正在准备登录信息。/);
+  assert.match(dialog, /登录信息已就绪，正在完成账户授权。/);
+  assert.match(dialog, /账户授权已提交，正在等待确认。/);
+  assert.doesNotMatch(dialog, /我已完成验证|改用此设备确认|完成后返回此处|找不到设备|Element 的“设置/);
+  assert.match(dialog, /正在检查设备状态/);
+  assert.match(dialog, /verification\?\.phase === "requested" && !verification\.startedByLocus/);
   assert.match(dialog, /onClick=\{\(\) => void refreshDeviceTrust\(\)\}/);
-  assert.match(dialog, /requestOwnUserVerification\(\)[\s\S]*?改用此设备确认/);
-  assert.match(dialog, /QR|二维码/);
-  assert.match(dialog, /case "AUTHENTICATED":[\s\S]*case "DEVICE_KEYS_READY":[\s\S]*case "TRUST_CHECKING": return "正在登录"/);
-  assert.match(dialog, /const initializing = connectionState === "AUTHENTICATED"[\s\S]*connectionState === "TRUST_CHECKING"/);
-  assert.match(dialog, /initializing \?[\s\S]*正在登录…/);
-  assert.doesNotMatch(dialog, /needsElementConfirmation \|\| connectionState === "TRUST_CHECKING"/);
+  assert.match(dialog, /preventOutsideDismiss=\{working \|\| showingVerification\}/);
+  assert.match(dialog, /preventEscapeDismiss=\{working \|\| showingVerification\}/);
+  assert.match(dialog, /取消登录/);
+  assert.match(modal, /preventEscapeDismiss\?: boolean/);
+  assert.match(modal, /onEscapeKeyDown=\{\(event\) => \{ if \(preventEscapeDismiss\) event\.preventDefault\(\); \}\}/);
+  assert.match(modal, /onInteractOutside=\{\(event\) => \{ if \(preventOutsideDismiss\) event\.preventDefault\(\); \}\}/);
+  assert.match(responsive, /matrix-verification-actions \.action-button \{ flex: 1; min-height: 48px/);
+  assert.match(responsive, /matrix-sas-emoji \{ min-height: 68px/);
   assert.match(connector, /if \(snapshot\.state === "UNVERIFIED"\)[\s\S]*?setState\(mapVerificationState\(connected\.verification\)\)/);
   assert.match(connector, /hasActiveVerificationRequest\(snapshot\)[\s\S]*?setState\(mapVerificationState\(snapshot\)\)/);
   assert.match(connector, /device\.startSync\(homeserver, authFetch, cryptoHttp\)[\s\S]*?makeConnected\(/);

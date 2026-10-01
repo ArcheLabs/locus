@@ -95,6 +95,7 @@ export type MatrixDeviceTrustMonitorOptions = {
   documentTarget?: DocumentTargetLike;
   windowTarget?: EventTargetLike;
   subscribeToChanges?: (listener: () => void) => () => void;
+  onResume?: () => void;
   scheduleInterval?: (callback: () => void, delayMs: number) => TimerHandle;
   clearScheduledInterval?: (timer: TimerHandle) => void;
   pollIntervalMs?: number;
@@ -150,7 +151,9 @@ export function createMatrixDeviceTrustMonitor(
   };
 
   const onResume = () => {
-    if (documentTarget.visibilityState === "visible") void refreshNow();
+    if (documentTarget.visibilityState !== "visible") return;
+    options.onResume?.();
+    void refreshNow();
   };
   const onCryptoChange = () => { void refreshNow(); };
 

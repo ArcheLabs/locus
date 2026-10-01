@@ -48,7 +48,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
   const [accountOptions, setAccountOptions] = useState<BrowserAccountOption[]>([]);
   const [selectedKind, setSelectedKind] = useState<SessionKind | null>(null);
   const [selectedAccount, setSelectedAccount] = useState("");
-  const [matrixOpen, setMatrixOpen] = useState(false);
+  const [matrixOpen, setMatrixOpen] = useState(Boolean(initialMatrixConnection));
   const [savedMatrixConnection, setSavedMatrixConnection] = useState<MatrixConnected | null>(null);
   const [continueWithNewMatrixDevice, setContinueWithNewMatrixDevice] = useState(false);
   const [waitingForEvm, setWaitingForEvm] = useState(false);
@@ -254,7 +254,7 @@ export function ConnectDialog({ open, onClose, onCancelMatrix, onMatrixSelected,
 
   return (
     <>
-    <Modal open={open && !matrixOpen} title="Connect" onClose={closeConnectDialog} preventOutsideDismiss={waitingForEvm}>
+    <Modal open={open && !matrixOpen && !initialMatrixConnection} title="Connect" onClose={closeConnectDialog} preventOutsideDismiss={waitingForEvm}>
       <p className="modal-lead">Choose an Ownership signer. This does not select an execution network.</p>
       <div className="connect-options">
         {displayOptions.map((entry) => (

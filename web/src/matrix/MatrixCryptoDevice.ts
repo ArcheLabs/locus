@@ -93,6 +93,7 @@ export type MatrixVerificationSnapshot = {
   otherDeviceId: string;
   startedByLocus: boolean;
   phase: "requested" | "unsupported" | "sas-waiting" | "sas-ready" | "confirming" | "done" | "cancelled";
+  reason?: "cancelled" | "timed-out" | "unsupported-method" | "sas-mismatch" | "failed";
   emojis: { symbol: string; description: string }[];
 };
 
@@ -102,6 +103,8 @@ function isKnownRequest(value: unknown): value is SupportedRequest {
 
 export class MatrixCryptoDevice {
   private syncAbort: AbortController | null = null;
+  private syncRequestAbort: AbortController | null = null;
+  private syncResumeRequested = false;
   private disposed = false;
   private verificationSnapshot: MatrixVerificationSnapshot | null = null;
   private readonly verificationListeners = new Set<(snapshot: MatrixVerificationSnapshot | null) => void>();
@@ -113,6 +116,8 @@ export class MatrixCryptoDevice {
   private lastSyncErrorDiagnostic: string | null = null;
   private activeFlowId: string | null = null;
   private ownVerificationInFlight: Promise<void> | null = null;
+  private verificationRefreshTask: Promise<void> | null = null;
+  private verificationRefreshPending = false;
   private initialSyncComplete = false;
   private initialSyncFailure: MatrixDeviceTrustSnapshot | null = null;
   private expectedMasterKey: string | null = null;
@@ -355,13 +360,32 @@ export class MatrixCryptoDevice {
     const otherDeviceId = this.otherDeviceId(request);
     const startedByLocus = request.weStarted();
     const base = { flowId, otherDeviceId, startedByLocus, emojis: [] as { symbol: string; description: string }[] };
-    if (request.isCancelled() || request.timedOut() || request.phase() === VerificationRequestPhase.Cancelled) return { ...base, phase: "cancelled" };
+    if (request.timedOut()) return { ...base, phase: "cancelled", reason: "timed-out" };
+    if (request.isCancelled() || request.phase() === VerificationRequestPhase.Cancelled) {
+      const cancelInfo = request.cancelInfo;
+      if (!cancelInfo) return { ...base, phase: "cancelled", reason: "cancelled" };
+      try {
+        const code = cancelInfo.cancelCode();
+        const reason = code === "m.mismatched_sas" ? "sas-mismatch"
+          : code === "m.unknown_method" ? "unsupported-method" : "cancelled";
+        return { ...base, phase: "cancelled", reason };
+      } finally { cancelInfo.free(); }
+    }
     if (request.isDone() || request.phase() === VerificationRequestPhase.Done) return { ...base, phase: "done" };
 
     const verification = request.getVerification();
     if (verification instanceof Sas) {
       try {
-        if (verification.isCancelled()) return { ...base, phase: "cancelled" };
+        if (verification.isCancelled()) {
+          const cancelInfo = verification.cancelInfo();
+          if (!cancelInfo) return { ...base, phase: "cancelled", reason: "cancelled" };
+          try {
+            const code = cancelInfo.cancelCode();
+            const reason = code === "m.mismatched_sas" ? "sas-mismatch"
+              : code === "m.unknown_method" ? "unsupported-method" : "cancelled";
+            return { ...base, phase: "cancelled", reason };
+          } finally { cancelInfo.free(); }
+        }
         if (verification.haveWeConfirmed()) return { ...base, phase: "confirming" };
         const emojiObjects = verification.canBePresented() && verification.supportsEmoji() ? verification.emoji() : undefined;
         if (emojiObjects) {
@@ -375,12 +399,12 @@ export class MatrixCryptoDevice {
     }
     if (verification instanceof Qr) {
       verification.free();
-      return { ...base, phase: "unsupported" };
+      return { ...base, phase: "unsupported", reason: "unsupported-method" };
     }
 
     if ((this.acceptedFlows.has(flowId) || startedByLocus) && request.phase() === VerificationRequestPhase.Ready && !this.startedSasFlows.has(flowId)) {
       const theirMethods = request.theirSupportedMethods;
-      if (theirMethods && !theirMethods.includes(VerificationMethod.SasV1)) return { ...base, phase: "unsupported" };
+      if (theirMethods && !theirMethods.includes(VerificationMethod.SasV1)) return { ...base, phase: "unsupported", reason: "unsupported-method" };
       const result = await request.startSas();
       if (result) {
         const [sas, outgoing] = result;
@@ -390,6 +414,7 @@ export class MatrixCryptoDevice {
         await this.flush(http);
         return this.readVerificationSnapshot(request, http);
       }
+      return { ...base, phase: "unsupported", reason: "unsupported-method" };
     }
     return { ...base, phase: this.acceptedFlows.has(flowId) ? "sas-waiting" : "requested" };
   }
@@ -457,7 +482,7 @@ export class MatrixCryptoDevice {
         this.publishVerification(await this.readVerificationSnapshot(request, http));
         this.queueVerificationRequest(outgoing);
         await this.flush(http);
-        await this.refreshVerificationRequests(http);
+        await this.refreshCurrentVerification(http);
       } finally { request.free(); }
     } catch (cause) {
       if (cause instanceof MatrixConnectorError) throw cause;
@@ -465,8 +490,28 @@ export class MatrixCryptoDevice {
   } finally { identity.free(); }
   }
 
+  /** Serialize SDK verification reads across /sync and foreground restoration. */
+  async refreshCurrentVerification(http: MatrixHttp): Promise<MatrixVerificationSnapshot | null> {
+    if (this.disposed || !this.initialSyncComplete) return this.verificationSnapshot;
+    if (this.verificationRefreshTask) {
+      this.verificationRefreshPending = true;
+      await this.verificationRefreshTask;
+      return this.verificationSnapshot;
+    }
+    const task = (async () => {
+      do {
+        this.verificationRefreshPending = false;
+        await this.readCurrentVerification(http);
+      } while (this.verificationRefreshPending && !this.disposed);
+    })();
+    this.verificationRefreshTask = task;
+    try { await task; }
+    finally { if (this.verificationRefreshTask === task) this.verificationRefreshTask = null; }
+    return this.verificationSnapshot;
+  }
+
   /** Inspect own-device requests after every /sync response. */
-  private async refreshVerificationRequests(http: MatrixHttp): Promise<void> {
+  private async readCurrentVerification(http: MatrixHttp): Promise<void> {
     const user = new UserId(this.userId);
     let requests: VerificationRequest[];
     try { requests = this.machine.getVerificationRequests(user); }
@@ -504,13 +549,16 @@ export class MatrixCryptoDevice {
       if (request.weStarted()) throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "Locus already sent this verification request. Accept it on your other Matrix device.");
       const theirMethods = request.theirSupportedMethods;
       if (theirMethods && !theirMethods.includes(VerificationMethod.SasV1)) {
+        if (this.verificationSnapshot?.flowId === flowId) {
+          this.publishVerification({ ...this.verificationSnapshot, phase: "unsupported", reason: "unsupported-method" });
+        }
         throw new MatrixConnectorError("UNSUPPORTED_MATRIX_CRYPTO_REQUEST", "This request uses QR verification, which Locus does not currently display or scan. Ask Element to use SAS verification.");
       }
       this.activeFlowId = flowId;
       this.acceptedFlows.add(flowId);
       this.queueVerificationRequest(request.acceptWithMethods([VerificationMethod.SasV1]));
       await this.flush(http);
-      await this.refreshVerificationRequests(http);
+      await this.refreshCurrentVerification(http);
     } finally { request.free(); }
   }
 
@@ -535,7 +583,7 @@ export class MatrixCryptoDevice {
           await this.flush(http);
           this.publishVerification({ flowId, otherDeviceId: this.otherDeviceId(request), startedByLocus: request.weStarted(), phase: "cancelled", emojis: [] });
         }
-        await this.refreshVerificationRequests(http);
+        await this.refreshCurrentVerification(http);
       } finally { verification.free(); }
     } finally { request.free(); }
   }
@@ -568,11 +616,16 @@ export class MatrixCryptoDevice {
     void (async () => {
       let since: string | undefined;
       while (!abort.signal.aborted) {
-        const query = new URLSearchParams({ timeout: "30000" });
+        const resumeImmediately = this.syncResumeRequested;
+        this.syncResumeRequested = false;
+        const query = new URLSearchParams({ timeout: resumeImmediately ? "0" : "30000" });
         if (since) query.set("since", since);
-        let response: Response;
+        const requestAbort = new AbortController();
+        const abortCurrentRequest = () => requestAbort.abort();
+        abort.signal.addEventListener("abort", abortCurrentRequest, { once: true });
+        this.syncRequestAbort = requestAbort;
         try {
-          response = await fetchImpl(`${homeserver.replace(/\/$/, "")}/_matrix/client/v3/sync?${query.toString()}`, { signal: abort.signal });
+          const response = await fetchImpl(`${homeserver.replace(/\/$/, "")}/_matrix/client/v3/sync?${query.toString()}`, { signal: requestAbort.signal });
           const payload = await response.json() as {
             next_batch?: string;
             to_device?: { events?: unknown[] };
@@ -597,12 +650,13 @@ export class MatrixCryptoDevice {
           // The trust read needs SDK state from at least one applied /sync.
           // Do not make it wait for unrelated verification UI work or uploads.
           this.initialSyncComplete = true;
-          await this.refreshVerificationRequests(http);
+          await this.refreshCurrentVerification(http);
           await this.flush(http);
           this.lastSyncErrorDiagnostic = null;
           for (const listener of this.trustListeners) listener();
         } catch (error) {
           if (abort.signal.aborted) return;
+          if (requestAbort.signal.aborted && this.syncResumeRequested) continue;
           if (error instanceof MatrixConnectorError && error.code === "MATRIX_SESSION_INVALID") {
             this.initialSyncFailure = { state: "SESSION_INVALID", reason: "matrix-session-expired" };
             for (const listener of this.trustListeners) listener();
@@ -618,9 +672,19 @@ export class MatrixCryptoDevice {
           }
           for (const listener of this.syncErrorListeners) listener(error);
           await new Promise((resolve) => window.setTimeout(resolve, 2_000));
+        } finally {
+          abort.signal.removeEventListener("abort", abortCurrentRequest);
+          if (this.syncRequestAbort === requestAbort) this.syncRequestAbort = null;
         }
       }
     })();
+  }
+
+  /** Interrupt a suspended long poll so foreground restoration can sync now. */
+  resumeSync(): void {
+    if (this.disposed || !this.syncAbort) return;
+    this.syncResumeRequested = true;
+    this.syncRequestAbort?.abort();
   }
 
   async sign(message: Uint8Array): Promise<Uint8Array> {

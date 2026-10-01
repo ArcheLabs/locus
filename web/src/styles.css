@@ -272,12 +272,10 @@ button:disabled { cursor: not-allowed; }
 .verification-card p { font-size: 14px; line-height: 1.5; margin: 0; }
 .matrix-verification-flow { display: grid; }
 .matrix-verification-status { display: flex; align-items: center; min-height: 32px; color: var(--text-secondary); font-size: 13px; }
-.matrix-recovery-details { border-top: 1px solid var(--border); padding-top: 10px; color: var(--text-secondary); font-size: 13px; }
-.matrix-recovery-details > summary { min-height: 36px; display: flex; align-items: center; cursor: pointer; color: var(--text-secondary); font-weight: 650; }
-.matrix-recovery-content { display: grid; justify-items: start; gap: 10px; padding-top: 4px; }
-.matrix-recovery-content > p, .matrix-verification-fallback > p { margin: 0; color: var(--text-secondary); line-height: 1.5; }
-.matrix-verification-fallback { display: grid; justify-items: start; gap: 9px; width: 100%; margin-top: 5px; padding-top: 12px; border-top: 1px solid var(--border); }
 .matrix-verification-actions { display: flex; gap: 8px; }
+.matrix-check-trust { justify-self: end; min-height: 44px; padding: 8px 0 0; color: var(--text-secondary); font-size: 13px; }
+.matrix-check-trust:hover:not(:disabled) { color: var(--accent); }
+.matrix-check-trust:disabled { opacity: .6; cursor: wait; }
 .create-asset-stage { margin-top: 18px; padding: 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-subtle); }
 .create-asset-stage strong { display: block; color: var(--text); }
 .create-asset-stage p, .create-asset-recovery p { margin: 6px 0 0; color: var(--text-secondary); font-size: 13px; line-height: 1.45; overflow-wrap: anywhere; }

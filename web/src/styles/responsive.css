@@ -332,7 +332,10 @@ textarea {
   .matrix-id-field input,
   .password-fallback input { width: 100%; }
   .matrix-verification-actions { width: 100%; }
-  .matrix-verification-actions .action-button { flex: 1; justify-content: center; }
+  .matrix-verification-actions .action-button { flex: 1; min-height: 48px; justify-content: center; white-space: normal; line-height: 1.25; }
+  .matrix-sas-emojis { gap: 6px; margin: 10px 0 6px; }
+  .matrix-sas-emoji { min-height: 68px; padding: 4px; }
+  .matrix-sas-emoji > span { font-size: 27px; }
   .matrix-auth-button,
   .legacy-auth-options .full,
   .password-fallback .full { width: 100%; min-height: 48px; justify-content: center; }

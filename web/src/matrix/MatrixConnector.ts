@@ -602,7 +602,7 @@ async function makeConnected(
     return "VERIFICATION_REQUESTED";
   };
   const hasActiveVerificationRequest = (snapshot: MatrixVerificationSnapshot | null): boolean => Boolean(snapshot
-    && ["requested", "unsupported", "sas-waiting", "sas-ready", "confirming"].includes(snapshot.phase));
+    && ["requested", "unsupported", "sas-waiting", "sas-ready", "confirming", "done"].includes(snapshot.phase));
   function applyTrustSnapshot(snapshot: MatrixDeviceTrustSnapshot): void {
     if (disposed) return;
     trustSnapshot = snapshot;
@@ -621,6 +621,10 @@ async function makeConnected(
         else notify();
         return;
       }
+      if (connected.state === "VERIFIED") {
+        notify();
+        return;
+      }
       const reason = snapshot.reason ?? "unknown";
       if (reason !== lastTrustUnknownReason) {
         console.warn("[Locus Matrix] Device trust is unknown", reason);
@@ -634,7 +638,7 @@ async function makeConnected(
             ? "Matrix 尚未返回账号的交叉签名信息，正在等待更新。"
             : "暂时无法确认设备状态，请重试。";
       if (connected.state === "READY") notify();
-      else if (["CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) setState("CONTROLLER_AUTHORIZATION_UNKNOWN");
+      else if (["CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING", "CONTROLLER_AUTHORIZATION_UNKNOWN"].includes(connected.state)) setState("CONTROLLER_AUTHORIZATION_UNKNOWN");
       else if (hasActiveVerificationRequest(connected.verification)) setState(mapVerificationState(connected.verification));
       else setState("TRUST_UNKNOWN");
       return;
@@ -655,8 +659,11 @@ async function makeConnected(
   }
   async function readAndApplyTrust(): Promise<MatrixDeviceTrustSnapshot> {
     if (disposed) return { state: "UNKNOWN", reason: "attempt-disposed" };
+    const revisionAtStart = trustRevision;
     const snapshot = await crypto.refreshDeviceTrust(authenticatedHttp(stored.homeserver, stored));
-    if (!disposed) applyTrustSnapshot(snapshot);
+    if (disposed) return { state: "UNKNOWN", reason: "attempt-disposed" };
+    if (revisionAtStart !== trustRevision) return trustSnapshot;
+    applyTrustSnapshot(snapshot);
     return snapshot;
   }
   async function finalizeVerifiedDevice(): Promise<void> {
@@ -675,7 +682,6 @@ async function makeConnected(
         return;
       }
       setState("VERIFIED");
-      setState("CONTROLLER_AUTHORIZING");
       try {
         const refreshed = await retryMatrixProofPreparation(async () => {
           const discovered = await queryMatrixKeys(
@@ -750,21 +756,25 @@ async function makeConnected(
       return;
     }
     if (connected.state === "READY") { notify(); return; }
-    if (["CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) return;
+    if (["VERIFIED", "CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING", "CONTROLLER_AUTHORIZATION_UNKNOWN"].includes(connected.state)) return;
     connected.error = "暂时无法确认设备状态，请重试。";
     if (hasActiveVerificationRequest(connected.verification) || trustSnapshot.state === "UNVERIFIED") notify();
     else setState("TRUST_UNKNOWN");
   });
   unsubscribeVerification = crypto.subscribeVerification((snapshot) => {
     if (disposed) return;
+    trustRevision += 1;
     connected.verification = snapshot;
-    if (["READY", "RELOGIN_REQUIRED", "CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) {
+    if (["READY", "RELOGIN_REQUIRED", "VERIFIED", "CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING", "CONTROLLER_AUTHORIZATION_UNKNOWN"].includes(connected.state)) {
       notify();
       return;
     }
-    if (trustSnapshot.state === "UNVERIFIED" || hasActiveVerificationRequest(snapshot)) {
+    if (snapshot?.phase === "done") {
+      connected.error = "";
+      setState("VERIFICATION_CONFIRMING");
+    } else if (trustSnapshot.state === "UNVERIFIED" || hasActiveVerificationRequest(snapshot)) {
       setState(mapVerificationState(snapshot));
-    } else if (trustSnapshot.state === "UNKNOWN" && (snapshot === null || snapshot.phase === "cancelled" || snapshot.phase === "done")) {
+    } else if (trustSnapshot.state === "UNKNOWN" && (snapshot === null || snapshot.phase === "cancelled")) {
       connected.error = trustSnapshot.reason === "initial-sync-pending" ? "" : "暂时无法确认设备状态，请重试。";
       setState(trustSnapshot.reason === "initial-sync-pending" ? "TRUST_CHECKING" : "TRUST_UNKNOWN");
     } else notify();
@@ -772,6 +782,10 @@ async function makeConnected(
   });
   options.onState?.(initialState);
   trustMonitor = createMatrixDeviceTrustMonitor(readAndApplyTrust, {
+    onResume: () => {
+      crypto.resumeSync();
+      void crypto.refreshCurrentVerification(authenticatedHttp(stored.homeserver, stored)).catch(() => {});
+    },
     subscribeToChanges: (listener) => crypto.subscribeTrustChanges(() => {
       trustRevision += 1;
       listener();

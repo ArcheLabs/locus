@@ -138,13 +138,16 @@ test("network configuration stays under the Vite base path for subpath deploymen
 
 test("Matrix verification is trust-driven, exposes accepted SAS requests, and has no device-type branch", async () => {
   const responsive = readFileSync(new URL("../web/src/styles/responsive.css", import.meta.url), "utf8");
-  assert.match(matrixDialogSource, /请在已登录的 Matrix 客户端中确认此设备。/);
-  assert.match(matrixDialogSource, /我已完成验证/);
-  assert.match(matrixDialogSource, /收到此 Matrix 账号的设备验证请求/);
-  assert.match(matrixDialogSource, /二维码验证，Locus 目前只支持 SAS/);
-  assert.match(matrixDialogSource, /requestOwnUserVerification\(\)[\s\S]*?改用此设备确认/);
+  assert.match(matrixDialogSource, /请在已登录的 Matrix 设备中确认此次登录。/);
+  assert.match(matrixDialogSource, /请在已登录的 Matrix 设备中完成此设备的验证。/);
+  assert.match(matrixDialogSource, /已在 Matrix 设备直接验证/);
+  assert.match(matrixDialogSource, /接受/);
+  assert.match(matrixDialogSource, /拒绝/);
+  assert.match(matrixDialogSource, /验证操作已完成，正在确认设备状态。/);
+  assert.doesNotMatch(matrixDialogSource, /我已完成验证|改用此设备确认|完成后返回此处|找不到设备|二维码验证，Locus 目前只支持 SAS/);
   assert.doesNotMatch(matrixDialogSource, /Short authentication string|Compare these emoji|device ID|Retry request delivery|Cancel verification|otherDeviceId/);
   assert.match(matrixConnectorSource, /createMatrixDeviceTrustMonitor\(readAndApplyTrust/);
+  assert.match(matrixConnectorSource, /onResume: \(\) => \{[\s\S]*crypto\.refreshCurrentVerification/);
   assert.match(matrixConnectorSource, /const finalTrust = await connected\.refreshDeviceTrust\(\)/);
   assert.match(matrixConnectorSource, /if \(snapshot\?\.phase === "done" \|\| snapshot\?\.phase === "cancelled"\) void trustMonitor\?\.refreshNow\(\)/);
   assert.doesNotMatch(matrixConnectorSource, /if \(keys\.verification !== "verified"\) \{\s*void connected\.requestOwnUserVerification\(\)/);
@@ -153,7 +156,7 @@ test("Matrix verification is trust-driven, exposes accepted SAS requests, and ha
   assert.match(readFileSync(new URL("../web/src/matrix/MatrixCryptoDevice.ts", import.meta.url), "utf8"), /OwnUserIdentity[\s\S]*?requestVerification\(\[VerificationMethod\.SasV1\]\)/);
   assert.match(readFileSync(new URL("../web/src/matrix/MatrixCryptoDevice.ts", import.meta.url), "utf8"), /request\.weStarted\(\).*?request\.phase\(\) === VerificationRequestPhase\.Ready/s);
   assert.doesNotMatch(matrixConnectorSource + matrixDialogSource, /navigator\.userAgent|\bMobile\b|\biPhone\b|\bAndroid\b/);
-  assert.match(responsive, /\.matrix-verification-actions \.action-button \{ flex: 1;/);
+  assert.match(responsive, /\.matrix-verification-actions \.action-button \{ flex: 1; min-height: 48px/);
 });
 
 function memoryStorage() {

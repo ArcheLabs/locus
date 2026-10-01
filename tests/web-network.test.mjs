@@ -877,15 +877,22 @@ test("canceling Matrix verification clears the provisional login and closes the 
   const dialog = await fs.readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
   const connectDialog = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
   const app = await fs.readFile(new URL("../web/src/app.tsx", import.meta.url), "utf8");
-  assert.match(dialog, /onClick=\{cancel\}>关闭/);
+  assert.match(dialog, /onClick=\{cancel\}>取消登录/);
   assert.match(dialog, /onCancel\(pendingConnection\)/);
   assert.match(dialog, /authAttempt\.current \+= 1/);
+  assert.match(dialog, /dialogGeneration\.current \+= 1/);
   assert.match(connectDialog, /onCancel=\{onCancelMatrix\}/);
   assert.match(app, /onCancelMatrix=\{cancelMatrixSignIn\}/);
   const cancelHandler = app.match(/function cancelMatrixSignIn\([\s\S]*?\n  \}/)?.[0] ?? "";
   assert.match(cancelHandler, /disconnectSession\(\)/);
   assert.match(cancelHandler, /setConnectOpen\(false\)/);
   assert.match(app, /signOutMatrixSession\(stored\)/);
+});
+
+test("Matrix login does not stack its modal over the Ownership chooser", async () => {
+  const connectDialog = await fs.readFile(new URL("../web/src/session/ConnectDialog.tsx", import.meta.url), "utf8");
+  assert.match(connectDialog, /useState\(Boolean\(initialMatrixConnection\)\)/);
+  assert.match(connectDialog, /open=\{open && !matrixOpen && !initialMatrixConnection\}/);
 });
 
 test("Matrix crypto WASM, store, and outgoing-request stages retain distinct safe errors", () => {
