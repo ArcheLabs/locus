@@ -2,11 +2,12 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import {
-  createMatrixVerificationMonitor,
-  MATRIX_VERIFICATION_POLL_INTERVAL_MS,
-  MATRIX_VERIFICATION_POLL_WINDOW_MS,
-  matrixProofIsPublished,
-} from "../web/src/matrix/MatrixVerificationMonitor.ts";
+  createMatrixDeviceTrustMonitor,
+  evaluateMatrixDeviceTrust,
+  MATRIX_TRUST_POLL_INTERVAL_MS,
+} from "../web/src/matrix/MatrixDeviceTrust.ts";
+import { matrixControllerReceiptFailure, MatrixConnectorError } from "../web/src/matrix/MatrixErrors.ts";
+import { classifyMatrixProofFailure, retryMatrixProofPreparation } from "../web/src/matrix/MatrixProofRetry.ts";
 
 class FakeEventTarget {
   constructor() { this.listeners = new Map(); }
@@ -20,83 +21,160 @@ class FakeEventTarget {
   count(type) { return this.listeners.get(type)?.size ?? 0; }
 }
 
-test("Element verification published by the server advances through controller authorization to READY", async () => {
+const verifiedSignals = {
+  identityAvailable: true,
+  deviceAvailable: true,
+  identityChanged: false,
+  deviceRevoked: false,
+  masterKeyAvailable: true,
+  deviceKeyAvailable: true,
+  masterKeyMatches: true,
+  deviceKeyMatches: true,
+  identityVerified: true,
+  identityTrustsOwnDevice: true,
+  deviceCrossSignedByOwner: true,
+  deviceCrossSigningTrusted: true,
+};
+
+test("Matrix trust requires the SDK's cross-signing chain and exact current device keys", () => {
+  assert.deepEqual(evaluateMatrixDeviceTrust(verifiedSignals), { state: "VERIFIED" });
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityAvailable: false }).state, "UNKNOWN");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceAvailable: false }).state, "UNKNOWN");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, masterKeyAvailable: false }).state, "UNKNOWN");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceKeyAvailable: false }).state, "UNKNOWN");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityVerified: false }).state, "UNVERIFIED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityTrustsOwnDevice: false }).state, "UNVERIFIED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceCrossSignedByOwner: false }).state, "UNVERIFIED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceCrossSigningTrusted: false }).state, "UNVERIFIED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, identityChanged: true }).state, "IDENTITY_CHANGED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceRevoked: true }).state, "DEVICE_REVOKED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, masterKeyMatches: false }).state, "IDENTITY_CHANGED");
+  assert.equal(evaluateMatrixDeviceTrust({ ...verifiedSignals, deviceKeyMatches: false }).state, "DEVICE_REVOKED");
+});
+
+test("trust monitor subscribes before initial read and repeats if a change arrives mid-read", async () => {
   const documentTarget = new FakeEventTarget();
   documentTarget.visibilityState = "visible";
   const windowTarget = new FakeEventTarget();
-  const keys = { verification: "pending", selfSigningSignature: null };
-  const states = [];
-  let authorizationCount = 0;
-  const refresh = async () => {
-    if (!matrixProofIsPublished(keys)) return false;
-    states.push("VERIFIED");
-    authorizationCount += 1;
-    states.push("CONTROLLER_AUTHORIZING");
-    await Promise.resolve();
-    states.push("READY");
-    return true;
-  };
-  const monitor = createMatrixVerificationMonitor(refresh, {
+  let changeListener;
+  let releaseFirst;
+  let refreshCount = 0;
+  const monitor = createMatrixDeviceTrustMonitor(async () => {
+    refreshCount += 1;
+    if (refreshCount === 1) await new Promise((resolve) => { releaseFirst = resolve; });
+    return { state: "UNVERIFIED" };
+  }, {
     documentTarget,
     windowTarget,
+    subscribeToChanges: (listener) => { changeListener = listener; return () => { changeListener = null; }; },
     scheduleInterval: () => 1,
     clearScheduledInterval: () => {},
   });
+  assert.equal(typeof changeListener, "function", "SDK listener is installed before the first trust read starts");
+  changeListener();
+  releaseFirst();
   await monitor.refreshNow();
-  keys.verification = "verified";
-  keys.selfSigningSignature = new Uint8Array([1, 2, 3]);
-  assert.equal(await monitor.refreshNow(), true);
-  assert.deepEqual(states, ["VERIFIED", "CONTROLLER_AUTHORIZING", "READY"]);
-  assert.equal(authorizationCount, 1);
-  assert.equal(documentTarget.count("visibilitychange"), 0);
-  console.log("MATRIX_EXTERNAL_VERIFICATION_DETECTED=PASS");
-  console.log("MATRIX_VERIFIED_TO_CONTROLLER_AUTH=PASS");
-  console.log("MATRIX_VERIFIED_TO_READY=PASS");
+  assert.equal(refreshCount, 2, "a trust change during refresh is not dropped");
+  monitor.dispose();
+  assert.equal(changeListener, null);
 });
 
-test("visibility, focus, and pageshow resume checks immediately; hidden tabs are ignored", async () => {
+test("trust monitor refreshes on sync and foreground, but its fallback poll is low-frequency and visible-only", async () => {
   const documentTarget = new FakeEventTarget();
   documentTarget.visibilityState = "hidden";
   const windowTarget = new FakeEventTarget();
   let refreshCount = 0;
-  const monitor = createMatrixVerificationMonitor(async () => { refreshCount += 1; return false; }, {
+  let poll;
+  let changes;
+  const monitor = createMatrixDeviceTrustMonitor(async () => {
+    refreshCount += 1;
+    return { state: "UNVERIFIED" };
+  }, {
     documentTarget,
     windowTarget,
-    scheduleInterval: () => 1,
+    subscribeToChanges: (listener) => { changes = listener; return () => { changes = null; }; },
+    scheduleInterval: (callback) => { poll = callback; return 1; },
     clearScheduledInterval: () => {},
   });
-  await monitor.refreshNow();
+  const settle = () => new Promise((resolve) => setImmediate(resolve));
+  await settle();
   assert.equal(refreshCount, 1);
-  documentTarget.emit("visibilitychange");
-  windowTarget.emit("focus");
-  windowTarget.emit("pageshow");
-  assert.equal(refreshCount, 1, "background pages do not trigger resume requests");
+  poll();
+  assert.equal(refreshCount, 1, "hidden pages pause the fallback poll");
+  changes();
+  await settle();
+  assert.equal(refreshCount, 2, "SDK sync notifications still refresh trust");
   documentTarget.visibilityState = "visible";
   documentTarget.emit("visibilitychange");
-  await monitor.refreshNow();
+  await settle();
   windowTarget.emit("focus");
-  await monitor.refreshNow();
-  windowTarget.emit("pageshow");
-  await monitor.refreshNow();
+  await settle();
   assert.equal(refreshCount, 4);
-  assert.equal(MATRIX_VERIFICATION_POLL_INTERVAL_MS, 2_000);
-  assert.equal(MATRIX_VERIFICATION_POLL_WINDOW_MS, 120_000);
+  assert.equal(MATRIX_TRUST_POLL_INTERVAL_MS, 30_000);
   monitor.dispose();
   assert.equal(documentTarget.count("visibilitychange"), 0);
   assert.equal(windowTarget.count("focus"), 0);
   assert.equal(windowTarget.count("pageshow"), 0);
-  console.log("MATRIX_VISIBILITY_RESUME_REFRESH=PASS");
+  assert.equal(changes, null);
 });
 
-test("the connector retains its SAS compatibility route while polling server proof", async () => {
+test("proof retry is finite, obeys Retry-After, and keeps invalid proof and expired sessions separate", async () => {
+  const waits = [];
+  let attempts = 0;
+  const value = await retryMatrixProofPreparation(async () => {
+    attempts += 1;
+    if (attempts < 3) throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "rate limited", { retryAfterMs: 1_250 });
+    return "proof-ready";
+  }, { delaysMs: [100, 200], sleep: async (delay) => waits.push(delay) });
+  assert.equal(value, "proof-ready");
+  assert.equal(attempts, 3);
+  assert.deepEqual(waits, [1_250, 1_250]);
+
+  let invalidAttempts = 0;
+  await assert.rejects(retryMatrixProofPreparation(async () => {
+    invalidAttempts += 1;
+    throw matrixControllerReceiptFailure(5005);
+  }, { sleep: async () => assert.fail("invalid proof must not retry") }), { code: "OWNERSHIP_PROOF_INVALID" });
+  assert.equal(invalidAttempts, 1);
+  assert.equal(classifyMatrixProofFailure(new MatrixConnectorError("MATRIX_SESSION_INVALID", "expired")), "SESSION_INVALID");
+  assert.equal(classifyMatrixProofFailure(new MatrixConnectorError("OWNERSHIP_PROOF_PENDING", "not synced")), "PENDING");
+
+  let exhaustedAttempts = 0;
+  await assert.rejects(retryMatrixProofPreparation(async () => {
+    exhaustedAttempts += 1;
+    throw new MatrixConnectorError("HOMESERVER_UNAVAILABLE", "later", { retryAfterMs: 60_000 });
+  }, { delaysMs: [10, 20], sleep: async () => assert.fail("do not retry before Retry-After") }));
+  assert.equal(exhaustedAttempts, 1);
+});
+
+test("only Locus application code 5005 is classified as definitive proof invalidity", () => {
+  const rejected = matrixControllerReceiptFailure(5005);
+  assert.equal(rejected.code, "OWNERSHIP_PROOF_INVALID");
+  assert.equal(classifyMatrixProofFailure(rejected), "INVALID");
+  assert.doesNotMatch(rejected.message, /proof bytes|signature|0x/);
+  assert.equal(matrixControllerReceiptFailure(5003).code, "CONTROLLER_REVOKED");
+  assert.equal(classifyMatrixProofFailure(matrixControllerReceiptFailure(5003)), "RELOGIN_REQUIRED");
+  assert.equal(classifyMatrixProofFailure(matrixControllerReceiptFailure(2_147_483_649)), "PENDING");
+});
+
+test("connector uses trust before proof and never treats SAS done or server proof presence as device trust", async () => {
   const connector = await readFile(new URL("../web/src/matrix/MatrixConnector.ts", import.meta.url), "utf8");
+  const crypto = await readFile(new URL("../web/src/matrix/MatrixCryptoDevice.ts", import.meta.url), "utf8");
   const dialog = await readFile(new URL("../web/src/matrix/MatrixLoginDialog.tsx", import.meta.url), "utf8");
-  assert.match(connector, /verificationMonitor = createMatrixVerificationMonitor\(refreshPublishedVerification\)/);
-  assert.match(connector, /matrixProofIsPublished\(refreshed\)/);
-  assert.match(connector, /if \(controllerAuthorization\) return controllerAuthorization/);
-  assert.match(connector, /ensureMatrixController\(locus, owner, controller, verifiedKeys, stored\.deviceId, setState\)/);
-  assert.match(connector, /if \(snapshot\?\.phase === "done"\) void connected\.refreshVerification\(\)/);
-  assert.match(dialog, /pendingConnection!\.requestOwnUserVerification\(\)/);
-  assert.match(dialog, /pendingConnection!\.confirmVerification\(true\)/);
-  console.log("MATRIX_SAS_FLOW_STILL_SUPPORTED=PASS");
+  assert.match(crypto, /this\.machine\.queryKeysForUsers\(\[user\]\)/);
+  assert.match(crypto, /identity\.trustsOurOwnDevice\(\)/);
+  assert.match(crypto, /device\.isCrossSignedByOwner\(\)/);
+  assert.match(crypto, /device\.isCrossSigningTrusted\(\)/);
+  assert.doesNotMatch(crypto, /device\.isVerified\(\)/);
+  assert.match(connector, /trustSnapshot\.state !== "VERIFIED"/);
+  assert.match(connector, /if \(!discovered\.encodedProof\) throw missingMatrixProof\(\)/);
+  assert.match(connector, /const finalTrust = await connected\.refreshDeviceTrust\(\)/);
+  assert.doesNotMatch(connector, /matrixProofIsPublished|keys\.verification === "verified"/);
+  assert.match(connector, /else if \(isVerificationInteraction\(\)\) notify\(\)/);
+  assert.match(connector, /if \(snapshot\?\.phase === "done" \|\| snapshot\?\.phase === "cancelled"\) void trustMonitor\?\.refreshNow\(\)/);
+  assert.match(dialog, /我已完成验证/);
+  assert.match(dialog, /onClick=\{\(\) => void refreshDeviceTrust\(\)\}/);
+  assert.match(dialog, /requestOwnUserVerification\(\)[\s\S]*?改用此设备确认/);
+  assert.match(dialog, /QR|二维码/);
+  assert.doesNotMatch(connector + dialog, /navigator\.userAgent|\bMobile\b|\biPhone\b|\bAndroid\b/);
 });

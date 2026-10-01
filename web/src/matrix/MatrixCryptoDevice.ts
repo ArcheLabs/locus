@@ -1,5 +1,6 @@
 import {
   DeviceId,
+  Device,
   DeviceLists,
   initAsync,
   KeysClaimRequest,
@@ -8,6 +9,7 @@ import {
   KeysUploadRequest,
   OlmMachine,
   OwnUserIdentity,
+  Qr,
   RoomMessageRequest,
   RequestType,
   Sas,
@@ -19,6 +21,7 @@ import {
   VerificationRequestPhase,
 } from "@matrix-org/matrix-sdk-crypto-wasm";
 import { describeMatrixCause, matrixCryptoStageFailure, MatrixConnectorError } from "./MatrixErrors.ts";
+import { evaluateMatrixDeviceTrust, type MatrixDeviceTrustSnapshot } from "./MatrixDeviceTrust.ts";
 
 type MatrixHttp = (path: string, body: string, method?: "POST" | "PUT") => Promise<string>;
 type MatrixFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -89,7 +92,7 @@ export type MatrixVerificationSnapshot = {
   flowId: string;
   otherDeviceId: string;
   startedByLocus: boolean;
-  phase: "requested" | "sas-waiting" | "sas-ready" | "confirming" | "done" | "cancelled";
+  phase: "requested" | "unsupported" | "sas-waiting" | "sas-ready" | "confirming" | "done" | "cancelled";
   emojis: { symbol: string; description: string }[];
 };
 
@@ -102,12 +105,15 @@ export class MatrixCryptoDevice {
   private disposed = false;
   private verificationSnapshot: MatrixVerificationSnapshot | null = null;
   private readonly verificationListeners = new Set<(snapshot: MatrixVerificationSnapshot | null) => void>();
-  private readonly syncErrorListeners = new Set<(message: string) => void>();
+  private readonly trustListeners = new Set<() => void>();
+  private readonly syncErrorListeners = new Set<(cause: unknown) => void>();
   private readonly pendingVerificationRequests: VerificationOutgoingRequest[] = [];
   private readonly acceptedFlows = new Set<string>();
   private readonly startedSasFlows = new Set<string>();
   private activeFlowId: string | null = null;
   private ownVerificationInFlight: Promise<void> | null = null;
+  private expectedMasterKey: string | null = null;
+  private expectedDeviceKey: string | null = null;
   readonly machine: OlmMachine;
   readonly deviceId: string;
 
@@ -157,9 +163,106 @@ export class MatrixCryptoDevice {
     return () => { this.verificationListeners.delete(listener); };
   }
 
-  subscribeSyncError(listener: (message: string) => void): () => void {
+  subscribeSyncError(listener: (cause: unknown) => void): () => void {
     this.syncErrorListeners.add(listener);
     return () => { this.syncErrorListeners.delete(listener); };
+  }
+
+  subscribeTrustChanges(listener: () => void): () => void {
+    this.trustListeners.add(listener);
+    return () => { this.trustListeners.delete(listener); };
+  }
+
+  setExpectedTrustKeys(masterPublicKey: Uint8Array, deviceEd25519Key: Uint8Array): void {
+    this.expectedMasterKey = bytesToMatrixBase64(masterPublicKey);
+    this.expectedDeviceKey = bytesToMatrixBase64(deviceEd25519Key);
+  }
+
+  /** Refresh SDK-owned trust state from a new signed keys/query response. */
+  async refreshDeviceTrust(http: MatrixHttp): Promise<MatrixDeviceTrustSnapshot> {
+    if (this.disposed) return { state: "UNKNOWN", reason: "crypto-device-disposed" };
+    try {
+      const user = new UserId(this.userId);
+      let request: KeysQueryRequest;
+      try { request = this.machine.queryKeysForUsers([user]); }
+      catch (cause) {
+        user.free();
+        throw cause;
+      }
+      try { await this.sendRequest(request, http); }
+      finally { request.free(); }
+      return await this.readDeviceTrustFromStore();
+    } catch (cause) {
+      if (cause instanceof MatrixConnectorError && cause.code === "MATRIX_SESSION_INVALID") {
+        return { state: "SESSION_INVALID", reason: "matrix-session-expired" };
+      }
+      return { state: "UNKNOWN", reason: "matrix-trust-refresh-failed" };
+    }
+  }
+
+  private async readDeviceTrustFromStore(): Promise<MatrixDeviceTrustSnapshot> {
+    if (!this.expectedMasterKey || !this.expectedDeviceKey) return { state: "UNKNOWN", reason: "trust-context-not-bound" };
+    let identity: OwnUserIdentity | undefined;
+    let device: Device | undefined;
+    try {
+      const userForIdentity = new UserId(this.userId);
+      try { identity = await this.machine.getIdentity(userForIdentity) as OwnUserIdentity | undefined; }
+      finally { userForIdentity.free(); }
+
+      const userForDevice = new UserId(this.userId);
+      const deviceId = new DeviceId(this.deviceId);
+      try { device = await this.machine.getDevice(userForDevice, deviceId); }
+      finally { userForDevice.free(); deviceId.free(); }
+
+      if (!(identity instanceof OwnUserIdentity) || !device) {
+        return evaluateMatrixDeviceTrust({
+          identityAvailable: identity instanceof OwnUserIdentity,
+          deviceAvailable: Boolean(device),
+          identityChanged: false,
+          deviceRevoked: false,
+          masterKeyAvailable: false,
+          deviceKeyAvailable: false,
+          masterKeyMatches: false,
+          deviceKeyMatches: false,
+          identityVerified: false,
+          identityTrustsOwnDevice: false,
+          deviceCrossSignedByOwner: false,
+          deviceCrossSigningTrusted: false,
+        });
+      }
+
+      const ed25519 = device.ed25519Key;
+      let currentDeviceKey: string | null = null;
+      try { currentDeviceKey = ed25519?.toBase64() ?? null; }
+      finally { ed25519?.free(); }
+      const currentMasterKey = identity.masterKey;
+      const identityTrustsOwnDevice = await identity.trustsOurOwnDevice();
+      return evaluateMatrixDeviceTrust({
+        identityAvailable: true,
+        deviceAvailable: true,
+        identityChanged: identity.hasVerificationViolation(),
+        deviceRevoked: device.isDeleted(),
+        masterKeyAvailable: typeof currentMasterKey === "string" && currentMasterKey.length > 0,
+        deviceKeyAvailable: currentDeviceKey !== null,
+        masterKeyMatches: typeof currentMasterKey === "string" && sameMatrixBase64(currentMasterKey, this.expectedMasterKey),
+        deviceKeyMatches: currentDeviceKey !== null && sameMatrixBase64(currentDeviceKey, this.expectedDeviceKey),
+        identityVerified: identity.isVerified(),
+        identityTrustsOwnDevice,
+        deviceCrossSignedByOwner: device.isCrossSignedByOwner(),
+        deviceCrossSigningTrusted: device.isCrossSigningTrusted(),
+      });
+    } finally {
+      identity?.free();
+      device?.free();
+    }
+  }
+
+  private async assertCurrentDeviceTrusted(): Promise<void> {
+    const trust = await this.readDeviceTrustFromStore();
+    if (trust.state === "VERIFIED") return;
+    if (trust.state === "IDENTITY_CHANGED") throw new MatrixConnectorError("MATRIX_IDENTITY_CHANGED", "The Matrix cross-signing identity changed. Sign in again.");
+    if (trust.state === "DEVICE_REVOKED") throw new MatrixConnectorError("MATRIX_DEVICE_REVOKED", "This Matrix device is no longer trusted. Sign in again.");
+    throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "The current Matrix device is not trusted by its cross-signing identity.");
   }
 
   private publishVerification(snapshot: MatrixVerificationSnapshot | null): void {
@@ -231,7 +334,12 @@ export class MatrixCryptoDevice {
 
   private sameUserRequest(request: VerificationRequest): boolean {
     const otherUser = request.otherUserId;
-    try { return otherUser.toString() === this.userId; }
+    try {
+      return otherUser.toString() === this.userId
+        && request.isSelfVerification()
+        && this.otherDeviceId(request) !== this.deviceId
+        && this.otherDeviceId(request) !== "Unknown device";
+    }
     finally { otherUser.free(); }
   }
 
@@ -240,7 +348,7 @@ export class MatrixCryptoDevice {
     const otherDeviceId = this.otherDeviceId(request);
     const startedByLocus = request.weStarted();
     const base = { flowId, otherDeviceId, startedByLocus, emojis: [] as { symbol: string; description: string }[] };
-    if (request.isCancelled() || request.phase() === VerificationRequestPhase.Cancelled) return { ...base, phase: "cancelled" };
+    if (request.isCancelled() || request.timedOut() || request.phase() === VerificationRequestPhase.Cancelled) return { ...base, phase: "cancelled" };
     if (request.isDone() || request.phase() === VerificationRequestPhase.Done) return { ...base, phase: "done" };
 
     const verification = request.getVerification();
@@ -258,9 +366,14 @@ export class MatrixCryptoDevice {
         return { ...base, phase: "sas-waiting" };
       } finally { verification.free(); }
     }
-    verification?.free();
+    if (verification instanceof Qr) {
+      verification.free();
+      return { ...base, phase: "unsupported" };
+    }
 
     if ((this.acceptedFlows.has(flowId) || startedByLocus) && request.phase() === VerificationRequestPhase.Ready && !this.startedSasFlows.has(flowId)) {
+      const theirMethods = request.theirSupportedMethods;
+      if (theirMethods && !theirMethods.includes(VerificationMethod.SasV1)) return { ...base, phase: "unsupported" };
       const result = await request.startSas();
       if (result) {
         const [sas, outgoing] = result;
@@ -382,6 +495,10 @@ export class MatrixCryptoDevice {
     try {
       if (!this.sameUserRequest(request)) throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "Only a verification request for your own Matrix account can authorize this device.");
       if (request.weStarted()) throw new MatrixConnectorError("MATRIX_VERIFICATION_FAILED", "Locus already sent this verification request. Accept it on your other Matrix device.");
+      const theirMethods = request.theirSupportedMethods;
+      if (theirMethods && !theirMethods.includes(VerificationMethod.SasV1)) {
+        throw new MatrixConnectorError("UNSUPPORTED_MATRIX_CRYPTO_REQUEST", "This request uses QR verification, which Locus does not currently display or scan. Ask Element to use SAS verification.");
+      }
       this.activeFlowId = flowId;
       this.acceptedFlows.add(flowId);
       this.queueVerificationRequest(request.acceptWithMethods([VerificationMethod.SasV1]));
@@ -461,7 +578,7 @@ export class MatrixCryptoDevice {
             (payload.device_lists?.left ?? []).map((value) => new UserId(value)),
           );
           try {
-            await this.machine.receiveSyncChanges(
+          await this.machine.receiveSyncChanges(
               JSON.stringify(payload.to_device?.events ?? []),
               lists,
               new Map(Object.entries(payload.device_one_time_keys_count ?? {})),
@@ -472,12 +589,11 @@ export class MatrixCryptoDevice {
           since = payload.next_batch;
           await this.refreshVerificationRequests(http);
           await this.flush(http);
+          for (const listener of this.trustListeners) listener();
         } catch (error) {
           if (abort.signal.aborted) return;
-          const message = error instanceof MatrixConnectorError
-            ? error.message
-            : "Matrix device sync failed; reconnecting. Verification requests will be retried.";
-          for (const listener of this.syncErrorListeners) listener(message);
+          for (const listener of this.syncErrorListeners) listener(error);
+          if (error instanceof MatrixConnectorError && error.code === "MATRIX_SESSION_INVALID") return;
           await new Promise((resolve) => window.setTimeout(resolve, 2_000));
         }
       }
@@ -485,6 +601,7 @@ export class MatrixCryptoDevice {
   }
 
   async sign(message: Uint8Array): Promise<Uint8Array> {
+    await this.assertCurrentDeviceTrusted();
     let text: string;
     try {
       text = new TextDecoder("utf-8", { fatal: true }).decode(message);
@@ -517,6 +634,7 @@ export class MatrixCryptoDevice {
     this.syncAbort?.abort();
     this.syncAbort = null;
     this.verificationListeners.clear();
+    this.trustListeners.clear();
     this.syncErrorListeners.clear();
     for (const request of this.pendingVerificationRequests) request.free();
     this.pendingVerificationRequests.length = 0;
@@ -544,4 +662,15 @@ function stableStoreSuffix(userId: string, deviceId: string): string {
   let hash = 2166136261;
   for (const byte of new TextEncoder().encode(`${userId}|${deviceId}`)) hash = Math.imul(hash ^ byte, 16777619);
   return (hash >>> 0).toString(16);
+}
+
+function bytesToMatrixBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+function sameMatrixBase64(left: string, right: string): boolean {
+  const normalize = (value: string) => value.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  return normalize(left) === normalize(right);
 }

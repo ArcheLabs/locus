@@ -14,7 +14,9 @@ type MatrixLoginStage = "saved-account" | "provider" | "custom-server" | "discov
 function verificationTitle(state: MatrixConnectionState): string {
   switch (state) {
     case "AUTHENTICATED":
-    case "DEVICE_KEYS_READY": return "正在连接 Matrix";
+    case "DEVICE_KEYS_READY":
+    case "TRUST_CHECKING": return "正在登录";
+    case "TRUST_UNKNOWN": return "确认设备状态";
     case "VERIFICATION_REQUIRED":
     case "VERIFICATION_REQUESTED":
     case "VERIFICATION_SAS_READY":
@@ -25,7 +27,8 @@ function verificationTitle(state: MatrixConnectionState): string {
     case "CONTROLLER_AUTHORIZATION_FINALIZING": return "正在完成登录";
     case "CONTROLLER_AUTHORIZATION_UNKNOWN":
     case "CONTROLLER_REVOKED":
-    case "CONTROLLER_AUTHORIZATION_FAILED": return "暂时无法完成登录";
+    case "CONTROLLER_AUTHORIZATION_FAILED":
+    case "RELOGIN_REQUIRED": return "暂时无法完成登录";
     case "READY": return "已连接";
   }
 }
@@ -51,23 +54,12 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
   const [password, setPassword] = useState("");
   const [authCapabilities, setAuthCapabilities] = useState<MatrixAuthCapabilities | null>(null);
   const [working, setWorking] = useState(false);
-  const [showRecovery, setShowRecovery] = useState(false);
   const [error, setError] = useState("");
   const [pendingConnection, setPendingConnection] = useState<MatrixConnected | null>(initialConnection);
   const [connectionState, setConnectionState] = useState<MatrixConnectionState>(initialConnection?.state ?? "AUTHENTICATED");
   const [, refreshConnection] = useState(0);
   const authAttempt = useRef(0);
   const passwordAbort = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    if (!pendingConnection) {
-      setShowRecovery(false);
-      return;
-    }
-    setShowRecovery(false);
-    const timer = window.setTimeout(() => setShowRecovery(true), 20_000);
-    return () => window.clearTimeout(timer);
-  }, [pendingConnection]);
 
   useEffect(() => {
     if (!open) return;
@@ -247,15 +239,15 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     finally { setWorking(false); }
   }
 
-  async function refreshVerification() {
+  async function refreshDeviceTrust() {
     if (!pendingConnection) return;
     setWorking(true);
     setError("");
     try {
-      const found = await pendingConnection.refreshVerification();
-      if (!found && waitingForElement(pendingConnection.state)) setError("");
+      const result = await pendingConnection.refreshDeviceTrust();
+      if (result.state === "UNKNOWN") setError("暂时无法确认设备状态，请重试。");
     } catch {
-      setError("暂时无法检查，请稍后重试。");
+      setError("暂时无法确认设备状态，请重试。");
     } finally { setWorking(false); }
   }
 
@@ -285,47 +277,56 @@ export function MatrixLoginDialog({ open, onClose, onCancel, onConnected, locus,
     || connectionState === "CONTROLLER_AUTHORIZATION_UNKNOWN"
     || connectionState === "CONTROLLER_AUTHORIZATION_QUEUED"
     || connectionState === "CONTROLLER_AUTHORIZATION_FINALIZING";
-  useEffect(() => {
-    if (canRetryConnection) setShowRecovery(true);
-  }, [canRetryConnection]);
+  const needsRelogin = connectionState === "RELOGIN_REQUIRED" || connectionState === "CONTROLLER_REVOKED";
+  const incomingRequest = verification?.phase === "requested" && !verification.startedByLocus;
   const legacyCapabilities = authCapabilities?.mode === "legacy" ? authCapabilities : null;
   return (
     <Modal open={open} title={showingVerification ? verificationTitle(connectionState) : "Connect Matrix"} onClose={cancel} footer={<ActionButton variant="secondary" icon={X} onClick={cancel}>关闭</ActionButton>}>
       {!showingVerification && <p className="modal-lead">Sign in with your Matrix account.</p>}
       {showingVerification ? <div className="matrix-verification-flow" aria-live="polite">
         <section className="verification-card">
-          {needsElementConfirmation ? <>
-            <p>请在 Element 中确认这台新设备。完成后返回 Locus，我们会自动继续。</p>
-            <p className="auth-caption">打开 Element → 设置 → 会话，找到 “Locus” 设备并选择“验证”。</p>
-            <div className="matrix-verification-status" role="status">正在等待确认…</div>
-          </> : connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" ?
-            <div className="matrix-verification-status" role="status">正在连接…</div> : canRetryConnection || connectionState === "CONTROLLER_REVOKED" ?
-              <div className="matrix-verification-status" role="status">请展开下方选项重新检查。</div> :
-                <div className="matrix-verification-status" role="status">正在完成登录…</div>}
-          {showRecovery && <details className="matrix-recovery-details">
-            <summary>{needsElementConfirmation ? "找不到设备？" : "连接遇到问题？"}</summary>
-            <div className="matrix-recovery-content">
-              {needsElementConfirmation && <p>打开 Element → 设置 → 会话，找到 “Locus” 设备并选择“验证”。</p>}
-              <ActionButton size="small" variant="secondary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void (canRetryConnection
-                ? performVerification(() => pendingConnection!.retryControllerAuthorization())
-                : refreshVerification())}>重新检查</ActionButton>
-              {needsElementConfirmation && <div className="matrix-verification-fallback">
-                <p>也可以在此继续设备确认。</p>
-                {(!verification || verification.phase === "cancelled") && <ActionButton size="small" variant="tertiary" loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.requestOwnUserVerification())}>改用此设备确认</ActionButton>}
-                {verification?.phase === "requested" && !verification.startedByLocus && <ActionButton size="small" variant="tertiary" loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>继续</ActionButton>}
-                {verification?.phase === "sas-waiting" && <p>请在另一台设备上接受确认。</p>}
-                {canCompare && <>
-                  <p>请核对两台设备上的图案。</p>
-                  <div className="matrix-sas-emojis" aria-label="确认图案">
-                    {verification.emojis.map((emoji, index) => <span className="matrix-sas-emoji" key={`${index}-${emoji.symbol}`} title={emoji.description}><span aria-hidden="true">{emoji.symbol}</span><small>{emoji.description}</small></span>)}
-                  </div>
-                  <div className="matrix-verification-actions">
-                    <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>不一致</ActionButton>
-                    <ActionButton size="small" variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>一致</ActionButton>
-                  </div>
-                </>}
-              </div>}
-            </div>
+          {needsElementConfirmation && pendingConnection?.error && <p className="auth-caption" role="status">{pendingConnection.error}</p>}
+          {needsRelogin ? <>
+            <p>当前登录状态不可用，请重新登录。</p>
+            <ActionButton size="small" variant="primary" loading={working} disabled={working} onClick={() => void useDifferentMatrixAccount()}>重新登录</ActionButton>
+          </> : connectionState === "AUTHENTICATED" || connectionState === "DEVICE_KEYS_READY" || connectionState === "TRUST_CHECKING" ?
+            <div className="matrix-verification-status" role="status">正在准备登录…</div> : connectionState === "TRUST_UNKNOWN" ? <>
+              <p>暂时无法确认设备状态，请重试。</p>
+              <ActionButton size="small" variant="secondary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void refreshDeviceTrust()}>重试</ActionButton>
+            </> : needsElementConfirmation ? <>
+              {verification?.phase === "unsupported" ? <>
+                <p>这次请求使用二维码验证，Locus 目前只支持 SAS。请在另一台设备选择 SAS 后重试。</p>
+                <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>取消验证</ActionButton>
+              </> : incomingRequest ? <>
+                <p>收到此 Matrix 账号的设备验证请求。</p>
+                <div className="matrix-verification-actions">
+                  <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>拒绝</ActionButton>
+                  <ActionButton size="small" variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.startVerification())}>接受</ActionButton>
+                </div>
+              </> : canCompare ? <>
+                <p>请核对另一台 Matrix 设备上显示的图案。</p>
+                <div className="matrix-sas-emojis" aria-label="确认图案">
+                  {verification.emojis.map((emoji, index) => <span className="matrix-sas-emoji" key={`${index}-${emoji.symbol}`} title={emoji.description}><span aria-hidden="true">{emoji.symbol}</span><small>{emoji.description}</small></span>)}
+                </div>
+                <div className="matrix-verification-actions">
+                  <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(false))}>不一致</ActionButton>
+                  <ActionButton size="small" variant="primary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.confirmVerification(true))}>一致</ActionButton>
+                </div>
+              </> : <>
+                <p>请在已登录的 Matrix 客户端中确认此设备。</p>
+                <p className="auth-caption">在 Element 的“设置 → 会话”中找到 Locus 并选择验证。完成后返回此处。</p>
+                {verification?.phase === "sas-waiting" || verification?.phase === "confirming" ? <div className="matrix-verification-status" role="status">正在等待另一台设备…</div> : null}
+                <ActionButton size="small" variant="primary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void refreshDeviceTrust()}>我已完成验证</ActionButton>
+                {(!verification || verification.phase === "cancelled") && <ActionButton size="small" variant="secondary" icon={Check} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.requestOwnUserVerification())}>改用此设备确认</ActionButton>}
+                {verification?.phase === "requested" && verification.startedByLocus && <ActionButton size="small" variant="secondary" icon={X} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.cancelVerification())}>取消验证</ActionButton>}
+              </>}
+            </> : canRetryConnection ? <>
+              <p>{pendingConnection?.error || "暂时无法完成登录，请重试。"}</p>
+              <ActionButton size="small" variant="secondary" icon={RefreshCw} loading={working} disabled={working} onClick={() => void performVerification(() => pendingConnection!.retryControllerAuthorization())}>重试</ActionButton>
+            </> : <div className="matrix-verification-status" role="status">正在完成登录…</div>}
+          {needsElementConfirmation && <details className="matrix-recovery-details">
+            <summary>找不到设备？</summary>
+            <div className="matrix-recovery-content"><p>打开 Element → 设置 → 会话，找到 “Locus” 设备并选择“验证”。</p></div>
           </details>}
         </section>
       </div> : <>

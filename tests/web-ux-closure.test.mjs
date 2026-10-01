@@ -18,13 +18,15 @@ test("routes support base-path candidate Liquidity while preserving direct pages
   assert.equal(routeFromPath("/activity", "/"), "activity");
 });
 
-test("Matrix restore does not open verification UI for an authorization that is already progressing", () => {
-  assert.equal(matrixStateRequiresUserInteraction("CONTROLLER_AUTHORIZING", "restore"), false);
-  assert.equal(matrixStateRequiresUserInteraction("CONTROLLER_AUTHORIZATION_QUEUED", "restore"), false);
+test("Matrix restore keeps the login UI open until trust and authorization reach READY", () => {
+  assert.equal(matrixStateRequiresUserInteraction("TRUST_CHECKING", "restore"), true);
+  assert.equal(matrixStateRequiresUserInteraction("TRUST_UNKNOWN", "restore"), true);
+  assert.equal(matrixStateRequiresUserInteraction("CONTROLLER_AUTHORIZING", "restore"), true);
+  assert.equal(matrixStateRequiresUserInteraction("CONTROLLER_AUTHORIZATION_QUEUED", "restore"), true);
   assert.equal(matrixStateRequiresUserInteraction("READY", "restore"), false);
   assert.equal(matrixStateRequiresUserInteraction("VERIFICATION_REQUIRED", "restore"), true);
   assert.equal(matrixStateRequiresUserInteraction("VERIFICATION_CONFIRMING", "fresh"), true);
-  assert.equal(matrixStateRequiresUserInteraction("VERIFICATION_CONFIRMING", "restore"), false);
+  assert.equal(matrixStateRequiresUserInteraction("VERIFICATION_CONFIRMING", "restore"), true);
 });
 
 test("amount and recipient validators reject unsafe or incomplete input", () => {

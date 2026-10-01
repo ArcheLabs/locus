@@ -524,12 +524,12 @@ test("Matrix controller authorization distinguishes JamScript fatal codes from b
   assert.equal(fatal.code, "CONTROLLER_NOT_AUTHORIZED");
   assert.match(fatal.message, /Internal JamScript runtime error/);
   assert.match(fatal.message, /FATAL_UNCAUGHT, 0x80000001/);
-  assert.doesNotMatch(fatal.message, /Locus rejected|sensitive proof details/);
+  assert.doesNotMatch(fatal.message, /Locus rejected|sensitive proof details|proof bytes/);
 
   const rejected = matrixControllerReceiptFailure(5005, "proof diagnostics");
-  assert.match(rejected.message, /Locus rejected/);
-  assert.match(rejected.message, /application error code 5005/);
-  assert.match(rejected.message, /proof diagnostics/);
+  assert.equal(rejected.code, "OWNERSHIP_PROOF_INVALID");
+  assert.match(rejected.message, /proof is invalid/);
+  assert.doesNotMatch(rejected.message, /proof diagnostics|signature|0x/);
 });
 
 test("network amounts remain exact bigint values", () => {
@@ -791,7 +791,7 @@ test("Matrix login separates server selection from authenticated identity and pr
   assert.match(oauth, /export function matrixDeviceId\(\): string/);
   assert.match(connector, /const MATRIX_SESSION_KEY = "locus\.matrix\.session\.v1"/);
   assert.match(connector, /requestOwnUserVerification: async/);
-  assert.match(connector, /createMatrixVerificationMonitor\(refreshPublishedVerification\)/);
+  assert.match(connector, /createMatrixDeviceTrustMonitor\(readAndApplyTrust/);
   assert.match(dialog, /confirmVerification\(true\)/);
   assert.doesNotMatch(dialog, /Copy device ID|pendingConnection!\.stored\.deviceId/);
   assert.doesNotMatch(dialog, /mobile\.element\.io/);

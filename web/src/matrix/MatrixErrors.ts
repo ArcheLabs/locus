@@ -16,17 +16,26 @@ export type MatrixErrorCode =
   | "DEVICE_KEYS_UPLOAD_FAILED"
   | "CRYPTO_REQUEST_ACK_FAILED"
   | "TOKEN_REFRESH_FAILED"
+  | "MATRIX_SESSION_INVALID"
   | "OAUTH_FAILED"
   | "CONTROLLER_NOT_AUTHORIZED"
+  | "OWNERSHIP_PROOF_PENDING"
+  | "OWNERSHIP_PROOF_INVALID"
+  | "MATRIX_IDENTITY_CHANGED"
+  | "MATRIX_DEVICE_REVOKED"
   | "CONTROLLER_REVOKED"
   | "UNSUPPORTED_MATRIX_CRYPTO_REQUEST";
 
+export type MatrixConnectorErrorOptions = ErrorOptions & { retryAfterMs?: number };
+
 export class MatrixConnectorError extends Error {
   readonly code: MatrixErrorCode;
+  readonly retryAfterMs?: number;
 
-  constructor(code: MatrixErrorCode, message: string, options?: ErrorOptions) {
+  constructor(code: MatrixErrorCode, message: string, options?: MatrixConnectorErrorOptions) {
     super(message, options);
     this.code = code;
+    this.retryAfterMs = options?.retryAfterMs;
     this.name = "MatrixConnectorError";
   }
 }
@@ -55,7 +64,7 @@ export function matrixCryptoStageFailure(code: MatrixErrorCode, message: string,
   return new MatrixConnectorError(code, `${message} ${describeMatrixCause(cause)}`, { cause });
 }
 
-export function matrixControllerReceiptFailure(errorCode: number | null | undefined, proofDetails = ""): MatrixConnectorError {
+export function matrixControllerReceiptFailure(errorCode: number | null | undefined): MatrixConnectorError {
   const code = typeof errorCode === "number" && Number.isInteger(errorCode) && errorCode >= 0
     ? errorCode >>> 0
     : null;
@@ -73,8 +82,14 @@ export function matrixControllerReceiptFailure(errorCode: number | null | undefi
       "This Locus Matrix controller was previously revoked. Sign in as a new Matrix device or use another active controller.",
     );
   }
+  if (code === 5005) {
+    return new MatrixConnectorError(
+      "OWNERSHIP_PROOF_INVALID",
+      "Locus confirmed that the Matrix ownership proof is invalid. Sign in again to retry with a current device identity.",
+    );
+  }
   return new MatrixConnectorError(
     "CONTROLLER_NOT_AUTHORIZED",
-    `Locus rejected the Matrix controller authorization (application error code ${code ?? "none"}). ${proofDetails}`,
+    `Locus could not complete Matrix device authorization (application error code ${code ?? "unknown"}). Retry after checking the connection.`,
   );
 }

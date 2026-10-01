@@ -17,6 +17,7 @@ export type LocusWebSession = {
     userId: string;
     deviceId: string;
     homeserver: string;
+    subscribeSecurity?: (listener: (message: string) => void) => () => void;
   };
   cleanup?: () => void;
 };

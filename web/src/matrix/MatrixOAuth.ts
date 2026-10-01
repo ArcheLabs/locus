@@ -279,6 +279,9 @@ export async function beginMatrixSso(homeserver: string, capabilities: MatrixAut
 async function parseTokenResponse(response: Response, context: string): Promise<{ access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string }> {
   const payload = await response.json().catch(() => ({})) as { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string };
   if (!response.ok || typeof payload.access_token !== "string") {
+    if (context.toLowerCase().includes("refresh") && payload.error === "invalid_grant") {
+      throw new MatrixConnectorError("MATRIX_SESSION_INVALID", "The Matrix session is no longer valid. Sign in again.");
+    }
     throw matrixError(payload.error_description || `${context} failed (HTTP ${response.status}${payload.error ? `, ${payload.error}` : ""}).`);
   }
   return payload;

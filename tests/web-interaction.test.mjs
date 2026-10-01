@@ -79,7 +79,7 @@ test("Matrix controller authorization restoration checks the saved transaction b
   assert.match(matrixConnectorSource, /getControllerStatus\(subject, controllerOwnership\)/);
   assert.match(matrixConnectorSource, /status === "revoked"[\s\S]*?CONTROLLER_REVOKED/);
   assert.match(matrixConnectorSource, /status === "active"[\s\S]*?removePendingMatrixControllerAuthorization[\s\S]*?return true/);
-  assert.match(matrixDialogSource, /重新检查/);
+  assert.match(matrixDialogSource, /重试/);
   assert.doesNotMatch(matrixDialogSource, /Check authorization status|do not repeat Matrix verification/);
 });
 
@@ -95,6 +95,9 @@ test("Matrix restore UI follows current controller authorization states", () => 
     "CONTROLLER_AUTHORIZATION_UNKNOWN",
     "CONTROLLER_AUTHORIZATION_FAILED",
     "CONTROLLER_REVOKED",
+    "TRUST_CHECKING",
+    "TRUST_UNKNOWN",
+    "RELOGIN_REQUIRED",
   ]) {
     assert.ok(appSource.includes(state), `app.tsx must handle ${state}`);
   }
@@ -133,23 +136,23 @@ test("network configuration stays under the Vite base path for subpath deploymen
   assert.equal(assetCatalogPath("local", "/candidate/"), "/candidate/catalogs/local.json");
 });
 
-test("mobile Matrix verification uses Element confirmation with concise copy and hidden recovery", async () => {
+test("Matrix verification is trust-driven, exposes accepted SAS requests, and has no device-type branch", async () => {
   const responsive = readFileSync(new URL("../web/src/styles/responsive.css", import.meta.url), "utf8");
-  assert.match(matrixDialogSource, /请在 Element 中确认这台新设备。完成后返回 Locus，我们会自动继续。/);
-  assert.match(matrixDialogSource, /打开 Element → 设置 → 会话，找到 “Locus” 设备并选择“验证”。/);
-  assert.match(matrixDialogSource, /正在等待确认…/);
-  assert.match(matrixDialogSource, /setTimeout\(\(\) => setShowRecovery\(true\), 20_000\)/);
-  assert.match(matrixDialogSource, /重新检查/);
-  assert.match(matrixDialogSource, /requestOwnUserVerification\(\)/);
+  assert.match(matrixDialogSource, /请在已登录的 Matrix 客户端中确认此设备。/);
+  assert.match(matrixDialogSource, /我已完成验证/);
+  assert.match(matrixDialogSource, /收到此 Matrix 账号的设备验证请求/);
+  assert.match(matrixDialogSource, /二维码验证，Locus 目前只支持 SAS/);
+  assert.match(matrixDialogSource, /requestOwnUserVerification\(\)[\s\S]*?改用此设备确认/);
   assert.doesNotMatch(matrixDialogSource, /Short authentication string|Compare these emoji|device ID|Retry request delivery|Cancel verification|otherDeviceId/);
-  assert.match(matrixConnectorSource, /verificationMonitor = createMatrixVerificationMonitor\(refreshPublishedVerification\)/);
-  assert.match(matrixConnectorSource, /matrixProofIsPublished\(refreshed\)[\s\S]*?authorizeVerifiedDevice\(refreshed\)/);
-  assert.match(matrixConnectorSource, /if \(snapshot\?\.phase === "done"\) void connected\.refreshVerification\(\)/);
+  assert.match(matrixConnectorSource, /createMatrixDeviceTrustMonitor\(readAndApplyTrust/);
+  assert.match(matrixConnectorSource, /const finalTrust = await connected\.refreshDeviceTrust\(\)/);
+  assert.match(matrixConnectorSource, /if \(snapshot\?\.phase === "done" \|\| snapshot\?\.phase === "cancelled"\) void trustMonitor\?\.refreshNow\(\)/);
   assert.doesNotMatch(matrixConnectorSource, /if \(keys\.verification !== "verified"\) \{\s*void connected\.requestOwnUserVerification\(\)/);
   assert.match(matrixDialogSource, /verification\.startedByLocus/);
   assert.doesNotMatch(matrixDialogSource, /elementMobileLaunchUrl|mobile\.element\.io|hs_url|element:\/\//);
   assert.match(readFileSync(new URL("../web/src/matrix/MatrixCryptoDevice.ts", import.meta.url), "utf8"), /OwnUserIdentity[\s\S]*?requestVerification\(\[VerificationMethod\.SasV1\]\)/);
   assert.match(readFileSync(new URL("../web/src/matrix/MatrixCryptoDevice.ts", import.meta.url), "utf8"), /request\.weStarted\(\).*?request\.phase\(\) === VerificationRequestPhase\.Ready/s);
+  assert.doesNotMatch(matrixConnectorSource + matrixDialogSource, /navigator\.userAgent|\bMobile\b|\biPhone\b|\bAndroid\b/);
   assert.match(responsive, /\.matrix-verification-actions \.action-button \{ flex: 1;/);
 });
 

@@ -1,11 +1,12 @@
 import { createClient, type MatrixClient } from "matrix-js-sdk";
-import { decodeMatrixControlClaimProofV1, encodeMatrixControlClaimProofV1, MatrixDeviceController, ownershipKey } from "@jamscript/client";
+import { MatrixDeviceController, ownershipKey } from "@jamscript/client";
 import { matrixOwnership, type LocusClient } from "@archelabs/locus";
 import type { LocusWebSession } from "../session/types.js";
 import { describeMatrixCause, matrixControllerReceiptFailure, MatrixConnectorError } from "./MatrixErrors.js";
 import { destroyMatrixCryptoStore, MatrixCryptoDevice, type MatrixVerificationSnapshot } from "./MatrixCryptoDevice.js";
 import { queryMatrixDeviceKeyParity, queryMatrixKeys, type MatrixDiscoveredKeys } from "./MatrixKeysQuery.js";
-import { createMatrixVerificationMonitor, matrixProofIsPublished } from "./MatrixVerificationMonitor.js";
+import { createMatrixDeviceTrustMonitor, type MatrixDeviceTrustSnapshot } from "./MatrixDeviceTrust.js";
+import { classifyMatrixProofFailure, missingMatrixProof, retryMatrixProofPreparation } from "./MatrixProofRetry.js";
 import { clearMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, committedMatrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
 import { authenticateMatrixPassword } from "./MatrixPasswordLogin.js";
 
@@ -14,6 +15,8 @@ export type MatrixStoredSession = MatrixOAuthSession;
 export type MatrixConnectionState =
   | "AUTHENTICATED"
   | "DEVICE_KEYS_READY"
+  | "TRUST_CHECKING"
+  | "TRUST_UNKNOWN"
   | "VERIFICATION_REQUIRED"
   | "VERIFICATION_REQUESTED"
   | "VERIFICATION_SAS_READY"
@@ -25,6 +28,7 @@ export type MatrixConnectionState =
   | "CONTROLLER_AUTHORIZATION_UNKNOWN"
   | "CONTROLLER_REVOKED"
   | "CONTROLLER_AUTHORIZATION_FAILED"
+  | "RELOGIN_REQUIRED"
   | "READY";
 
 export type MatrixConnectionOptions = {
@@ -35,6 +39,7 @@ export type MatrixConnectionOptions = {
 
 const MATRIX_SESSION_KEY = "locus.matrix.session.v1";
 const MATRIX_AUTHORIZATION_PENDING_KEY = "locus.matrix-controller-authorization.v2";
+let matrixConnectionAttemptSequence = 0;
 
 class MatrixControllerAuthorizationWaitTimeout extends Error {
   constructor(readonly transactionId: string, readonly lastStatus?: Awaited<ReturnType<LocusClient["transactionStatus"]>>) {
@@ -62,9 +67,10 @@ function matrixOwnershipKeyHex(owner: ReturnType<typeof matrixOwnership>): strin
 }
 
 function matrixAuthorizationFailureState(cause: unknown): MatrixConnectionState {
-  return cause instanceof MatrixConnectorError && cause.code === "CONTROLLER_REVOKED"
-    ? "CONTROLLER_REVOKED"
-    : "CONTROLLER_AUTHORIZATION_FAILED";
+  if (!(cause instanceof MatrixConnectorError)) return "CONTROLLER_AUTHORIZATION_FAILED";
+  if (cause.code === "CONTROLLER_REVOKED") return "CONTROLLER_REVOKED";
+  if (["OWNERSHIP_PROOF_INVALID", "MATRIX_SESSION_INVALID", "MATRIX_IDENTITY_CHANGED", "MATRIX_DEVICE_REVOKED"].includes(cause.code)) return "RELOGIN_REQUIRED";
+  return "CONTROLLER_AUTHORIZATION_FAILED";
 }
 
 function readPendingMatrixControllerAuthorizations(): PendingMatrixControllerAuthorization[] {
@@ -134,10 +140,13 @@ export async function discoverHomeserver(userId: string, configured?: string): P
 }
 
 async function refreshMatrixAccessToken(stored: MatrixStoredSession, persist = true): Promise<void> {
-  if (!stored.refreshToken) throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "The Matrix session has no refresh token");
+  if (!stored.refreshToken) throw new MatrixConnectorError("MATRIX_SESSION_INVALID", "The Matrix session has expired. Sign in again.");
   if (stored.authType === "oauth") {
     try { await refreshMatrixOAuthToken(stored, persist); }
-    catch (cause) { throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "Matrix OAuth token refresh failed. Sign in again if the session has expired.", { cause }); }
+    catch (cause) {
+      if (cause instanceof MatrixConnectorError && cause.code === "MATRIX_SESSION_INVALID") throw cause;
+      throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "Matrix OAuth token refresh failed. Sign in again if the session has expired.", { cause });
+    }
     return;
   }
   let response: Response;
@@ -150,11 +159,19 @@ async function refreshMatrixAccessToken(stored: MatrixStoredSession, persist = t
   } catch (cause) {
     throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "Unable to refresh the Matrix session", { cause });
   }
-  let payload: MatrixTokenResponse = {};
-  try { payload = await response.json() as MatrixTokenResponse; } catch (cause) {
+  let payload: MatrixTokenResponse & { errcode?: string; error?: string; retry_after_ms?: number } = {};
+  try { payload = await response.json() as typeof payload; } catch (cause) {
     throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "Matrix token refresh returned invalid JSON", { cause });
   }
   if (!response.ok || typeof payload.access_token !== "string") {
+    if (response.status === 401 || payload.errcode === "M_UNKNOWN_TOKEN" || payload.errcode === "M_MISSING_TOKEN") {
+      throw new MatrixConnectorError("MATRIX_SESSION_INVALID", "The Matrix session is no longer valid. Sign in again.");
+    }
+    if (response.status === 429) {
+      throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", "Matrix token refresh was rate limited. Retry after the server's delay.", {
+        retryAfterMs: typeof payload.retry_after_ms === "number" ? payload.retry_after_ms : undefined,
+      });
+    }
     throw new MatrixConnectorError("TOKEN_REFRESH_FAILED", `Matrix token refresh failed with HTTP ${response.status}`);
   }
   stored.accessToken = payload.access_token;
@@ -180,6 +197,13 @@ async function authenticatedFetch(stored: MatrixStoredSession, input: RequestInf
   if (response.status === 401 && stored.refreshToken) {
     await refreshMatrixAccessToken(stored, persistRefresh);
     response = await request();
+  }
+  if (response.status === 401) throw new MatrixConnectorError("MATRIX_SESSION_INVALID", "The Matrix session is no longer valid. Sign in again.");
+  if (response.status === 403) {
+    const payload = await response.clone().json().catch(() => ({})) as { errcode?: unknown };
+    if (payload.errcode === "M_UNKNOWN_TOKEN" || payload.errcode === "M_MISSING_TOKEN") {
+      throw new MatrixConnectorError("MATRIX_SESSION_INVALID", "The Matrix session is no longer valid. Sign in again.");
+    }
   }
   return response;
 }
@@ -233,8 +257,7 @@ async function ensureMatrixController(
     return true;
   }
   const proof = keys.encodedProof;
-  if (!proof) throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Verify this Matrix device before authorizing it for Locus");
-  const proofDetails = await matrixProofDiagnostics(keys, subject, controllerOwnership, proof);
+  if (!proof) throw missingMatrixProof();
 
   const settlePending = async (pending: PendingMatrixControllerAuthorization): Promise<"ready" | "expired"> => {
     const deadline = Date.now() + 180_000;
@@ -269,7 +292,7 @@ async function ensureMatrixController(
         lastStatus = status;
         if (status.status === "failed") {
           removePendingMatrixControllerAuthorization(pendingIdentity);
-          throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", `Locus could not dispatch the Matrix controller authorization: ${status.error ?? "transaction failed"}. ${proofDetails}`);
+          throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", `Locus could not dispatch the Matrix controller authorization: ${status.error ?? "transaction failed"}. Retry after checking the connection.`);
         }
         if (status.status === "queued") {
           onProgress?.("CONTROLLER_AUTHORIZATION_QUEUED");
@@ -285,7 +308,7 @@ async function ensureMatrixController(
           }
           if (receipt && receipt.status !== "applied") {
             removePendingMatrixControllerAuthorization(pendingIdentity);
-            throw matrixControllerReceiptFailure(receipt.errorCode, proofDetails);
+            throw matrixControllerReceiptFailure(receipt.errorCode);
           }
           if (receipt?.status === "applied" && await inspectChainAuthorization() === "ready") return "ready";
         }
@@ -365,47 +388,12 @@ export type MatrixConnected = {
   startVerification: () => Promise<void>;
   confirmVerification: (matches: boolean) => Promise<void>;
   cancelVerification: () => Promise<void>;
-  refreshVerification: () => Promise<boolean>;
+  refreshDeviceTrust: () => Promise<MatrixDeviceTrustSnapshot>;
   retryControllerAuthorization: () => Promise<void>;
 };
 
 function sameBytes(left: Uint8Array, right: Uint8Array): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
-}
-
-function hex(bytes: Uint8Array): string {
-  return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
-}
-
-async function matrixProofDiagnostics(
-  keys: MatrixDiscoveredKeys,
-  subject: ReturnType<typeof matrixOwnership>,
-  controller: Awaited<ReturnType<MatrixDeviceController["getController"]>>,
-  proof: Uint8Array,
-): Promise<string> {
-  let proofHash = "unavailable";
-  try {
-    const proofBuffer = Uint8Array.from(proof).buffer;
-    proofHash = hex(new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", proofBuffer)));
-  } catch { /* Diagnostics must not block the authorization result. */ }
-  let clientRoundtrip = false;
-  try {
-    clientRoundtrip = sameBytes(encodeMatrixControlClaimProofV1(decodeMatrixControlClaimProofV1(proof)), proof);
-  } catch { /* The exact encoder/decoder failure is represented by false. */ }
-  return [
-    `deviceId=${keys.deviceId}`,
-    `algorithms=${keys.algorithms.join(",")}`,
-    `subjectEqualsMaster=${subject.kind === 0 && sameBytes(subject.public, keys.masterPublicKey)}`,
-    `controllerEqualsDeviceEd25519=${controller.kind === 0 && sameBytes(controller.public, keys.deviceEd25519Key)}`,
-    `masterPublicKey=0x${hex(keys.masterPublicKey)}`,
-    `selfSigningPublicKey=0x${hex(keys.selfSigningPublicKey)}`,
-    `deviceEd25519Key=0x${hex(keys.deviceEd25519Key)}`,
-    `deviceCurve25519Key=0x${hex(keys.deviceCurve25519Key)}`,
-    `encodedProof.length=${proof.length}`,
-    `encodedProof.sha256=0x${proofHash}`,
-    `clientProofRoundtrip=${clientRoundtrip}`,
-    `encodedProof.hex=0x${hex(proof)}`,
-  ].join("; ");
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -455,18 +443,17 @@ async function connectStoredMatrixSession(
       }
       const keys = await queryMatrixKeys(stored.userId, stored.deviceId, homeserver, stored.accessToken, authFetch);
       throwIfAborted(options.signal);
+      device.setExpectedTrustKeys(keys.masterPublicKey, keys.deviceEd25519Key);
       options.onState?.("DEVICE_KEYS_READY");
-      device.startSync(homeserver, authFetch, cryptoHttp);
       return { device, keys };
     });
     cryptoSetupCommitted = true;
     throwIfAborted(options.signal);
     const controller = new MatrixDeviceController(keys.deviceEd25519Key, { sign: (message) => device.sign(message) });
-    const owner = matrixOwnership(keys.masterPublicKey);
-    if (keys.verification === "pending") {
-      options.onState?.("VERIFICATION_REQUIRED");
-    } else options.onState?.("VERIFIED");
-    return await makeConnected(stored, client, device, keys, controller, options.locus, options, freshDevice);
+    const connected = await makeConnected(stored, client, device, keys, controller, options.locus, options, freshDevice);
+    throwIfAborted(options.signal);
+    device.startSync(homeserver, authFetch, cryptoHttp);
+    return connected;
   } catch (cause) {
     try { cryptoDevice.current?.dispose(); } catch { /* Preserve the original connection error. */ }
     client.stopClient();
@@ -493,16 +480,25 @@ async function makeConnected(
   const owner = matrixOwnership(keys.masterPublicKey);
   const currentController = await controller.getController();
   const listeners = new Set<() => void>();
+  const securityListeners = new Set<(message: string) => void>();
   let disposed = false;
-  let verificationMonitor: ReturnType<typeof createMatrixVerificationMonitor> | null = null;
-  let controllerAuthorization: Promise<boolean> | null = null;
-  let unsubscribeCrypto: () => void = () => {};
+  let trustMonitor: ReturnType<typeof createMatrixDeviceTrustMonitor> | null = null;
+  let authorizationTask: Promise<void> | null = null;
+  let finalizationQueued = false;
+  let finalizationPaused = false;
+  let unsubscribeVerification: () => void = () => {};
   let unsubscribeSyncError: () => void = () => {};
+  let trustSnapshot: MatrixDeviceTrustSnapshot = { state: "UNKNOWN", reason: "initializing" };
+  let trustRevision = 0;
+  const attemptId = `${stored.userId}|${stored.deviceId}|${++matrixConnectionAttemptSequence}`;
   const initialVerification = crypto.currentVerification;
-  const initialState: MatrixConnectionState = keys.verification === "verified"
-    ? (locus ? "CONTROLLER_AUTHORIZING" : "VERIFIED")
-    : initialVerification?.phase === "sas-ready" ? "VERIFICATION_SAS_READY"
-      : initialVerification ? "VERIFICATION_REQUESTED" : "VERIFICATION_REQUIRED";
+  const initialState: MatrixConnectionState = "TRUST_CHECKING";
+  const securityMessage = "当前 Matrix 登录状态不可用，请重新登录。";
+  let connected: MatrixConnected;
+  const isVerificationInteraction = () => connected.state === "VERIFICATION_REQUIRED"
+    || connected.state === "VERIFICATION_REQUESTED"
+    || connected.state === "VERIFICATION_SAS_READY"
+    || connected.state === "VERIFICATION_CONFIRMING";
   const session: LocusWebSession = {
     kind: "matrix",
     owner,
@@ -511,18 +507,28 @@ async function makeConnected(
     label: `Matrix ${stored.userId}`,
     address: stored.userId,
     connectionId: `${stored.homeserver}|${stored.userId}|${stored.deviceId}`,
-    matrix: { userId: stored.userId, deviceId: stored.deviceId, homeserver: stored.homeserver },
+    matrix: {
+      userId: stored.userId,
+      deviceId: stored.deviceId,
+      homeserver: stored.homeserver,
+      subscribeSecurity: (listener) => {
+        securityListeners.add(listener);
+        if (connected?.state === "RELOGIN_REQUIRED") listener(securityMessage);
+        return () => { securityListeners.delete(listener); };
+      },
+    },
     cleanup: () => {
       if (disposed) return;
       disposed = true;
-      verificationMonitor?.dispose();
-      unsubscribeCrypto();
+      trustMonitor?.dispose();
+      unsubscribeVerification();
       unsubscribeSyncError();
+      securityListeners.clear();
       crypto.dispose();
       client.stopClient();
     },
   };
-  const connected: MatrixConnected = {
+  connected = {
     session,
     client,
     crypto,
@@ -548,135 +554,192 @@ async function makeConnected(
       if (!connected.verification) return;
       await crypto.cancelVerification(connected.verification.flowId, authenticatedHttp(stored.homeserver, stored));
     },
-    refreshVerification: async () => verificationMonitor ? verificationMonitor.refreshNow() : refreshPublishedVerification(),
+    refreshDeviceTrust: async () => trustMonitor
+      ? trustMonitor.refreshNow()
+      : crypto.refreshDeviceTrust(authenticatedHttp(stored.homeserver, stored)),
     retryControllerAuthorization: async () => {
       if (disposed) throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The Matrix session was disconnected. Reconnect before retrying authorization.");
       connected.error = "";
-      setState("CONTROLLER_AUTHORIZING");
-      try {
-        const refreshed = await queryMatrixKeys(
-          stored.userId,
-          stored.deviceId,
-          stored.homeserver,
-          stored.accessToken,
-          (input, init) => authenticatedFetch(stored, input, init),
-        );
-        if (!sameBytes(refreshed.deviceEd25519Key, connected.keys.deviceEd25519Key)) {
-          throw new MatrixConnectorError("STALE_MATRIX_DEVICE", "The Matrix device key changed during verification. Sign in again to create a new device.");
-        }
-        connected.keys = refreshed;
-        if (!matrixProofIsPublished(refreshed)) {
-          throw new MatrixConnectorError("DEVICE_NOT_VERIFIED", "Matrix has not published the completed M → S → D verification proof yet. Wait briefly, then retry.");
-        }
-        await authorizeVerifiedDevice(refreshed);
-      } catch (cause) {
-        if (!disposed) {
-          connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
-          setState(matrixAuthorizationFailureState(cause));
-        }
-        throw cause;
-      }
+      finalizationPaused = false;
+      const refreshed = await connected.refreshDeviceTrust();
+      if (refreshed.state !== "VERIFIED") return;
+      await finalizeVerifiedDevice();
     },
   };
 
   const notify = () => { for (const listener of listeners) listener(); };
   const setState = (state: MatrixConnectionState) => {
+    if (disposed) return;
     connected.state = state;
     options.onState?.(state);
     notify();
   };
-  unsubscribeSyncError = crypto.subscribeSyncError((message) => {
-    if (disposed || connected.state === "CONTROLLER_AUTHORIZING" || connected.state === "CONTROLLER_AUTHORIZATION_FAILED" || connected.state === "CONTROLLER_REVOKED") return;
-    connected.error = message;
-    notify();
-  });
-  async function authorizeVerifiedDevice(verifiedKeys: MatrixDiscoveredKeys): Promise<boolean> {
-    if (!matrixProofIsPublished(verifiedKeys)) return false;
-    connected.keys = verifiedKeys;
-    if (controllerAuthorization) return controllerAuthorization;
-    const authorization = (async (): Promise<boolean> => {
-      if (disposed) return false;
-      connected.error = "";
-      setState("VERIFIED");
-      if (!locus) return true;
-      setState("CONTROLLER_AUTHORIZING");
-      try {
-        const ready = await ensureMatrixController(locus, owner, controller, verifiedKeys, stored.deviceId, setState);
-        if (!disposed) {
-          connected.error = "";
-          setState(ready ? "READY" : "CONTROLLER_AUTHORIZATION_UNKNOWN");
-        }
-        return true;
-      } catch (cause) {
-        if (!disposed) {
-          connected.error = cause instanceof Error ? cause.message : "Locus could not authorize this Matrix device.";
-          setState(matrixAuthorizationFailureState(cause));
-        }
-        throw cause;
-      }
-    })();
-    controllerAuthorization = authorization;
-    try {
-      return await authorization;
-    } finally {
-      if (controllerAuthorization === authorization) controllerAuthorization = null;
-    }
-  }
-
-  async function refreshPublishedVerification(): Promise<boolean> {
-    if (disposed) return false;
-    if (matrixProofIsPublished(connected.keys)) return true;
-    let refreshed: MatrixDiscoveredKeys;
-    try {
-      refreshed = await queryMatrixKeys(
-        stored.userId,
-        stored.deviceId,
-        stored.homeserver,
-        stored.accessToken,
-        (input, init) => authenticatedFetch(stored, input, init),
-      );
-    } catch {
-      // Homeserver requests can be throttled while the browser resumes. Keep
-      // waiting and let the next poll or foreground event retry.
-      return false;
-    }
-    if (disposed) return false;
-    if (!sameBytes(refreshed.deviceEd25519Key, connected.keys.deviceEd25519Key)) {
-      connected.error = "无法确认这台设备，请重新登录。";
-      notify();
-      return true;
-    }
-    connected.keys = refreshed;
-    if (!matrixProofIsPublished(refreshed)) return false;
-    try { await authorizeVerifiedDevice(refreshed); }
-    catch { /* The proof is published; the dialog exposes a separate retry for Locus setup. */ }
-    return true;
-  }
-  unsubscribeCrypto = crypto.subscribeVerification((snapshot) => {
+  const requireRelogin = () => {
+    if (disposed || connected.state === "RELOGIN_REQUIRED") return;
+    const wasReady = connected.state === "READY";
+    connected.error = securityMessage;
+    setState("RELOGIN_REQUIRED");
+    trustMonitor?.dispose();
+    unsubscribeVerification();
+    unsubscribeSyncError();
+    crypto.dispose();
+    client.stopClient();
+    if (wasReady) for (const listener of securityListeners) listener(securityMessage);
+  };
+  const mapVerificationState = (snapshot: MatrixVerificationSnapshot | null): MatrixConnectionState => {
+    if (!snapshot || snapshot.phase === "cancelled") return "VERIFICATION_REQUIRED";
+    if (snapshot.phase === "sas-ready") return "VERIFICATION_SAS_READY";
+    if (snapshot.phase === "confirming" || snapshot.phase === "done") return "VERIFICATION_CONFIRMING";
+    return "VERIFICATION_REQUESTED";
+  };
+  function applyTrustSnapshot(snapshot: MatrixDeviceTrustSnapshot): void {
     if (disposed) return;
-    connected.verification = snapshot;
-    if (connected.state === "CONTROLLER_AUTHORIZING" || connected.state === "CONTROLLER_AUTHORIZATION_FAILED" || connected.state === "CONTROLLER_REVOKED") {
-      notify();
+    trustSnapshot = snapshot;
+    if (snapshot.state === "SESSION_INVALID" || snapshot.state === "IDENTITY_CHANGED" || snapshot.state === "DEVICE_REVOKED") {
+      requireRelogin();
+      return;
+    }
+    if (snapshot.state === "UNKNOWN") {
+      connected.error = "暂时无法确认设备状态，请重试。";
+      if (connected.state === "READY") notify();
+      else if (["CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) setState("CONTROLLER_AUTHORIZATION_UNKNOWN");
+      else if (isVerificationInteraction()) notify();
+      else setState("TRUST_UNKNOWN");
+      return;
+    }
+    if (snapshot.state === "UNVERIFIED") {
+      connected.error = connected.state === "READY" ? securityMessage : "";
+      if (connected.state === "READY") {
+        requireRelogin();
+        return;
+      }
+      setState(mapVerificationState(connected.verification));
       return;
     }
     connected.error = "";
-    if (connected.keys.verification !== "verified") {
-      if (!snapshot) setState("VERIFICATION_REQUIRED");
-      else if (snapshot.phase === "sas-ready") setState("VERIFICATION_SAS_READY");
-      else if (snapshot.phase === "confirming" || snapshot.phase === "done") setState("VERIFICATION_CONFIRMING");
-      else if (snapshot.phase === "cancelled") setState("VERIFICATION_REQUIRED");
-      else setState("VERIFICATION_REQUESTED");
-      if (snapshot?.phase === "done") void connected.refreshVerification();
-    } else notify();
-    notify();
+    if (connected.state !== "READY") void finalizeVerifiedDevice();
+    else notify();
+  }
+  async function readAndApplyTrust(): Promise<MatrixDeviceTrustSnapshot> {
+    if (disposed) return { state: "UNKNOWN", reason: "attempt-disposed" };
+    const snapshot = await crypto.refreshDeviceTrust(authenticatedHttp(stored.homeserver, stored));
+    if (!disposed) applyTrustSnapshot(snapshot);
+    return snapshot;
+  }
+  async function finalizeVerifiedDevice(): Promise<void> {
+    if (disposed || trustSnapshot.state !== "VERIFIED") return;
+    if (authorizationTask) {
+      finalizationQueued = true;
+      return authorizationTask;
+    }
+    const task = Promise.resolve().then(async () => {
+      const context = attemptId;
+      connected.error = "";
+      if (!locus) {
+        finalizationPaused = true;
+        connected.error = "Locus 服务暂时不可用，请重试。";
+        setState("CONTROLLER_AUTHORIZATION_FAILED");
+        return;
+      }
+      setState("VERIFIED");
+      setState("CONTROLLER_AUTHORIZING");
+      try {
+        const refreshed = await retryMatrixProofPreparation(async () => {
+          const discovered = await queryMatrixKeys(
+            stored.userId,
+            stored.deviceId,
+            stored.homeserver,
+            stored.accessToken,
+            (input, init) => authenticatedFetch(stored, input, init),
+          );
+          if (!sameBytes(discovered.masterPublicKey, keys.masterPublicKey)) {
+            throw new MatrixConnectorError("MATRIX_IDENTITY_CHANGED", "The Matrix cross-signing identity changed during sign-in.");
+          }
+          if (!sameBytes(discovered.deviceEd25519Key, keys.deviceEd25519Key)) {
+            throw new MatrixConnectorError("MATRIX_DEVICE_REVOKED", "The Matrix device key changed during sign-in.");
+          }
+          if (!discovered.encodedProof) throw missingMatrixProof();
+          return discovered;
+        });
+        if (disposed || context !== attemptId || trustSnapshot.state !== "VERIFIED") return;
+        connected.keys = refreshed;
+        const ready = await ensureMatrixController(locus, owner, controller, refreshed, stored.deviceId, setState);
+        if (disposed || context !== attemptId) return;
+        if (!ready) {
+          finalizationPaused = true;
+          connected.error = "暂时无法确认登录状态，请重试。";
+          setState("CONTROLLER_AUTHORIZATION_UNKNOWN");
+          return;
+        }
+        const revisionBeforeFinalTrust = trustRevision;
+        const finalTrust = await connected.refreshDeviceTrust();
+        if (disposed || context !== attemptId) return;
+        if (revisionBeforeFinalTrust !== trustRevision) {
+          finalizationQueued = true;
+          void trustMonitor?.refreshNow();
+          return;
+        }
+        trustSnapshot = finalTrust;
+        if (finalTrust.state !== "VERIFIED") {
+          applyTrustSnapshot(finalTrust);
+          return;
+        }
+        connected.error = "";
+        setState("READY");
+      } catch (cause) {
+        if (disposed || context !== attemptId) return;
+        const failureClass = classifyMatrixProofFailure(cause);
+        if (failureClass === "INVALID" || failureClass === "SESSION_INVALID" || failureClass === "RELOGIN_REQUIRED") {
+          requireRelogin();
+          return;
+        }
+        finalizationPaused = true;
+        connected.error = "暂时无法完成登录，请重试。";
+        setState(matrixAuthorizationFailureState(cause));
+      }
+    });
+    authorizationTask = task;
+    try { await task; }
+    finally {
+      if (authorizationTask === task) authorizationTask = null;
+      const rerun = finalizationQueued;
+      finalizationQueued = false;
+      if (rerun && !disposed && !finalizationPaused && connected.state !== "READY" && trustSnapshot.state === "VERIFIED") {
+        void finalizeVerifiedDevice();
+      }
+    }
+  }
+
+  unsubscribeSyncError = crypto.subscribeSyncError((cause) => {
+    if (disposed) return;
+    if (cause instanceof MatrixConnectorError && cause.code === "MATRIX_SESSION_INVALID") {
+      requireRelogin();
+      return;
+    }
+    if (connected.state === "READY") { notify(); return; }
+    if (["CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) return;
+    connected.error = "暂时无法确认设备状态，请重试。";
+    if (isVerificationInteraction()) notify();
+    else setState("TRUST_UNKNOWN");
+  });
+  unsubscribeVerification = crypto.subscribeVerification((snapshot) => {
+    if (disposed) return;
+    connected.verification = snapshot;
+    if (["READY", "RELOGIN_REQUIRED", "CONTROLLER_AUTHORIZING", "CONTROLLER_AUTHORIZATION_QUEUED", "CONTROLLER_AUTHORIZATION_FINALIZING"].includes(connected.state)) {
+      notify();
+      return;
+    }
+    if (trustSnapshot.state === "UNVERIFIED") setState(mapVerificationState(snapshot));
+    else notify();
+    if (snapshot?.phase === "done" || snapshot?.phase === "cancelled") void trustMonitor?.refreshNow();
   });
   options.onState?.(initialState);
-  if (keys.verification === "verified" && locus) {
-    void authorizeVerifiedDevice(keys).catch(() => {});
-  }
-  if (keys.verification !== "verified") {
-    verificationMonitor = createMatrixVerificationMonitor(refreshPublishedVerification);
-  }
+  trustMonitor = createMatrixDeviceTrustMonitor(readAndApplyTrust, {
+    subscribeToChanges: (listener) => crypto.subscribeTrustChanges(() => {
+      trustRevision += 1;
+      listener();
+    }),
+  });
   return connected;
 }
 

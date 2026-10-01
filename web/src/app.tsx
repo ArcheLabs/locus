@@ -90,6 +90,10 @@ function activityAmount(amount: string, asset: string): string {
 }
 
 function matrixRestoreMessage(connected: MatrixConnected): string {
+  if (connected.state === "TRUST_CHECKING" || connected.state === "AUTHENTICATED" || connected.state === "DEVICE_KEYS_READY") {
+    return "正在检查 Matrix 设备状态。";
+  }
+  if (connected.state === "TRUST_UNKNOWN") return "暂时无法确认设备状态，请重试。";
   if (connected.state === "CONTROLLER_AUTHORIZATION_QUEUED") {
     return "设备已确认，正在完成连接。";
   }
@@ -102,7 +106,7 @@ function matrixRestoreMessage(connected: MatrixConnected): string {
   if (connected.state === "CONTROLLER_AUTHORIZATION_FAILED") {
     return "暂时无法完成连接，请稍后重试。";
   }
-  if (connected.state === "CONTROLLER_REVOKED") {
+  if (connected.state === "CONTROLLER_REVOKED" || connected.state === "RELOGIN_REQUIRED") {
     return "这台设备已无法继续连接，请重新登录。";
   }
   return "请在 Element 中确认这台新设备。完成后返回 Locus，我们会自动继续。";
@@ -548,7 +552,13 @@ export function App() {
 
   useEffect(() => {
     if (!session) return;
-    if (session.kind === "matrix" || session.kind === "evm") return () => undefined;
+    if (session.kind === "matrix") {
+      return session.matrix?.subscribeSecurity?.((message) => {
+        notify(message);
+        clearSession();
+      });
+    }
+    if (session.kind === "evm") return () => undefined;
     return watchBrowserSession(session, (address) => {
       if (!address || address.toLowerCase() !== session.address.toLowerCase()) {
         clearSession();
