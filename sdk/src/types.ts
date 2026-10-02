@@ -3,15 +3,16 @@ import type {
   Ownership as JamOwnership,
   OwnershipSigner,
   PreparedOwnershipAction,
-  OwnershipPreparationPhase,
+  OwnershipPreparationPhase as JamOwnershipPreparationPhase,
   SignedOwnershipAction,
   SubmitActionResult,
-  TransactionStatusResult,
+  TransactionStatusResult as JamTransactionStatusResult,
   FinalizedContext,
   WaitForActionResult,
 } from "@jamscript/client";
 
-export type { PreparedOwnershipAction, SignedOwnershipAction, OwnershipPreparationPhase };
+export type { PreparedOwnershipAction, SignedOwnershipAction };
+export type OwnershipPreparationPhase = JamOwnershipPreparationPhase | "READING_BEST_CONTEXT" | "READING_FINALIZED_CONTEXT";
 
 export type Ownership = JamOwnership;
 export type AssetId = Uint8Array;
@@ -69,7 +70,16 @@ export interface ExactInQuote {
 
 export interface LocusQueryResult {
   value: LocusValue | null;
+  context?: FinalizedContext & { contextType?: "best" | "finalized" };
+  stateRoot?: string;
 }
+
+export type LocusTransactionStatusResult = Omit<JamTransactionStatusResult, "status"> & {
+  status: JamTransactionStatusResult["status"] | "reorged";
+  bestChainStatus?: "included" | "not_included" | "unknown";
+  bestContext?: FinalizedContext & { contextType: "best" };
+  finalized?: boolean;
+};
 
 export interface OwnershipSession {
   signer: OwnershipSigner;
@@ -86,11 +96,15 @@ export interface JamScriptLikeClient {
     options?: { ttl?: bigint; extrinsics?: Uint8Array[] },
   ): Promise<SubmitActionResult>;
   queryLatest(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
+  queryBest?(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
+  queryFinalized?(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
   waitForAction(
     transactionId: string,
     optionsOrActionHash?: { intervalMs?: number; timeoutMs?: number } | string,
     legacyOptions?: { intervalMs?: number; timeoutMs?: number },
   ): Promise<WaitForActionResult>;
+  waitForBest?(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }): Promise<LocusTransactionStatusResult>;
+  waitForFinalized?(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }): Promise<WaitForActionResult>;
   prepareOwnershipAction?(
     actionName: string,
     input: Record<string, CodecValue>,
@@ -100,8 +114,9 @@ export interface JamScriptLikeClient {
   signPreparedOwnershipAction?(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction>;
   abandonPreparedOwnershipAction?(prepared: PreparedOwnershipAction): void;
   submitSignedOwnershipAction?(signed: SignedOwnershipAction): Promise<SubmitActionResult>;
-  transactionStatus?(transactionId: string): Promise<TransactionStatusResult>;
+  transactionStatus?(transactionId: string): Promise<LocusTransactionStatusResult>;
   finalizedContext?(): Promise<FinalizedContext>;
+  bestContext?(): Promise<FinalizedContext & { contextType: "best" }>;
 }
 
 export type ActionReceipt = WaitForActionResult;

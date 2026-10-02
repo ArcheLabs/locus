@@ -179,7 +179,7 @@ test("SDK uses Ownership auth and canonical ownership keys", async () => {
       if (actionName === "transfer") model.transfer(alice, input.assetId, input.to, input.amount);
       return { transactionId: "0x1", status: "queued", actionHash: "0x2" };
     },
-    async queryLatest(name, queryKey) { return { value: model.query(name, queryKey) }; },
+    async queryBest(name, queryKey) { return { value: model.query(name, queryKey) }; },
     async waitForAction() { return { status: "applied" }; },
   };
   const signer = { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } };
@@ -196,7 +196,7 @@ test("SDK injects the stable subject and does not use actAs", async () => {
   const calls = [];
   const adapter = {
     async submitOwnershipAction(...args) { calls.push(args); return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
-    async queryLatest() { return { value: null }; },
+    async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
   };
   const controller = owner(51);
@@ -224,7 +224,7 @@ test("direct-owner session uses signer controller as subject and encodes through
       calls.push({ actionName, input, payload });
       return { transactionId: "0xencoded", status: "queued", actionHash: "0xhash" };
     },
-    async queryLatest() { return { value: null }; },
+    async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
   };
 
@@ -245,7 +245,7 @@ test("malformed JavaScript Ownership session rejects missing subject before subm
   };
   const adapter = {
     async submitOwnershipAction() { submissions += 1; return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
-    async queryLatest() { return { value: null }; },
+    async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
   };
 
@@ -262,7 +262,7 @@ test("SDK treats missing controller state as inactive", async () => {
   const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
   const adapter = {
     async submitOwnershipAction() { return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
-    async queryLatest() { return { value: null }; },
+    async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
   };
   const client = new LocusClient(adapter, { signer, subject });
@@ -277,7 +277,7 @@ test("SDK reports absent, active and revoked controller grant states", async () 
   const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
   const client = new LocusClient({
     async submitOwnershipAction() { return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
-    async queryLatest() { return { value: results.shift() ?? null }; },
+    async queryBest() { return { value: results.shift() ?? null }; },
     async waitForAction() { return { status: "applied" }; },
   }, { signer, subject });
   assert.equal(await client.getControllerStatus(subject, controller), "absent");
@@ -294,7 +294,7 @@ test("SDK submits the Matrix proof through the per-controller authorization acti
       calls.push({ actionName, input });
       return { transactionId: "0xauth", status: "queued", actionHash: "0xproof" };
     },
-    async queryLatest() { return { value: null }; },
+    async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
   }, { signer, subject: owner(79) });
   const proof = new Uint8Array([1, 2, 3]);
@@ -310,7 +310,7 @@ test("SDK surfaces mapped application errors", async () => {
       error.code = 2007;
       throw error;
     },
-    async queryLatest() { return { value: null }; },
+    async queryBest() { return { value: null }; },
     async waitForAction() { return {}; },
   }, { signer: { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } }, subject: alice });
   await assert.rejects(() => client.mint(assetId, bob, 1n), (error) => error instanceof LocusError && error.code === 2007);
