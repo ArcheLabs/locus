@@ -93,6 +93,7 @@ test("production network config defaults to TestNet without pointing at Local se
   assert.equal(config.networks.local.deploymentUrl, null);
   assert.equal("matrixResolverUrl" in config.networks.local, false);
   assert.equal(config.networks.testnet.backendUrl, "https://rpc-stage1.minijam.xyz/rpc");
+  assert.equal(config.networks.testnet.matrixResolverUrl, "https://rpc-stage1.minijam.xyz/matrix-resolver");
   assert.equal(config.networks.testnet.deploymentUrl, "deployments/testnet.json");
   assert.equal(config.networks.testnet.label, "MiniJAM TestNet");
 });

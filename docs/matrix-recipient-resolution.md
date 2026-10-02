@@ -126,13 +126,17 @@ After the AS registration exists, the protected live probe is
 markers and never prints the token or returned key.
 
 The existing Local deployment has passed these gates for
-`@libingjiang:matrix.org`. TestNet remains unconfigured until the new
-homeserver's federation, Application Service, remote-key, and ownership
-checks all pass. If the DNS, protected token file,
-or controlled remote Matrix test account is missing in another environment,
-leave `matrixResolverUrl` unset and do not deploy a frontend that advertises
-Matrix recipient resolution. No ordinary Matrix access token is an acceptable
-fallback.
+`@libingjiang:matrix.org`. The Stage-1 resolver is deployed at
+`https://rpc-stage1.minijam.xyz/matrix-resolver`; the TestNet frontend must use
+that endpoint rather than a path on `locus.minijam.xyz`. On 2026-10-02,
+`/healthz` and `/readyz` returned ready, and the browser-origin CORS preflight
+was allowed. A room-membership dry run resolved 574 of 588 members; 13 lacked a
+published cross-signing master key and one lookup returned a homeserver error.
+The all-member airdrop must remain blocked until every member resolves. If the
+DNS, protected token file, or controlled remote Matrix test account is missing
+in another environment, leave `matrixResolverUrl` unset and do not deploy a
+frontend that advertises Matrix recipient resolution. No ordinary Matrix
+access token is an acceptable resolver credential.
 
 ## Verification
 
