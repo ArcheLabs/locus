@@ -68,6 +68,7 @@ html[data-theme="dark"] {
   border-right-color: var(--border, var(--identity-menu-border));
   color: var(--text, var(--identity-menu-text));
 }
+.type-button:not(:disabled) { cursor: pointer; }
 .recipient-control input {
   background: var(--surface, var(--identity-menu-surface));
   color: var(--text, var(--identity-menu-text));
@@ -98,10 +99,10 @@ html[data-theme="dark"] {
   font: inherit;
 }
 
-button.identity-option-row { cursor: pointer; }
+.identity-option-row:not([data-disabled]):not(:disabled) { cursor: pointer; }
 .identity-option-row--comfortable { min-height: 80px; padding: 12px; border-radius: 12px; }
 .identity-option-row--compact { min-height: 62px; padding: 8px 12px; border-color: transparent; }
-.identity-option-row:disabled { cursor: not-allowed; }
+.identity-option-row[data-disabled], .identity-option-row:disabled { cursor: not-allowed; }
 
 .identity-option-copy { display: grid; gap: 2px; min-width: 0; }
 .identity-option-copy strong { color: var(--text, var(--identity-menu-text)); font-size: 15px; font-weight: 650; line-height: 1.25; }
