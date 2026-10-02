@@ -70,7 +70,7 @@ test("mock Wallet Standard Solana signer returns ED25519 Ownership", async () =>
 test("Matrix controller authorization restoration checks the saved transaction before permitting a replacement", () => {
   const restorePending = matrixConnectorSource.indexOf("const pendingRecord = pendingMatrixControllerAuthorizationFor(");
   const intentWrite = matrixConnectorSource.indexOf("saveMatrixAuthorizationIntent({", restorePending);
-  const freshSubmission = matrixConnectorSource.indexOf("submitted = await scoped.authorizeMatrixController(proof);", intentWrite);
+  const freshSubmission = matrixConnectorSource.indexOf("submitted = await scoped.authorizeMatrixController(proof,", intentWrite);
   assert.ok(restorePending >= 0 && freshSubmission > restorePending);
   assert.ok(intentWrite > restorePending && freshSubmission > intentWrite);
   assert.match(matrixConnectorSource, /if \(pendingRecord\) \{[\s\S]*?await settlePending\(pendingRecord\)/);
@@ -80,7 +80,7 @@ test("Matrix controller authorization restoration checks the saved transaction b
   assert.doesNotMatch(matrixConnectorSource, /matrixBootstrapUsed|hasMatrixBootstrapCompleted|bootstrapMatrixController/);
   assert.doesNotMatch(matrixDialogSource, /Existing device approval required|Authorize Matrix device|Copy controller ID|Ask that device to authorize/);
   assert.doesNotMatch(accountMenuSource, /Authorize Matrix device|AuthorizeMatrixControllerDialog/);
-  assert.match(matrixConnectorSource, /getControllerStatus\(subject, controllerOwnership\)/);
+  assert.match(matrixConnectorSource, /getControllerStatusFinalized\(subject, controllerOwnership\)/);
   assert.match(matrixConnectorSource, /status === "revoked"[\s\S]*?CONTROLLER_REVOKED/);
   assert.match(matrixConnectorSource, /status === "active"[\s\S]*?removePendingMatrixControllerAuthorization[\s\S]*?return true/);
   assert.match(matrixDialogSource, /t\("ui\.signInAgain"\)/);

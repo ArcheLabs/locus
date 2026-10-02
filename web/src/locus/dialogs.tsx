@@ -11,6 +11,7 @@ import { IdentityIcon } from "../components/IdentityIcon.js";
 import { ConfirmationAssetList } from "../components/ConfirmationAssetList.js";
 import { useI18n, type TranslationKey } from "../i18n/I18nProvider.js";
 import { useGlobalNotify } from "../components/GlobalNotificationContext.js";
+import { createPendingOperationTracker, type PendingOperationTracker } from "./pendingOperations.js";
 import {
   createAssetPendingKey,
   OperationTimeoutError,
@@ -226,7 +227,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
     }
   }
 
-  async function resumePending(record: CreateAssetPendingRecord) {
+  async function resumePending(record: CreateAssetPendingRecord, tracking?: PendingOperationTracker) {
     if (!locus || record.state !== "submitted" || !record.transactionId || !record.actionHash) return;
     if (activeResumeKeys.current.has(record.key)) return;
     activeResumeKeys.current.add(record.key);
@@ -234,18 +235,21 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
     setStageMessage({ key: "ui.assetStage.checkingSaved", params: { transactionId: record.transactionId } });
     setError("");
     try {
-      const best = await locus.waitForBest(record.transactionId, { intervalMs: 1_000, timeoutMs: CREATE_ASSET_FINALIZATION_TIMEOUT_MS });
-      if (best.status === "reorged") throw new Error("TRANSACTION_REORGED");
-      if (best.status === "failed") throw new Error(best.error ?? "Create asset failed before best-chain inclusion.");
-      if (best.bestChainStatus === "included" && best.finalized !== true) {
-        setStageMessage("The asset is visible in the best chain and may still be reverted until finalization. A dependent Service action waits for finalized state under Formal.");
-        onCreated();
-      }
       const result = await resumeCreateAssetFinalization(
         record,
-        (transactionId, actionHash) => locus.waitForActionByHash(transactionId, actionHash, { intervalMs: 1_000, timeoutMs: CREATE_ASSET_FINALIZATION_TIMEOUT_MS }),
+        (transactionId, actionHash) => locus.waitForFinalized(transactionId, {
+          actionHash,
+          intervalMs: 1_000,
+          timeoutMs: CREATE_ASSET_FINALIZATION_TIMEOUT_MS,
+          onUpdate: (update) => {
+            tracking?.onUpdate(update);
+            if (update.status.status === "reorged") setStageMessage("The chain changed. Checking this saved asset action again.");
+            else if (update.confirmation === "best") setStageMessage("The asset is visible in the current chain. Waiting for final confirmation.");
+          },
+        }),
         CREATE_ASSET_FINALIZATION_TIMEOUT_MS,
       );
+      tracking?.onFinalized(result);
       if (result.actionReceipt.status !== "applied") {
         removeCreateAssetPending(window.localStorage, record.key);
         updatePending(null);
@@ -259,6 +263,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
       resetDraft();
       onCreated();
     } catch (cause) {
+      tracking?.onSubmissionUnknown(cause);
       const message = cause instanceof Error ? cause.message : "Unable to check the saved create-asset transaction.";
       setStage("FAILED");
       setStageMessage(message.includes("TRANSACTION_REORGED")
@@ -387,13 +392,9 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
       const asset = await locus.getAssetFinalized(assetId);
       const expectedSupply = parseUnits(record.initialSupply, record.decimals);
       if (asset && asset.totalSupply === expectedSupply) {
-        removeCreateAssetPending(window.localStorage, record.key);
-        updatePending(null);
-        appliedRef.current = true;
-        setStage("APPLIED");
-        setStageMessage("The asset is present on-chain. The create action was applied.");
-        resetDraft();
-        onCreated();
+        setStage("FAILED");
+        setStageMessage("A matching asset is visible in finalized state, but this request has no transaction receipt to identify it. The recovery record is kept; do not submit this action again automatically.");
+        setError("The asset state cannot prove which transaction created it.");
       } else {
         setStage("FAILED");
         setStageMessage("The asset is not visible at the latest state. The timed-out submission remains unresolved; do not repeat it automatically.");
@@ -423,18 +424,32 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
       return;
     }
     const preparedAction = preparedRef.current;
+    const subject = locus.session?.subject ?? session?.owner;
+    if (!subject) return;
+    const tracking = createPendingOperationTracker(
+      locus,
+      networkId,
+      subject,
+      "create-asset",
+    );
     preparedRef.current = null;
     setPrepared(null);
     setError("");
     setStage("AWAITING_WALLET");
     setStageMessage("Waiting for your wallet. Return to Locus after approving or rejecting the signature.");
     let signatureReceived = false;
+    let submissionStarted = false;
     try {
       // This direct call is the first external interaction in the click
       // handler. Preparation and every state read have already completed.
       const signaturePromise = locus.signPreparedOwnershipAction(preparedAction);
       const signed = await waitForWalletSignature(signaturePromise, WALLET_SIGNATURE_TIMEOUT_MS);
       signatureReceived = true;
+      await tracking.submissionOptions.onSigned?.({
+        actionHash: signed.actionHash,
+        submittedSlot: signed.submittedSlot,
+        validUntil: signed.validUntil,
+      });
       setStage("SIGNED");
       setStageMessage("Wallet signature received. Submitting the signed action once.");
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
@@ -458,13 +473,15 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
 
       let submissionTimedOut = false;
+      submissionStarted = true;
       const submissionPromise = submitCreateAssetOnce(
         recordBase,
         window.localStorage,
         () => locus.submitSignedOwnershipAction(signed),
         (unknownRecord) => updatePending(unknownRecord),
         async (submittedRecord, submitted) => {
-        updatePending(submittedRecord);
+          tracking.onSubmitted(submitted);
+          updatePending(submittedRecord);
         setStage("SUBMITTED");
         setStageMessage({ key: "ui.assetStage.transactionSaved", params: { transactionId: submitted.transactionId } });
         if (submissionTimedOut) void resumePending(submittedRecord);
@@ -485,7 +502,11 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
           setError("Check the asset state or wait for a delayed submission response before dismissing this recovery record.");
           return;
         }
-        if (cause && typeof cause === "object" && (cause as { name?: unknown }).name === "RpcError") {
+        const rpcCode = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
+        const definiteRejection = cause && typeof cause === "object"
+          && (cause as { name?: unknown }).name === "RpcError"
+          && (typeof rpcCode === "number" && (rpcCode < 0 || [400, 401, 403, 404, 422].includes(rpcCode)));
+        if (definiteRejection) {
           removeCreateAssetPending(window.localStorage, recordBase.key);
           updatePending(null);
           throw new Error(`The backend rejected the submission before returning a transaction ID. The action was not submitted. ${cause instanceof Error ? cause.message : ""}`);
@@ -495,8 +516,10 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
 
       setStage("SUBMITTED");
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-      await resumePending(submittedRecord);
+      await resumePending(submittedRecord, tracking);
     } catch (cause) {
+      if (submissionStarted) tracking.onSubmissionUnknown(cause);
+      else tracking.onNotSubmitted(cause);
       if (!signatureReceived) locus?.abandonPreparedOwnershipAction(preparedAction);
       const message = cause instanceof Error ? cause.message : "Unable to create asset.";
       const errorPending = pendingRef.current as CreateAssetPendingRecord | null;

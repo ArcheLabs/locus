@@ -15,9 +15,10 @@ import type { LiquidityScope } from "./liquidityTypes.js";
 import { useI18n } from "../../i18n/I18nProvider.js";
 import { AssetBalanceStatus } from "../../components/AssetBalanceStatus.js";
 import "./permissionlessLiquidity.css";
+import { createPendingOperationTracker, currentOperationScope, unresolvedOperationsForScope } from "../pendingOperations.js";
 
 type Operation = "create" | "initialize" | "add" | "remove";
-type PendingAction = { transactionId: string; action: string; networkId: string; serviceId: number; ownerKey: string; createdAt: number; phase?: "pending" | "best-included" | "reorged" };
+type PendingAction = { transactionId: string; action: string; networkId: string; serviceId: number; ownerKey: string; createdAt: number; actionHash?: string; operationId?: string; phase?: "pending" | "best-included" | "reorged" | "finalized-receipt-pending" };
 type PairPoolState = { key: string; pool: Pool | null; loading: boolean; error: string };
 type LiquidityReview =
   | { operation: Exclude<Operation, "remove">; scope: LiquidityScope; assetA: AssetView; assetB: AssetView; amountA: string; amountB: string }
@@ -60,6 +61,9 @@ function friendlyError(cause: unknown): string {
 
 function preReceiptFailure(cause: unknown, transactionId: string): string | null {
   if (!cause || typeof cause !== "object") return null;
+  if ((cause as { code?: unknown }).code === "WORK_FAILED") {
+    return cause instanceof Error ? cause.message : "The service rejected the transaction before producing an action receipt.";
+  }
   const rpcError = cause as { code?: unknown; data?: unknown };
   if (rpcError.code !== -32040 || !rpcError.data || typeof rpcError.data !== "object") return null;
   const transaction = rpcError.data as { transactionId?: unknown; status?: unknown; error?: unknown };
@@ -140,6 +144,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   const transactionNoticeId = `liquidity-${storageKey}`;
   const pendingScopeReady = networkReady && sessionOwner !== null && serviceId !== null;
   const [pending, setPending] = useState<PendingAction | null>(() => pendingScopeReady ? readPending(storageKey) : null);
+  const [submissionUnknown, setSubmissionUnknown] = useState(false);
   const pendingMatchesScope = !!pending && pending.networkId === networkId && pending.serviceId === serviceId && pending.ownerKey === ownerKey;
   const previousTransactionNoticeId = useRef(transactionNoticeId);
   const selectedA = assets.find((asset) => asset.assetIdHex === assetAId) ?? null;
@@ -155,7 +160,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }, [additionalPools, pools]);
   const poolEmpty = !!selectedPool && selectedPool.totalShares === 0n;
   const operation: Exclude<Operation, "remove"> = !selectedPool ? "create" : poolEmpty ? "initialize" : "add";
-  const busyOrPending = busy || !!pending;
+  const busyOrPending = busy || !!pending || submissionUnknown;
   const formLocked = busyOrPending || !!review;
   const removalPosition = review?.operation === "remove" ? review.position ?? null : null;
   const isScopeCurrentRef = useRef(isScopeCurrent);
@@ -217,6 +222,17 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     setPending(pendingScopeReady ? readPending(storageKey) : null);
     setTransactionId("");
   }, [pendingScopeReady, storageKey]);
+
+  useEffect(() => {
+    if (!locus || !sessionOwner || !pendingScopeReady) {
+      setSubmissionUnknown(false);
+      return;
+    }
+    const subject = locus.session?.subject ?? sessionOwner;
+    const unresolved = unresolvedOperationsForScope(window.localStorage, currentOperationScope(locus, networkId, subject))
+      .some((operation) => operation.operationType.startsWith("liquidity-") && !operation.transactionId);
+    setSubmissionUnknown(unresolved);
+  }, [locus, networkId, pendingScopeReady, sessionOwner]);
 
   useEffect(() => {
     if (previousTransactionNoticeId.current !== transactionNoticeId) {
@@ -508,7 +524,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       : "Review the current pool and balance state before another attempt.";
     const message = `The transaction failed before an action receipt was created (${reason}). No liquidity action was applied. ${refreshed ? "Pool state and balances were refreshed." : "The automatic state refresh failed; refresh the page before continuing."} ${followUp}`;
     setError(message);
-    showLiquidityFailureNotice(id, message);
+    showLiquidityFailureNotice(id, message, saved?.operationId ? `operation-${saved.operationId}` : transactionNoticeId);
     return true;
   }
 
@@ -541,26 +557,29 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     setTransactionId(id);
     const message = `Transaction finalized as ${status}${errorCode === null ? "" : ` (error ${errorCode})`}. The liquidity action was not applied; review the current state before trying again.`;
     setError(message);
-    showLiquidityFailureNotice(id, message);
+    showLiquidityFailureNotice(id, message, saved?.operationId ? `operation-${saved.operationId}` : transactionNoticeId);
     setPairRefreshRevision((revision) => revision + 1);
   }
 
-  function showPendingNotice(current: PendingAction, checking: boolean, phase: "pending" | "best-included" = "pending") {
-    const resolvedPhase = current.phase ?? phase;
+  function showPendingNotice(current: PendingAction, checking: boolean, phase: "pending" | "best-included" | "finalized-receipt-pending" = "pending") {
+    const resolvedPhase = phase !== "pending" ? phase : current.phase ?? phase;
     onTransactionNotice({
-      id: transactionNoticeId,
-      title: checking ? "Checking liquidity transaction"
-        : resolvedPhase === "reorged" ? `${current.action} needs reconciliation`
-          : resolvedPhase === "best-included" ? `${current.action} included in the best chain` : `${current.action} pending`,
+      id: current.operationId ? `operation-${current.operationId}` : transactionNoticeId,
+      title: checking ? t("lifecycle.checkingSaved")
+        : resolvedPhase === "reorged" ? `${current.action} · ${t("lifecycle.reorged")}`
+        : resolvedPhase === "best-included" ? `${current.action} · ${t("lifecycle.bestIncluded")}`
+          : resolvedPhase === "finalized-receipt-pending" ? `${current.action} · ${t("lifecycle.finalizedReceiptPending")}`
+            : `${current.action} · ${t("lifecycle.accepted")}`,
       message: resolvedPhase === "reorged"
-        ? "The action was previously visible in the best chain but is no longer there. It may still be queued or included again; check its status before retrying."
+        ? t("lifecycle.reorged")
         : resolvedPhase === "best-included"
-          ? "The action is visible in the current chain and can still be reverted until finalized. A follow-up pool action waits because Formal builds the next Service Work from finalized state."
-        : checking ? "Waiting for confirmation." : "The transaction is saved. Check its status before signing another liquidity action.",
+          ? t("lifecycle.bestIncluded")
+          : resolvedPhase === "finalized-receipt-pending"
+            ? t("lifecycle.finalizedReceiptPending")
+        : checking ? t("lifecycle.checkingSaved") : t("lifecycle.timeout"),
       transactionId: current.transactionId,
-      tone: resolvedPhase === "reorged" ? "error" : undefined,
       busy: checking,
-      actionLabel: "Check status",
+      actionLabel: t("auth.checkStatus"),
       onAction: () => void waitForPending(current),
       dismissible: true,
     });
@@ -573,9 +592,9 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     return updated;
   }
 
-  function showLiquidityFailureNotice(id: string, message = error) {
+  function showLiquidityFailureNotice(id: string, message = error, noticeId = transactionNoticeId) {
     onTransactionNotice({
-      id: transactionNoticeId,
+      id: noticeId,
       title: "Liquidity action failed",
       message: message || "The action was not applied. Review the current pool and balances before retrying.",
       transactionId: id,
@@ -603,22 +622,27 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   async function waitForPending(current: PendingAction, expectedScope = scope) {
     if (!locus || busy || !isScopeCurrent(expectedScope)) return;
     setBusy(true); setError("");
+    let refreshedBest = false;
     try {
-      const best = await locus.waitForBest(current.transactionId, { intervalMs: 750, timeoutMs: 180_000 });
-      if (!isScopeCurrent(expectedScope)) return;
-      if (best.status === "reorged") {
-        const reconciliation = savePendingPhase(current, "reorged");
-        showPendingNotice(reconciliation, false);
-        setError("This transaction was removed from the best chain. Check its status before retrying.");
-        return;
-      }
-      if (best.status === "failed") throw new Error(best.error ?? "Liquidity action failed before best-chain inclusion.");
-      if (best.bestChainStatus === "included" && best.finalized !== true) {
-        const included = savePendingPhase(current, "best-included");
-        showPendingNotice(included, false);
-        await refreshAfterApplied(expectedScope);
-      }
-      const receipt = await locus.waitForAction(current.transactionId, { intervalMs: 750, timeoutMs: 180_000 });
+      const receipt = await locus.waitForFinalized(current.transactionId, {
+        ...(current.actionHash ? { actionHash: current.actionHash } : {}),
+        intervalMs: 750,
+        timeoutMs: 180_000,
+        onUpdate: (update) => {
+          if (!isScopeCurrent(expectedScope)) return;
+          if (update.status.status === "reorged") {
+            showPendingNotice(savePendingPhase(current, "reorged"), true);
+          } else if (update.confirmation === "best") {
+            showPendingNotice(savePendingPhase(current, "best-included"), true);
+            if (!refreshedBest) {
+              refreshedBest = true;
+              void refreshAfterApplied(expectedScope);
+            }
+          } else if (update.confirmation === "finalized" && !update.actionResult) {
+            showPendingNotice(current, true, "finalized-receipt-pending");
+          }
+        },
+      });
       if (!isScopeCurrent(expectedScope)) return;
       if (receipt.actionReceipt.status !== "applied") {
         clearFinalizedFailure(current.transactionId, receipt.actionReceipt.status, receipt.actionReceipt.errorCode);
@@ -648,6 +672,9 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       || !isScopeCurrentRef.current(review.scope)) return;
 
     const prepared = preparedActionRef.current;
+    const subject = locus.session?.subject ?? sessionOwner;
+    if (!subject) return;
+    const tracking = createPendingOperationTracker(locus, review.scope.networkId, subject, `liquidity-${review.operation}`);
     let signature: Promise<SignedOwnershipAction>;
     try {
       // No RPC or asynchronous state read may run before this call. It must
@@ -655,6 +682,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       signature = locus.signPreparedOwnershipAction(prepared);
     } catch (cause) {
       locus.abandonPreparedOwnershipAction(prepared);
+      tracking.onSubmissionUnknown(cause);
       closeReview();
       setError(friendlyError(cause));
       return;
@@ -665,12 +693,21 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     setPreparingAction(false);
     setBusy(true);
     setError("");
-    void finishConfirmedAction(review, prepared, signature);
+    void finishConfirmedAction(review, prepared, signature, tracking);
   }
 
-  async function finishConfirmedAction(request: LiquidityReview, prepared: PreparedOwnershipAction, signature: Promise<SignedOwnershipAction>) {
-    if (!locus) return;
+  async function finishConfirmedAction(
+    request: LiquidityReview,
+    prepared: PreparedOwnershipAction,
+    signature: Promise<SignedOwnershipAction>,
+    tracking: ReturnType<typeof createPendingOperationTracker>,
+  ) {
+    if (!locus) {
+      tracking.onNotSubmitted(new Error("The active Locus session was closed before submission."));
+      return;
+    }
     let signatureReceived = false;
+    let submissionAttempted = false;
     let submittedId = "";
     try {
       const signed = await waitForWalletSignature(signature, WALLET_SIGNATURE_TIMEOUT_MS);
@@ -678,11 +715,17 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       if (!isScopeCurrentRef.current(request.scope)) throw new Error("The active Ownership or network changed. Check the action before continuing.");
       if (!canPerformAuthorizedAction()) {
         closeReview();
-        setError(`${authorizationWaitMessage || "正在准备账户，请稍候。"} No transaction was submitted.`);
+        const message = `${authorizationWaitMessage || "正在准备账户，请稍候。"} No transaction was submitted.`;
+        tracking.onNotSubmitted(new Error(message));
+        setError(message);
         return;
       }
-      const submitted = await locus.submitSignedOwnershipAction(signed);
+      submissionAttempted = true;
+      const submitted = await locus.submitSignedOwnershipAction(signed, {
+        onSigned: async (info) => { await tracking.submissionOptions.onSigned?.(info); },
+      });
       submittedId = submitted.transactionId;
+      tracking.onSubmitted(submitted);
       const saved: PendingAction = {
         transactionId: submittedId,
         action: operationLabel(request.operation),
@@ -690,27 +733,36 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         serviceId: request.scope.serviceId!,
         ownerKey: request.scope.ownerKey!,
         createdAt: Date.now(),
+        actionHash: submitted.actionHash,
+        operationId: tracking.operation.operationId,
         phase: "pending",
       };
       setPending(saved); setTransactionId(submittedId);
       try { window.localStorage.setItem(pendingStorageKey(request.scope), JSON.stringify(saved)); } catch { /* Keep the in-memory pending guard if this browser blocks local storage. */ }
       closeReview();
 
-      const best = await locus.waitForBest(submittedId, { intervalMs: 750, timeoutMs: 180_000 });
-      if (!isScopeCurrentRef.current(request.scope)) return;
-      if (best.status === "reorged") {
-        const reconciliation = savePendingPhase(saved, "reorged");
-        showPendingNotice(reconciliation, false);
-        setError("This transaction was removed from the best chain. Check its status before retrying.");
-        return;
-      }
-      if (best.status === "failed") throw new Error(best.error ?? "Liquidity action failed before best-chain inclusion.");
-      if (best.bestChainStatus === "included" && best.finalized !== true) {
-        const included = savePendingPhase(saved, "best-included");
-        showPendingNotice(included, false);
-        await refreshAfterApplied(request.scope);
-      }
-      const receipt = await locus.waitForAction(submittedId, { intervalMs: 750, timeoutMs: 180_000 });
+      let refreshedBest = false;
+      const receipt = await locus.waitForFinalized(submittedId, {
+        actionHash: submitted.actionHash,
+        intervalMs: 750,
+        timeoutMs: 180_000,
+        onUpdate: (update) => {
+          tracking.onUpdate(update);
+          if (!isScopeCurrentRef.current(request.scope)) return;
+          if (update.status.status === "reorged") {
+            showPendingNotice(savePendingPhase(saved, "reorged"), true);
+          } else if (update.confirmation === "best") {
+            showPendingNotice(savePendingPhase(saved, "best-included"), true);
+            if (!refreshedBest) {
+              refreshedBest = true;
+              void refreshAfterApplied(request.scope);
+            }
+          } else if (update.confirmation === "finalized" && !update.actionResult) {
+            showPendingNotice(saved, true, "finalized-receipt-pending");
+          }
+        },
+      });
+      tracking.onFinalized(receipt);
       if (!isScopeCurrentRef.current(request.scope)) return;
       if (receipt.actionReceipt.status !== "applied") {
         clearFinalizedFailure(submittedId, receipt.actionReceipt.status, receipt.actionReceipt.errorCode);
@@ -718,12 +770,20 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       }
       window.localStorage.removeItem(pendingStorageKey(request.scope));
       setPending(null); setTransactionId("");
-      onClearTransactionNotice(transactionNoticeId);
+      onTransactionNotice({
+        id: `operation-${tracking.operation.operationId}`,
+        title: operationLabel(request.operation),
+        message: t("lifecycle.finalizedApplied"),
+        transactionId: submittedId,
+        dismissible: true,
+      });
       if (request.operation !== "remove") { setAmountA(""); setAmountB(""); }
       await refreshAfterApplied(request.scope);
       setPairRefreshRevision((revision) => revision + 1);
       if (request.operation !== "remove") onActionSuccess(request.operation === "create" ? t("liquidity.poolCreated") : t("liquidity.liquidityAdded"));
     } catch (cause) {
+      if (submissionAttempted) tracking.onSubmissionUnknown(cause);
+      else tracking.onNotSubmitted(cause);
       if (!signatureReceived) locus.abandonPreparedOwnershipAction(prepared);
       if (!isScopeCurrentRef.current(request.scope)) return;
       if (submittedId && await clearPreReceiptFailure(submittedId, cause, request.scope)) return;
@@ -738,8 +798,22 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         serviceId: request.scope.serviceId!,
         ownerKey: request.scope.ownerKey!,
         createdAt: Date.now(),
+        actionHash: tracking.getCurrent()?.actionHash,
+        operationId: tracking.operation.operationId,
       }, false);
-      else setError(t("errors.submissionOutcomeUnknown", { reason: friendlyError(cause) }));
+      else {
+        const saved = tracking.getCurrent();
+        if (saved?.actionHash) {
+          setSubmissionUnknown(true);
+          onTransactionNotice({
+            id: `operation-${saved.operationId}`,
+            title: operationLabel(request.operation),
+            message: t("lifecycle.submissionUnknown"),
+            tone: "error",
+            dismissible: true,
+          });
+        } else setError(t("errors.submissionOutcomeUnknown", { reason: friendlyError(cause) }));
+      }
     } finally {
       setBusy(false);
     }

@@ -9,9 +9,15 @@ import type {
   TransactionStatusResult as JamTransactionStatusResult,
   FinalizedContext,
   WaitForActionResult,
+  TransactionTrackingOptions,
+  TransactionLifecycleUpdate,
+  SignedActionTrackingInfo,
+  PreparedActionTrackingInfo,
+  BackendCapabilitiesV1,
 } from "@jamscript/client";
 
 export type { PreparedOwnershipAction, SignedOwnershipAction };
+export type { TransactionTrackingOptions, TransactionLifecycleUpdate, SignedActionTrackingInfo, PreparedActionTrackingInfo };
 export type OwnershipPreparationPhase = JamOwnershipPreparationPhase | "READING_BEST_CONTEXT" | "READING_FINALIZED_CONTEXT";
 
 export type Ownership = JamOwnership;
@@ -89,34 +95,48 @@ export interface OwnershipSession {
 
 /** The subset implemented by the published @jamscript/client package. */
 export interface JamScriptLikeClient {
+  assertTransactionLifecycleSupport(): Promise<BackendCapabilitiesV1>;
+  transactionScope(): { genesisHash: string; networkDomain: string; serviceId: number; serviceKey: string; codeHash: string };
   submitOwnershipAction(
     actionName: string,
     input: Record<string, CodecValue>,
     signer: OwnershipSigner,
-    options?: { ttl?: bigint; extrinsics?: Uint8Array[] },
+    options?: {
+      ttl?: bigint;
+      extrinsics?: Uint8Array[];
+      onPrepared?: (info: PreparedActionTrackingInfo) => void | Promise<void>;
+      onSigned?: (info: SignedActionTrackingInfo) => void | Promise<void>;
+    },
   ): Promise<SubmitActionResult>;
   queryLatest(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
-  queryBest?(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
-  queryFinalized?(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
+  queryBest(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
+  queryFinalized(queryName: string, key?: CodecValue): Promise<LocusQueryResult>;
   waitForAction(
     transactionId: string,
-    optionsOrActionHash?: { intervalMs?: number; timeoutMs?: number } | string,
-    legacyOptions?: { intervalMs?: number; timeoutMs?: number },
+    optionsOrActionHash?: TransactionTrackingOptions | string,
+    legacyOptions?: TransactionTrackingOptions,
   ): Promise<WaitForActionResult>;
-  waitForBest?(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }): Promise<LocusTransactionStatusResult>;
-  waitForFinalized?(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }): Promise<WaitForActionResult>;
-  prepareOwnershipAction?(
+  waitForBest(transactionId: string, options?: TransactionTrackingOptions): Promise<LocusTransactionStatusResult>;
+  waitForFinalized(transactionId: string, options?: TransactionTrackingOptions): Promise<WaitForActionResult>;
+  watchTransaction(transactionId: string, options?: TransactionTrackingOptions): Promise<WaitForActionResult>;
+  prepareOwnershipAction(
     actionName: string,
     input: Record<string, CodecValue>,
     signer: OwnershipSigner,
     options?: { actAs?: JamOwnership; ttl?: bigint; extrinsics?: Uint8Array[]; onProgress?: (phase: OwnershipPreparationPhase) => void },
   ): Promise<PreparedOwnershipAction>;
-  signPreparedOwnershipAction?(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction>;
-  abandonPreparedOwnershipAction?(prepared: PreparedOwnershipAction): void;
-  submitSignedOwnershipAction?(signed: SignedOwnershipAction): Promise<SubmitActionResult>;
-  transactionStatus?(transactionId: string): Promise<LocusTransactionStatusResult>;
-  finalizedContext?(): Promise<FinalizedContext>;
-  bestContext?(): Promise<FinalizedContext & { contextType: "best" }>;
+  signPreparedOwnershipAction(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction>;
+  abandonPreparedOwnershipAction(prepared: PreparedOwnershipAction): void;
+  abandonSignedOwnershipAction(signed: SignedOwnershipAction): void;
+  submitSignedOwnershipAction(signed: SignedOwnershipAction, options?: { onSigned?: (info: SignedActionTrackingInfo) => void | Promise<void> }): Promise<SubmitActionResult>;
+  transactionStatus(transactionId: string): Promise<LocusTransactionStatusResult>;
+  finalizedContext(): Promise<FinalizedContext>;
+  bestContext(): Promise<FinalizedContext & { contextType: "best" }>;
 }
+
+export type LocusActionSubmissionOptions = {
+  onPrepared?: (info: PreparedActionTrackingInfo) => void | Promise<void>;
+  onSigned?: (info: SignedActionTrackingInfo) => void | Promise<void>;
+};
 
 export type ActionReceipt = WaitForActionResult;

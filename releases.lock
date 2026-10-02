@@ -22,3 +22,12 @@ testnet_raw_spec_sha256 = "8f05ce3cf44090d0c602180521e4ca9de8971a19cd5788be0b1e2
 node_image = "ghcr.io/archelabs/minijam-node@sha256:ba765011d45f6f0307328e55f3d7311ae15570baa286ef13897ed8d59d18bfa9"
 worker_image = "ghcr.io/archelabs/minijam-worker@sha256:714bf7456ad797d8436568cfbe0375f8afbead892c7bb407fd60bb3f6ed8ac2f"
 formal_rpc_image = "ghcr.io/archelabs/minijam-formal-rpc@sha256:6314129f900154ec2f001e73b2f09c1e4ad747bc12f972438c372f55e2210904"
+
+# These are lifecycle-upgrade requirements, not claims about the currently
+# deployed release pins above. Publish and verify both artifacts before use.
+[transaction_lifecycle_upgrade]
+status = "pending_artifact_publication"
+minimum_client = "@jamscript/client@0.1.0-rc.5"
+minimum_backend = "backend-v0.1.0-rc.11"
+backend_image_digest = "pending"
+durable_transaction_lookup = false

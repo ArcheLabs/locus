@@ -435,5 +435,16 @@
   "ui.youPay": "支払う額", "ui.youReceive": "受取額", "ui.estimatedAmount": "見積金額", "ui.assetToPay": "支払う資産", "ui.assetToReceive": "受け取る資産",
   "ui.amountToPay": "支払額", "ui.estimatedAmountToReceive": "受取予定額", "ui.switchAssets": "資産を入れ替える", "ui.priceImpact": "価格への影響",
   "ui.swapPending": "スワップ処理中", "ui.swapFailed": "スワップに失敗しました", "ui.swapStatusAttention": "スワップの状態を確認してください", "ui.waitingConfirmation": "確認を待っています。",
-  "ui.swapBalanceTooLow": "スワップに必要な残高が不足しています。", "ui.insufficientLiquidity": "スワップに必要な流動性がありません。", "ui.swapCannotComplete": "スワップを完了できませんでした。"
+  "ui.swapBalanceTooLow": "スワップに必要な残高が不足しています。", "ui.insufficientLiquidity": "スワップに必要な流動性がありません。", "ui.swapCannotComplete": "スワップを完了できませんでした。",
+  "lifecycle.requestSignature": "ウォレットでこの操作を確認してください。",
+  "lifecycle.accepted": "送信され、処理中です。",
+  "lifecycle.bestIncluded": "現在のチェーンに含まれました。最終確認を待っています。",
+  "lifecycle.reorged": "チェーン状態が変わりました。このトランザクションを再確認しています。",
+  "lifecycle.submissionUnknown": "送信結果を確認できません。再署名または再送信しないでください。",
+  "lifecycle.finalizedApplied": "操作が完了しました。",
+  "lifecycle.finalizedFailure": "操作は完了しませんでした。",
+  "lifecycle.finalizedReceiptPending": "トランザクションは最終確定しました。この操作のレシートを確認しています。",
+  "lifecycle.checkingSaved": "保存済みの操作を確認しています。",
+  "lifecycle.timeout": "結果を引き続き確認しています。この操作を再送信しないでください。",
+  "lifecycle.unsupported": "このサーバーはトランザクションの最終確認を検証できません。操作を送信する前にサーバーを更新してください。"
 }

@@ -602,5 +602,16 @@
   "ui.waitingConfirmation": "Warten auf Bestätigung.",
   "ui.swapBalanceTooLow": "Dein Guthaben reicht für diesen Tausch nicht aus.",
   "ui.insufficientLiquidity": "Für diesen Tausch ist nicht genügend Liquidität vorhanden.",
-  "ui.swapCannotComplete": "Der Tausch konnte nicht abgeschlossen werden."
+  "ui.swapCannotComplete": "Der Tausch konnte nicht abgeschlossen werden.",
+  "lifecycle.requestSignature": "Bitte bestätige diese Aktion in deiner Wallet.",
+  "lifecycle.accepted": "Übermittelt und wird verarbeitet.",
+  "lifecycle.bestIncluded": "In der aktuellen Chain enthalten. Die finale Bestätigung wird abgewartet.",
+  "lifecycle.reorged": "Die Chain hat sich geändert. Diese Transaktion wird erneut geprüft.",
+  "lifecycle.submissionUnknown": "Das Übermittlungsergebnis ist unklar. Signiere oder sende diese Aktion nicht erneut.",
+  "lifecycle.finalizedApplied": "Aktion abgeschlossen.",
+  "lifecycle.finalizedFailure": "Die Aktion wurde nicht ausgeführt.",
+  "lifecycle.finalizedReceiptPending": "Die Transaktion ist finalisiert. Der Beleg dieser Aktion wird noch abgefragt.",
+  "lifecycle.checkingSaved": "Gespeicherte Aktion wird geprüft.",
+  "lifecycle.timeout": "Das Ergebnis wird weiterhin geprüft. Sende diese Aktion nicht erneut.",
+  "lifecycle.unsupported": "Dieser Server kann die finale Transaktionsbestätigung nicht verifizieren. Aktualisiere den Server vor weiteren Aktionen."
 }

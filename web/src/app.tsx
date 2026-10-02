@@ -15,6 +15,7 @@ import { assetBalanceQueryKey, assetIdsQueryKey, assetMetadataQueryKey, assetQue
 import { attachAssetBalances, keepAssetRowsForScope } from "./locus/assetCache.js";
 import { resolveRecipient, detectRecipientType, type RecipientType } from "./locus/recipients.js";
 import { transferAndWait, type SendState } from "./locus/transaction.js";
+import { applyLifecycleUpdate, currentOperationScope, createPendingOperationTracker, pendingOperationsForScope, unresolvedOperationsForScope, updatePendingOperation } from "./locus/pendingOperations.js";
 import { useSession } from "./session/SessionProvider.js";
 import { authorizationWaitMessage as getAuthorizationWaitMessage, canPerformAuthorizedAction as checkActionAuthorization } from "./session/actionAuthorization.js";
 import { connectBrowserSession, connectEvmProvider, restoreBrowserSession, watchBrowserSession } from "./session/connectors.js";
@@ -589,6 +590,117 @@ export function App() {
   }, [network.deployment, network.locus, network.networkId, network.status, serviceId, session]);
 
   useEffect(() => {
+    if (!networkMode || network.status !== "ready" || !locus || !sessionOwner) return;
+    const subject = locus.session?.subject ?? sessionOwner;
+    let active = true;
+    const abort = new AbortController();
+    const scope = currentOperationScope(locus, network.networkId, subject);
+    const watching = new Set<string>();
+    const records = pendingOperationsForScope(window.localStorage, scope)
+      .filter((operation) => !["finalized", "failed", "not-submitted"].includes(operation.phase));
+
+    const watch = async (operation: (typeof records)[number]) => {
+      if (!active || watching.has(operation.operationId)) return;
+      if (!operation.transactionId || !operation.actionHash) {
+        publishTransactionNotice({
+          id: `operation-${operation.operationId}`,
+          title: t("common.transaction"),
+          message: t("lifecycle.submissionUnknown"),
+          tone: "error",
+          dismissible: true,
+        });
+        return;
+      }
+      watching.add(operation.operationId);
+      const noticeId = `operation-${operation.operationId}`;
+      publishTransactionNotice({
+        id: noticeId,
+        title: t("common.transaction"),
+        message: t("lifecycle.checkingSaved"),
+        transactionId: operation.transactionId,
+        busy: true,
+      });
+      try {
+        const result = await locus.waitForFinalized(operation.transactionId, {
+          actionHash: operation.actionHash,
+          intervalMs: 1_000,
+          timeoutMs: 180_000,
+          signal: abort.signal,
+          onUpdate: (update) => {
+            if (!active) return;
+            applyLifecycleUpdate(window.localStorage, operation.operationId, update);
+            const message = update.status.status === "reorged" ? t("lifecycle.reorged")
+              : update.status.status === "submission_unknown" ? t("lifecycle.submissionUnknown")
+                : update.confirmation === "best" ? t("lifecycle.bestIncluded")
+                  : update.confirmation === "finalized"
+                    ? update.actionResult === "applied" ? t("lifecycle.finalizedApplied")
+                      : update.actionResult ? t("lifecycle.finalizedFailure") : t("lifecycle.finalizedReceiptPending")
+                    : t("lifecycle.accepted");
+            publishTransactionNotice({
+              id: noticeId,
+              title: t("common.transaction"),
+              message,
+              transactionId: update.transactionId,
+              busy: (update.confirmation !== "finalized" || !update.actionResult) && update.status.status !== "submission_unknown",
+              ...(update.confirmation === "finalized" && update.actionResult && update.actionResult !== "applied" ? { tone: "error" as const } : {}),
+              dismissible: true,
+            });
+          },
+        });
+        if (!active) return;
+        updatePendingOperation(window.localStorage, operation.operationId, {
+          transactionId: result.transactionId,
+          actionHash: result.actionHash,
+          packageHash: result.packageHash,
+          phase: result.actionReceipt.status === "applied" ? "finalized" : "failed",
+          confirmation: "finalized",
+          actionResult: result.actionReceipt.status,
+          lastKnownStatus: result.transactionStatus,
+        });
+        publishTransactionNotice({
+          id: noticeId,
+          title: t("common.transaction"),
+          message: result.actionReceipt.status === "applied" ? t("lifecycle.finalizedApplied") : t("lifecycle.finalizedFailure"),
+          transactionId: result.transactionId,
+          ...(result.actionReceipt.status === "applied" ? {} : { tone: "error" as const }),
+          dismissible: true,
+        });
+      } catch (error) {
+        if (!active || abort.signal.aborted) return;
+        const code = error && typeof error === "object" && "code" in error ? String((error as { code?: unknown }).code) : "";
+        const definiteFailure = code === "WORK_FAILED";
+        if (definiteFailure) {
+          const lastStatus = error && typeof error === "object" ? (error as { lastStatus?: { status?: string } }).lastStatus : undefined;
+          updatePendingOperation(window.localStorage, operation.operationId, {
+            phase: "failed",
+            confirmation: "unknown",
+            lastKnownStatus: lastStatus?.status ?? "failed",
+            ...(error instanceof Error ? { lastError: error.message } : {}),
+          });
+        }
+        publishTransactionNotice({
+          id: noticeId,
+          title: t("common.transaction"),
+          message: definiteFailure ? t("lifecycle.finalizedFailure") : code === "SUBMISSION_UNKNOWN" ? t("lifecycle.submissionUnknown") : t("lifecycle.timeout"),
+          transactionId: operation.transactionId,
+          ...(definiteFailure ? { tone: "error" as const } : {}),
+          actionLabel: t("common.retry"),
+          onAction: () => { void watch(operation); },
+          dismissible: true,
+        });
+      } finally {
+        watching.delete(operation.operationId);
+      }
+    };
+
+    for (const operation of records) void watch(operation);
+    return () => {
+      active = false;
+      abort.abort("account or network scope changed");
+    };
+  }, [locus, network.networkId, network.status, networkMode, publishTransactionNotice, sessionOwner, t]);
+
+  useEffect(() => {
     const id = matrixAuthorizationNoticeId;
     const previousId = currentAuthorizationNoticeId.current;
     if (previousId !== id) {
@@ -927,6 +1039,18 @@ export function App() {
     if (!session) { openConnect(); return; }
     if (!canPerformAuthorizedAction()) { setSendFormError(authorizationWaitMessage()); return; }
     if (!resolvedRecipient.valid || !resolvedRecipient.ownership) return;
+    try {
+      const subject = locus.session?.subject ?? session.owner;
+      const pending = unresolvedOperationsForScope(window.localStorage, currentOperationScope(locus, network.networkId, subject))
+        .filter((operation) => operation.operationType === "transfer");
+      if (pending.length > 0) {
+        setSendFormError(t("lifecycle.timeout"));
+        return;
+      }
+    } catch {
+      setSendFormError(t("lifecycle.unsupported"));
+      return;
+    }
     let parsedAmount: bigint;
     try { parsedAmount = parseUnits(amount, assetForSend.decimals); } catch { return; }
     if (assetForSend.balance === null || parsedAmount > assetForSend.balance) return;
@@ -953,35 +1077,55 @@ export function App() {
     };
     setReviewOpen(false);
     let submittedTransactionId = "";
-    const transactionNoticeId = (transactionId: string) => `send-transaction-${transactionId.toLowerCase()}`;
+    const subject = locus.session?.subject ?? session.owner;
+    const tracking = createPendingOperationTracker(locus, submittedNetwork, subject, "transfer");
+    const transactionNoticeId = `operation-${tracking.operation.operationId}`;
     try {
       setSendState({ status: "awaiting-signature" });
+      publishTransactionNotice({
+        id: transactionNoticeId,
+        title: t("send.transferPending"),
+        message: t("lifecycle.requestSignature"),
+        busy: true,
+      });
       const applied = await transferAndWait(locus, assetForSend.assetId, destinationOwner, parsedAmount, submittedNetwork, (submitted) => {
         submittedTransactionId = submitted.transactionId;
         publishTransactionNotice({
-          id: transactionNoticeId(submitted.transactionId),
-          title: "Transfer pending",
-          message: "Waiting for confirmation.",
+          id: transactionNoticeId,
+          title: t("send.transferPending"),
+          message: t("lifecycle.accepted"),
           transactionId: submitted.transactionId,
           busy: true,
         });
         if (isLiquidityScopeCurrent(expectedScope)) setSendState({ status: "submitted", transactionId: submitted.transactionId, actionHash: submitted.actionHash, networkId: submittedNetwork });
       }, () => {
         publishTransactionNotice({
-          id: transactionNoticeId(submittedTransactionId),
-          title: "Transfer included in the best chain",
-          message: "The transfer is visible in the current chain and can still be reverted until finalized.",
+          id: transactionNoticeId,
+          title: t("send.transferPending"),
+          message: t("lifecycle.bestIncluded"),
           transactionId: submittedTransactionId,
           busy: true,
         });
         if (isLiquidityScopeCurrent(expectedScope)) setSendState({ status: "best-included", transactionId: submittedTransactionId, networkId: submittedNetwork });
-        if (isLiquidityScopeCurrent(expectedScope)) {
-          setAmount("");
-          setAmountTouched(false);
-        }
         void refreshAssets();
+      }, tracking, (update) => {
+        const message = update.status.status === "reorged" ? t("lifecycle.reorged")
+          : update.status.status === "submission_unknown" ? t("lifecycle.submissionUnknown")
+            : update.confirmation === "best" ? t("lifecycle.bestIncluded")
+              : update.confirmation === "finalized"
+                ? update.actionResult === "applied" ? t("lifecycle.finalizedApplied")
+                  : update.actionResult ? t("lifecycle.finalizedFailure") : t("lifecycle.finalizedReceiptPending")
+                : t("lifecycle.accepted");
+        publishTransactionNotice({
+          id: transactionNoticeId,
+          title: t("send.transferPending"),
+          message,
+          transactionId: update.transactionId,
+          busy: update.confirmation !== "finalized" || !update.actionResult,
+          ...(update.confirmation === "finalized" && update.actionResult && update.actionResult !== "applied" ? { tone: "error" as const } : {}),
+        });
       });
-      clearTransactionNotice(transactionNoticeId(applied.transactionId));
+      publishTransactionNotice({ id: transactionNoticeId, title: t("send.transferComplete"), message: t("lifecycle.finalizedApplied"), transactionId: applied.transactionId, dismissible: true });
       if (!isLiquidityScopeCurrent(expectedScope)) return;
       setSendState((current) => current.status === "best-included" && current.transactionId === applied.transactionId ? applied : current);
       const nextActivity = [{ direction: "sent" as const, asset: assetForSend.symbol, recipient, amount: formatUnits(parsedAmount, assetForSend.decimals), transactionId: applied.transactionId }, ...sessionActivity];
@@ -992,26 +1136,38 @@ export function App() {
     } catch (error) {
       const errorCode = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
       const reorged = errorCode === -32042 || (error instanceof Error && (error.message.includes("removed from the best chain") || error.message.includes("TRANSACTION_REORGED")));
-      if (submittedTransactionId) {
-        const visibleError = reorged
-          ? "The transfer was removed from the best chain. Check its status before retrying."
-          : text(knownActionErrorMessage(error) ?? "The transfer could not be completed.");
+      const savedOperation = pendingOperationsForScope(window.localStorage, currentOperationScope(locus, submittedNetwork, subject))
+        .find((operation) => operation.operationId === tracking.operation.operationId);
+      if (submittedTransactionId || savedOperation?.phase === "submission-unknown" || savedOperation?.phase === "submitted" || savedOperation?.phase === "best-included" || savedOperation?.phase === "reorged") {
+        const unresolved = savedOperation?.phase !== "failed" && savedOperation?.phase !== "finalized";
+        const visibleError = unresolved
+          ? (savedOperation?.phase === "reorged" || reorged ? t("lifecycle.reorged") : t("lifecycle.timeout"))
+          : text(knownActionErrorMessage(error) ?? t("lifecycle.finalizedFailure"));
         publishTransactionNotice({
-          id: transactionNoticeId(submittedTransactionId),
-          title: t("send.transferFailed"),
+          id: transactionNoticeId,
+          title: unresolved ? t("send.transferPending") : t("send.transferFailed"),
           message: visibleError,
-          transactionId: submittedTransactionId,
-          tone: "error",
+          ...(submittedTransactionId ? { transactionId: submittedTransactionId } : {}),
+          ...(unresolved ? {} : { tone: "error" as const }),
+          busy: unresolved,
           dismissible: true,
         });
-      } else clearTransactionNotice("send-transaction");
+      } else {
+        const details = error instanceof Error ? error.message : String(error);
+        updatePendingOperation(window.localStorage, tracking.operation.operationId, { phase: "not-submitted", lastError: details });
+        publishTransactionNotice({ id: transactionNoticeId, title: t("send.transferFailed"), message: text(knownActionErrorMessage(error) ?? details), tone: "error", dismissible: true });
+      }
       if (isLiquidityScopeCurrent(expectedScope)) {
         setSendState((current) => {
           const ownsCurrentSubmission = submittedTransactionId
             ? "transactionId" in current && current.transactionId === submittedTransactionId
             : current.status === "awaiting-signature" || current.status === "submitting";
           return ownsCurrentSubmission
-            ? { status: "failed", error: reorged ? "Transaction removed from best chain; check status before retrying." : text(knownActionErrorMessage(error) ?? "Transaction failed."), networkId: submittedNetwork, ...(submittedTransactionId ? { transactionId: submittedTransactionId } : {}) }
+            ? savedOperation?.phase === "failed" || savedOperation?.phase === "finalized"
+              ? { status: "failed", error: reorged ? t("lifecycle.reorged") : text(knownActionErrorMessage(error) ?? t("lifecycle.finalizedFailure")), networkId: submittedNetwork, ...(submittedTransactionId ? { transactionId: submittedTransactionId } : {}) }
+              : submittedTransactionId || savedOperation?.phase === "submission-unknown" || savedOperation?.phase === "submitted" || savedOperation?.phase === "best-included" || savedOperation?.phase === "reorged"
+              ? { status: "submitted", transactionId: submittedTransactionId || savedOperation?.transactionId || "", actionHash: savedOperation?.actionHash, networkId: submittedNetwork }
+              : { status: "failed", error: reorged ? t("lifecycle.reorged") : text(knownActionErrorMessage(error) ?? "Transaction failed."), networkId: submittedNetwork }
             : current;
         });
       }
@@ -1082,7 +1238,7 @@ export function App() {
         {page === "send" && <SendPage networkMode={networkMode} status={network.status} hasSession={Boolean(sessionOwner)} balanceState={currentNetworkAsset ? getAssetBalanceState(currentNetworkAsset) : sessionOwner ? "loading" : "signed-out"} asset={currentAsset} assets={assets} assetSearch={assetSearch} assetPickerOpen={assetPickerOpen} recipientType={recipientType} recipient={recipient} recipientError={recipientFieldError} recipientMessage={recipient.trim() && (resolvedRecipient.valid || matrixResolutionPending) ? resolvedRecipient.message : ""} amount={amount} amountError={amountFieldError} formError={sendFormError} typeOpen={typeOpen} resolution={resolvedRecipient} sendState={sendState} onSearchAssets={setAssetSearch} onToggleAssets={setAssetPickerOpen} onSelectAsset={(asset) => { chooseNetworkAsset(asset); setAssetSearch(""); }} onChooseType={chooseType} onToggleTypes={setTypeOpen} onRecipient={(value) => { updateRecipient(value); setRecipientTouched(false); }} onRecipientBlur={() => setRecipientTouched(true)} onAmount={updateAmount} onAmountBlur={() => setAmountTouched(true)} onMax={() => { updateAmount(currentAsset ? displayAmount(networkMode ? currentNetworkAsset?.balance ?? null : currentDemoAsset.balance, currentAsset.decimals) : ""); setAmountTouched(true); }} onContinue={continueSend} onCycleDemo={() => setDemoAssetIndex((value) => (value + 1) % demoAssets.length)} onClear={() => updateRecipient("")} />}
         {page === "assets" && <AssetsPage networkMode={networkMode} loading={assetsLoading} error={assetsError} assets={filteredAssets} featuredAssets={assets.filter((asset) => asset.presentation.curated).slice(0, 6)} search={search} setSearch={setSearch} filter={assetFilter} setFilter={setAssetFilter} getBalanceState={getAssetBalanceState} onRetry={() => void refreshAssets()} onCreate={() => { if (!session) { openConnect(); return; } setCreateAssetOpen(true); }} onOpenDetail={setDetailAsset} />}
         {page === "swap" && <>
-          <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} canPerformAuthorizedAction={canPerformAuthorizedAction} authorizationWaitMessage={authorizationWaitMessage()} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onTransactionNotice={publishTransactionNotice} onClearTransactionNotice={clearTransactionNotice} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} getBalanceState={getAssetBalanceState} />
+          <SwapPage networkMode={networkMode} networkId={network.networkId} status={network.status} serviceId={serviceId} locus={locus} assets={assets} pools={pools} poolLoading={poolsQuery.isLoading} poolError={poolsError} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} isScopeCurrent={isLiquidityScopeCurrent} canPerformAuthorizedAction={canPerformAuthorizedAction} authorizationWaitMessage={authorizationWaitMessage()} onConnect={openConnect} onApplied={recordSwap} onNotify={notify} onTransactionNotice={publishTransactionNotice} onRefreshAssets={refreshAssets} onRefreshPools={refreshPools} getBalanceState={getAssetBalanceState} />
         </>}
         {(page === "liquidity" || page === "liquidity-new") && <LiquidityPage key={page} view={page === "liquidity-new" ? "new" : "home"} initialTab={liquidityTab} initialPair={{ assetA: new URLSearchParams(window.location.search).get("assetA") ?? "", assetB: new URLSearchParams(window.location.search).get("assetB") ?? "" }} assets={assets} pools={pools} poolsError={poolsError} poolsLoading={poolsQuery.isLoading} locus={locus} networkId={network.networkId} serviceId={serviceId} sessionOwner={sessionOwner} connectionId={session?.connectionId ?? null} networkReady={networkMode && network.status === "ready"} canPerformAuthorizedAction={canPerformAuthorizedAction} authorizationWaitMessage={authorizationWaitMessage()} isScopeCurrent={isLiquidityScopeCurrent} onPoolsRefreshed={(next) => queryClient.setQueryData(poolListQueryKey(network.networkId, serviceId), next)} onRefreshAssets={refreshAssets} onConnect={openConnect} onNewPosition={navigateToLiquidityNew} onTabChange={updateLiquidityTab} onActionSuccess={(message) => notify(message)} onTransactionNotice={publishTransactionNotice} onClearTransactionNotice={clearTransactionNotice} onRetryPools={() => void refreshPools()} getBalanceState={getAssetBalanceState} />}
         {page === "activity" && <ActivityPage networkMode={networkMode} filter={filter} setFilter={setFilter} rows={filteredActivity} />}

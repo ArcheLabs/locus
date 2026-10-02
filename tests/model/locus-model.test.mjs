@@ -12,6 +12,12 @@ const bob = owner(42);
 const carol = owner(43);
 const assetId = id(10);
 
+const lifecycleSupport = {
+  async assertTransactionLifecycleSupport() {
+    return { transactionLifecycleVersion: 1, bestChainTracking: true, strictFinalizedReceipts: true };
+  },
+};
+
 function expectCode(code, callback) {
   assert.throws(callback, (error) => error?.code === code, `expected Locus abort ${code}`);
 }
@@ -173,7 +179,7 @@ test("u128 max and checked overflow are handled by the reference model", () => {
 test("SDK uses Ownership auth and canonical ownership keys", async () => {
   const model = setup();
   const submitted = [];
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction(actionName, input) {
       submitted.push({ actionName, input });
       if (actionName === "transfer") model.transfer(alice, input.assetId, input.to, input.amount);
@@ -192,9 +198,41 @@ test("SDK uses Ownership auth and canonical ownership keys", async () => {
   assert.equal(key(submitted[0].input.to), key(bob));
 });
 
-test("SDK injects the stable subject and does not use actAs", async () => {
+test("SDK rejects a write before consulting the wallet when lifecycle support is missing", async () => {
   const calls = [];
   const adapter = {
+    async assertTransactionLifecycleSupport() {
+      calls.push("capabilities");
+      throw Object.assign(new Error("strict lifecycle support is unavailable"), { code: "LIFECYCLE_UNSUPPORTED" });
+    },
+    async submitOwnershipAction() { calls.push("submit"); },
+  };
+  const signer = {
+    async getController() { calls.push("controller"); return alice; },
+    async signJamScriptAction() { calls.push("sign"); return new Uint8Array([1]); },
+  };
+  const client = new LocusClient(adapter, { signer, subject: alice });
+  await assert.rejects(() => client.transfer(assetId, bob, 1n), /strict lifecycle support is unavailable/);
+  assert.deepEqual(calls, ["capabilities"]);
+});
+
+test("SDK action hash recovery always uses strict finalized tracking", async () => {
+  const calls = [];
+  const adapter = {
+    async waitForAction() { calls.push("legacy"); throw new Error("legacy waiter must not be used"); },
+    async waitForFinalized(transactionId, options) {
+      calls.push({ transactionId, options });
+      return { status: "applied", transactionId, actionHash: options.actionHash };
+    },
+  };
+  const client = new LocusClient(adapter);
+  await client.waitForActionByHash("tx-1", "action-1", { timeoutMs: 10 });
+  assert.deepEqual(calls, [{ transactionId: "tx-1", options: { timeoutMs: 10, actionHash: "action-1" } }]);
+});
+
+test("SDK injects the stable subject and does not use actAs", async () => {
+  const calls = [];
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction(...args) { calls.push(args); return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
     async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
@@ -218,7 +256,7 @@ test("direct-owner session uses signer controller as subject and encodes through
   };
   const session = { signer, subject: signer.controller };
   assert.equal(signer.controller, session.subject);
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction(actionName, input) {
       const payload = encodeActionPayload(serviceAbi, actionName, input);
       calls.push({ actionName, input, payload });
@@ -243,7 +281,7 @@ test("malformed JavaScript Ownership session rejects missing subject before subm
     async getController() { return alice; },
     async signJamScriptAction() { return new Uint8Array([1]); },
   };
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction() { submissions += 1; return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
     async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
@@ -260,7 +298,7 @@ test("SDK treats missing controller state as inactive", async () => {
   const subject = owner(74);
   const controller = owner(75);
   const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction() { return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
     async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
@@ -275,7 +313,7 @@ test("SDK reports absent, active and revoked controller grant states", async () 
   const controller = owner(77);
   const results = [null, 1n, 0n];
   const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
-  const client = new LocusClient({
+  const client = new LocusClient({ ...lifecycleSupport,
     async submitOwnershipAction() { return { transactionId: "0x1", status: "queued", actionHash: "0x2" }; },
     async queryBest() { return { value: results.shift() ?? null }; },
     async waitForAction() { return { status: "applied" }; },
@@ -289,7 +327,7 @@ test("SDK submits the Matrix proof through the per-controller authorization acti
   const calls = [];
   const controller = owner(78);
   const signer = { async getController() { return controller; }, async signJamScriptAction() { return new Uint8Array([1]); } };
-  const client = new LocusClient({
+  const client = new LocusClient({ ...lifecycleSupport,
     async submitOwnershipAction(actionName, input) {
       calls.push({ actionName, input });
       return { transactionId: "0xauth", status: "queued", actionHash: "0xproof" };
@@ -304,7 +342,7 @@ test("SDK submits the Matrix proof through the per-controller authorization acti
 });
 
 test("SDK surfaces mapped application errors", async () => {
-  const client = new LocusClient({
+  const client = new LocusClient({ ...lifecycleSupport,
     async submitOwnershipAction() {
       const error = new Error("not issuer");
       error.code = 2007;
