@@ -10,6 +10,7 @@
     "testnet": {
       "label": "MiniJAM TestNet",
       "backendUrl": "https://rpc-stage1.minijam.xyz/rpc",
+      "matrixResolverUrl": "https://rpc-stage1.minijam.xyz/matrix-resolver",
       "deploymentUrl": "deployments/testnet.json"
     }
   }
