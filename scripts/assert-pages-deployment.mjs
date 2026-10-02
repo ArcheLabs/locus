@@ -49,6 +49,7 @@ assert.equal(descriptor.provenance?.backendVersion, "backend-v0.1.0-rc.8");
 assert.equal(descriptor.provenance?.minijamVersion, "stage1-v0.2.1");
 assert.equal(networks.defaultNetwork, "testnet");
 assert.equal(networks.networks?.testnet?.backendUrl, "https://rpc-stage1.minijam.xyz/rpc");
+assert.equal(networks.networks?.testnet?.matrixResolverUrl, "https://rpc-stage1.minijam.xyz/matrix-resolver");
 assert.equal(networks.networks?.testnet?.deploymentUrl, "deployments/testnet.json");
 assert.equal(await fs.readFile(path.join(root, "web", "dist", "404.html"), "utf8"), await fs.readFile(path.join(root, "web", "dist", "index.html"), "utf8"));
 rejectSecretFields(descriptor);
