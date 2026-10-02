@@ -1,6 +1,7 @@
 import { asWorkRpc, FetchRpcTransport, JamScriptClient } from "@jamscript/client";
 import { LocusClient } from "@archelabs/locus";
 import { loadDeploymentDescriptor } from "./config.js";
+import { bestHeadTransport, parseBestContext } from "./bestHeadTransport.js";
 import { NetworkBootstrapError, type RuntimeNetwork } from "./types.js";
 
 export async function bootstrapNetwork(
@@ -23,15 +24,20 @@ export async function bootstrapNetwork(
   }
 
   const transport = new FetchRpcTransport(network.backendUrl, fetch.bind(globalThis));
-  const workRpc = asWorkRpc(transport);
+  const finalizedRpc = asWorkRpc(transport);
   const protocolClient = Object.assign(
-    new JamScriptClient(deployment, transport),
-    // JamScript rc.3 exposes finalized context on WorkRpc, but not on
-    // JamScriptClient. The bootstrap recovery flow needs the signed action's
-    // validity horizon when its transaction mapping is lost after restart.
-    { finalizedContext: () => workRpc.finalizedContext() },
+    new JamScriptClient(deployment, bestHeadTransport(transport)),
+    {
+      // State queries and action preparation use the best head through the
+      // adapter above. Keep a real finalized read for recovery and explicit
+      // finality checks.
+      finalizedContext: () => finalizedRpc.finalizedContext(),
+      bestContext: () => transport.call<unknown>("minijam_getBestContext").then(parseBestContext),
+      preparationContextType: "best" as const,
+    },
   );
   try {
+    await protocolClient.bestContext();
     await protocolClient.validateDeployment();
   } catch (error) {
     const message = error instanceof Error ? error.message : "";

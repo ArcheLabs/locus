@@ -3,15 +3,18 @@ import type {
   Ownership as JamOwnership,
   OwnershipSigner,
   PreparedOwnershipAction,
-  OwnershipPreparationPhase,
   SignedOwnershipAction,
   SubmitActionResult,
   TransactionStatusResult,
   FinalizedContext,
+  OwnershipPreparationPhase as JamOwnershipPreparationPhase,
   WaitForActionResult,
 } from "@jamscript/client";
 
-export type { PreparedOwnershipAction, SignedOwnershipAction, OwnershipPreparationPhase };
+export type { PreparedOwnershipAction, SignedOwnershipAction };
+export type OwnershipPreparationPhase = JamOwnershipPreparationPhase | "READING_BEST_CONTEXT";
+
+export type BestContext = FinalizedContext & { contextType: "best" };
 
 export type Ownership = JamOwnership;
 export type AssetId = Uint8Array;
@@ -95,13 +98,15 @@ export interface JamScriptLikeClient {
     actionName: string,
     input: Record<string, CodecValue>,
     signer: OwnershipSigner,
-    options?: { actAs?: JamOwnership; ttl?: bigint; extrinsics?: Uint8Array[]; onProgress?: (phase: OwnershipPreparationPhase) => void },
+    options?: { actAs?: JamOwnership; ttl?: bigint; extrinsics?: Uint8Array[]; onProgress?: (phase: JamOwnershipPreparationPhase) => void },
   ): Promise<PreparedOwnershipAction>;
   signPreparedOwnershipAction?(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction>;
   abandonPreparedOwnershipAction?(prepared: PreparedOwnershipAction): void;
   submitSignedOwnershipAction?(signed: SignedOwnershipAction): Promise<SubmitActionResult>;
   transactionStatus?(transactionId: string): Promise<TransactionStatusResult>;
   finalizedContext?(): Promise<FinalizedContext>;
+  bestContext?(): Promise<BestContext>;
+  preparationContextType?: "best" | "finalized";
 }
 
 export type ActionReceipt = WaitForActionResult;

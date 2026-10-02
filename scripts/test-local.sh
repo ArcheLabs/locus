@@ -15,6 +15,8 @@ echo "MATRIX_AIRDROP_TESTS=PASS"
 echo "LOCAL_MODEL_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-network.test.mjs
 echo "WEB_NETWORK_TESTS=PASS"
+"${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-best-context.test.mjs
+echo "WEB_BEST_CONTEXT_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-interaction.test.mjs
 echo "WEB_INTERACTION_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/web-matrix-verification.test.mjs

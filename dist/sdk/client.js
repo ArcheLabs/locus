@@ -188,7 +188,15 @@ export class LocusClient {
         const prepare = this.jamClient.prepareOwnershipAction;
         if (!prepare)
             throw new Error("the configured JamScript client does not expose phased Ownership actions");
-        return prepare.call(this.jamClient, actionName, { ...input, subject: session.subject }, session.signer, options);
+        return prepare.call(this.jamClient, actionName, { ...input, subject: session.subject }, session.signer, {
+            onProgress: (phase) => {
+                if (phase === "READING_FINALIZED_CONTEXT" && this.jamClient.preparationContextType === "best") {
+                    options.onProgress?.("READING_BEST_CONTEXT");
+                    return;
+                }
+                options.onProgress?.(phase);
+            },
+        });
     }
     /** Starts the wallet request synchronously when called from a user gesture. */
     signPreparedOwnershipAction(prepared) {
@@ -220,6 +228,11 @@ export class LocusClient {
         if (!this.jamClient.finalizedContext)
             throw new Error("the configured JamScript client does not expose finalized context");
         return this.jamClient.finalizedContext();
+    }
+    async bestContext() {
+        if (!this.jamClient.bestContext)
+            throw new Error("the configured JamScript client does not expose best context");
+        return this.jamClient.bestContext();
     }
     async createAsset(assetId, name, symbol, decimals, initialSupply, initialHolder) {
         return this.submit("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder));

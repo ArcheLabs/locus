@@ -110,6 +110,7 @@ function stageLabel(stage: CreateAssetStage): string {
 function preparationPhaseKey(phase: OwnershipPreparationPhase): TranslationKey {
   switch (phase) {
     case "VALIDATING_DEPLOYMENT": return "ui.assetStage.phaseDeployment";
+    case "READING_BEST_CONTEXT": return "ui.assetStage.phaseBest";
     case "READING_FINALIZED_CONTEXT": return "ui.assetStage.phaseFinalized";
     case "READING_MANAGED_STATE": return "ui.assetStage.phaseOwnership";
     case "READING_NONCE": return "ui.assetStage.phaseNonce";

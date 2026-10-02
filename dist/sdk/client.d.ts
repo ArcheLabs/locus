@@ -35,6 +35,7 @@ export declare class LocusClient {
     submitSignedOwnershipAction(signed: SignedOwnershipAction): Promise<SubmitActionResult>;
     transactionStatus(transactionId: string): Promise<import("@jamscript/client").TransactionStatusResult>;
     finalizedContext(): Promise<import("@jamscript/client").FinalizedContext>;
+    bestContext(): Promise<import("./types.js").BestContext>;
     createAsset(assetId: AssetId, name: string | Uint8Array, symbol: string | Uint8Array, decimals: number, initialSupply: Amount, initialHolder?: Ownership): Promise<SubmitActionResult>;
     prepareCreateAsset(assetId: AssetId, name: string | Uint8Array, symbol: string | Uint8Array, decimals: number, initialSupply: Amount, initialHolder?: Ownership, onProgress?: (phase: OwnershipPreparationPhase) => void): Promise<PreparedOwnershipAction>;
     private createAssetInput;
