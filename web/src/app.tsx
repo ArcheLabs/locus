@@ -888,7 +888,7 @@ export function App() {
   }
 
   function chooseNetworkAsset(asset: AssetView) {
-    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") {
+    if (["awaiting-signature", "submitting", "submitted"].includes(sendState.status)) {
       navigateToPage("send");
       return;
     }
@@ -902,14 +902,14 @@ export function App() {
   }
 
   function updateRecipient(value: string) {
-    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") return;
+    if (["awaiting-signature", "submitting", "submitted"].includes(sendState.status)) return;
     changeRecipient(value);
     setSendState({ status: "idle" });
     setSendFormError("");
   }
 
   function updateAmount(value: string) {
-    if (sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted") return;
+    if (["awaiting-signature", "submitting", "submitted"].includes(sendState.status)) return;
     setAmount(value);
     setSendState({ status: "idle" });
     setSendFormError("");
@@ -953,32 +953,51 @@ export function App() {
     };
     setReviewOpen(false);
     let submittedTransactionId = "";
+    const transactionNoticeId = (transactionId: string) => `send-transaction-${transactionId.toLowerCase()}`;
     try {
       setSendState({ status: "awaiting-signature" });
       const applied = await transferAndWait(locus, assetForSend.assetId, destinationOwner, parsedAmount, submittedNetwork, (submitted) => {
         submittedTransactionId = submitted.transactionId;
         publishTransactionNotice({
-          id: "send-transaction",
+          id: transactionNoticeId(submitted.transactionId),
           title: "Transfer pending",
           message: "Waiting for confirmation.",
           transactionId: submitted.transactionId,
           busy: true,
         });
         if (isLiquidityScopeCurrent(expectedScope)) setSendState({ status: "submitted", transactionId: submitted.transactionId, actionHash: submitted.actionHash, networkId: submittedNetwork });
+      }, () => {
+        publishTransactionNotice({
+          id: transactionNoticeId(submittedTransactionId),
+          title: "Transfer included in the best chain",
+          message: "The transfer is visible in the current chain and can still be reverted until finalized.",
+          transactionId: submittedTransactionId,
+          busy: true,
+        });
+        if (isLiquidityScopeCurrent(expectedScope)) setSendState({ status: "best-included", transactionId: submittedTransactionId, networkId: submittedNetwork });
+        if (isLiquidityScopeCurrent(expectedScope)) {
+          setAmount("");
+          setAmountTouched(false);
+        }
+        void refreshAssets();
       });
-      clearTransactionNotice("send-transaction");
+      clearTransactionNotice(transactionNoticeId(applied.transactionId));
       if (!isLiquidityScopeCurrent(expectedScope)) return;
-      setSendState(applied);
+      setSendState((current) => current.status === "best-included" && current.transactionId === applied.transactionId ? applied : current);
       const nextActivity = [{ direction: "sent" as const, asset: assetForSend.symbol, recipient, amount: formatUnits(parsedAmount, assetForSend.decimals), transactionId: applied.transactionId }, ...sessionActivity];
       setSessionActivity(nextActivity);
       try { window.localStorage.setItem(sessionActivityKey(submittedNetwork, formatLocusId(session.owner)), JSON.stringify(nextActivity)); } catch { /* A local activity write cannot change transaction finality. */ }
       void refreshAssets();
       notify("Sent");
     } catch (error) {
+      const errorCode = error && typeof error === "object" && "code" in error ? (error as { code?: unknown }).code : undefined;
+      const reorged = errorCode === -32042 || (error instanceof Error && (error.message.includes("removed from the best chain") || error.message.includes("TRANSACTION_REORGED")));
       if (submittedTransactionId) {
-        const visibleError = text(knownActionErrorMessage(error) ?? "The transfer could not be completed.");
+        const visibleError = reorged
+          ? "The transfer was removed from the best chain. Check its status before retrying."
+          : text(knownActionErrorMessage(error) ?? "The transfer could not be completed.");
         publishTransactionNotice({
-          id: "send-transaction",
+          id: transactionNoticeId(submittedTransactionId),
           title: t("send.transferFailed"),
           message: visibleError,
           transactionId: submittedTransactionId,
@@ -987,7 +1006,14 @@ export function App() {
         });
       } else clearTransactionNotice("send-transaction");
       if (isLiquidityScopeCurrent(expectedScope)) {
-        setSendState({ status: "failed", error: text(knownActionErrorMessage(error) ?? "Transaction failed."), networkId: submittedNetwork, ...(submittedTransactionId ? { transactionId: submittedTransactionId } : {}) });
+        setSendState((current) => {
+          const ownsCurrentSubmission = submittedTransactionId
+            ? "transactionId" in current && current.transactionId === submittedTransactionId
+            : current.status === "awaiting-signature" || current.status === "submitting";
+          return ownsCurrentSubmission
+            ? { status: "failed", error: reorged ? "Transaction removed from best chain; check status before retrying." : text(knownActionErrorMessage(error) ?? "Transaction failed."), networkId: submittedNetwork, ...(submittedTransactionId ? { transactionId: submittedTransactionId } : {}) }
+            : current;
+        });
       }
     }
   }
@@ -1126,7 +1152,8 @@ function SendPage({ networkMode, status, hasSession, balanceState, asset, assets
   const busy = sendState.status === "awaiting-signature" || sendState.status === "submitting" || sendState.status === "submitted";
   const sendLabel = sendState.status === "awaiting-signature" ? "Approve in wallet…"
     : sendState.status === "submitting" ? "Submitting…"
-      : sendState.status === "submitted" ? "Waiting for confirmation…"
+      : sendState.status === "submitted" ? "Waiting for best-chain inclusion…"
+        : sendState.status === "best-included" ? "Review another transfer"
         : sendState.status === "applied" ? "Sent" : "Review transfer";
   return <section className="page page--narrow send-page">
     <div className="card send-card">

@@ -17,7 +17,7 @@ import { AssetBalanceStatus } from "../../components/AssetBalanceStatus.js";
 import "./permissionlessLiquidity.css";
 
 type Operation = "create" | "initialize" | "add" | "remove";
-type PendingAction = { transactionId: string; action: string; networkId: string; serviceId: number; ownerKey: string; createdAt: number };
+type PendingAction = { transactionId: string; action: string; networkId: string; serviceId: number; ownerKey: string; createdAt: number; phase?: "pending" | "best-included" | "reorged" };
 type PairPoolState = { key: string; pool: Pool | null; loading: boolean; error: string };
 type LiquidityReview =
   | { operation: Exclude<Operation, "remove">; scope: LiquidityScope; assetA: AssetView; assetB: AssetView; amountA: string; amountB: string }
@@ -545,17 +545,32 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     setPairRefreshRevision((revision) => revision + 1);
   }
 
-  function showPendingNotice(current: PendingAction, checking: boolean) {
+  function showPendingNotice(current: PendingAction, checking: boolean, phase: "pending" | "best-included" = "pending") {
+    const resolvedPhase = current.phase ?? phase;
     onTransactionNotice({
       id: transactionNoticeId,
-      title: checking ? "Checking liquidity transaction" : `${current.action} pending`,
-      message: checking ? "Waiting for confirmation." : "The transaction is saved. Check its status before signing another liquidity action.",
+      title: checking ? "Checking liquidity transaction"
+        : resolvedPhase === "reorged" ? `${current.action} needs reconciliation`
+          : resolvedPhase === "best-included" ? `${current.action} included in the best chain` : `${current.action} pending`,
+      message: resolvedPhase === "reorged"
+        ? "The action was previously visible in the best chain but is no longer there. It may still be queued or included again; check its status before retrying."
+        : resolvedPhase === "best-included"
+          ? "The action is visible in the current chain and can still be reverted until finalized. A follow-up pool action waits because Formal builds the next Service Work from finalized state."
+        : checking ? "Waiting for confirmation." : "The transaction is saved. Check its status before signing another liquidity action.",
       transactionId: current.transactionId,
+      tone: resolvedPhase === "reorged" ? "error" : undefined,
       busy: checking,
       actionLabel: "Check status",
       onAction: () => void waitForPending(current),
       dismissible: true,
     });
+  }
+
+  function savePendingPhase(current: PendingAction, phase: NonNullable<PendingAction["phase"]>): PendingAction {
+    const updated = { ...current, phase };
+    try { window.localStorage.setItem(storageKey, JSON.stringify(updated)); } catch { /* Keep the in-memory pending guard if local storage is unavailable. */ }
+    setPending(updated);
+    return updated;
   }
 
   function showLiquidityFailureNotice(id: string, message = error) {
@@ -589,6 +604,20 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     if (!locus || busy || !isScopeCurrent(expectedScope)) return;
     setBusy(true); setError("");
     try {
+      const best = await locus.waitForBest(current.transactionId, { intervalMs: 750, timeoutMs: 180_000 });
+      if (!isScopeCurrent(expectedScope)) return;
+      if (best.status === "reorged") {
+        const reconciliation = savePendingPhase(current, "reorged");
+        showPendingNotice(reconciliation, false);
+        setError("This transaction was removed from the best chain. Check its status before retrying.");
+        return;
+      }
+      if (best.status === "failed") throw new Error(best.error ?? "Liquidity action failed before best-chain inclusion.");
+      if (best.bestChainStatus === "included" && best.finalized !== true) {
+        const included = savePendingPhase(current, "best-included");
+        showPendingNotice(included, false);
+        await refreshAfterApplied(expectedScope);
+      }
       const receipt = await locus.waitForAction(current.transactionId, { intervalMs: 750, timeoutMs: 180_000 });
       if (!isScopeCurrent(expectedScope)) return;
       if (receipt.actionReceipt.status !== "applied") {
@@ -603,7 +632,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     } catch (cause) {
       if (!isScopeCurrent(expectedScope)) return;
       if (await clearPreReceiptFailure(current.transactionId, cause, expectedScope)) return;
-      showPendingNotice(current, false);
+      showPendingNotice(readPending(storageKey) ?? current, false);
     } finally {
       setBusy(false);
       if (isScopeCurrent(expectedScope)) {
@@ -661,11 +690,26 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         serviceId: request.scope.serviceId!,
         ownerKey: request.scope.ownerKey!,
         createdAt: Date.now(),
+        phase: "pending",
       };
       setPending(saved); setTransactionId(submittedId);
       try { window.localStorage.setItem(pendingStorageKey(request.scope), JSON.stringify(saved)); } catch { /* Keep the in-memory pending guard if this browser blocks local storage. */ }
       closeReview();
 
+      const best = await locus.waitForBest(submittedId, { intervalMs: 750, timeoutMs: 180_000 });
+      if (!isScopeCurrentRef.current(request.scope)) return;
+      if (best.status === "reorged") {
+        const reconciliation = savePendingPhase(saved, "reorged");
+        showPendingNotice(reconciliation, false);
+        setError("This transaction was removed from the best chain. Check its status before retrying.");
+        return;
+      }
+      if (best.status === "failed") throw new Error(best.error ?? "Liquidity action failed before best-chain inclusion.");
+      if (best.bestChainStatus === "included" && best.finalized !== true) {
+        const included = savePendingPhase(saved, "best-included");
+        showPendingNotice(included, false);
+        await refreshAfterApplied(request.scope);
+      }
       const receipt = await locus.waitForAction(submittedId, { intervalMs: 750, timeoutMs: 180_000 });
       if (!isScopeCurrentRef.current(request.scope)) return;
       if (receipt.actionReceipt.status !== "applied") {

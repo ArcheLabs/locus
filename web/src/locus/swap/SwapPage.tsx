@@ -192,6 +192,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
     onClearTransactionNotice("swap-transaction");
     let submittedTransactionId = "";
     let terminalFailure = false;
+    let reorged = false;
     try {
       const submitted = await locus.swapExactIn(assetIn.assetId, assetOut.assetId, quote.amountIn, quote.minimumAmountOut);
       submittedTransactionId = submitted.transactionId;
@@ -212,6 +213,22 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
         return;
       }
       setSubmission("submitted");
+      const best = await locus.waitForBest(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+      if (best.status === "reorged") {
+        reorged = true;
+        throw new Error("The swap was removed from the best chain. Check its status before retrying.");
+      }
+      if (best.status === "failed") throw new Error(best.error ?? "Swap failed before best-chain inclusion.");
+      if (best.bestChainStatus === "included" && best.finalized !== true) {
+        onTransactionNotice({
+          id: "swap-transaction",
+          title: "Swap included in the best chain",
+          message: "The swap is visible in the current chain and can still be reverted until finalized. A follow-up swap waits because Formal builds the next Service Work from finalized pool state.",
+          transactionId: submitted.transactionId,
+          busy: true,
+        });
+        await Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
+      }
       const receipt = await locus.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
       if (receipt.actionReceipt.status !== "applied") {
         terminalFailure = true;
@@ -240,12 +257,14 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       await Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
       onNotify(t("swap.completed"));
     } catch (cause) {
+      const causeCode = cause && typeof cause === "object" && "code" in cause ? (cause as { code?: unknown }).code : undefined;
+      if (causeCode === -32042 || (cause instanceof Error && cause.message.includes("TRANSACTION_REORGED"))) reorged = true;
       const message = friendlySwapError(cause);
       if (submittedTransactionId) {
         onTransactionNotice({
           id: "swap-transaction",
-          title: terminalFailure ? t("ui.swapFailed") : t("ui.swapStatusAttention"),
-          message: terminalFailure ? t("ui.reviewBalancesBeforeRetry") : t("ui.finalStatusUnavailable"),
+          title: terminalFailure ? t("ui.swapFailed") : reorged ? "Swap needs reconciliation" : t("ui.swapStatusAttention"),
+          message: terminalFailure ? t("ui.reviewBalancesBeforeRetry") : reorged ? message : t("ui.finalStatusUnavailable"),
           transactionId: submittedTransactionId,
           tone: "error",
           dismissible: true,

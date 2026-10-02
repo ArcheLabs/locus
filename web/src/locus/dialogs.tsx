@@ -110,6 +110,7 @@ function stageLabel(stage: CreateAssetStage): string {
 function preparationPhaseKey(phase: OwnershipPreparationPhase): TranslationKey {
   switch (phase) {
     case "VALIDATING_DEPLOYMENT": return "ui.assetStage.phaseDeployment";
+    case "READING_BEST_CONTEXT": return "ui.assetStage.phaseBest";
     case "READING_FINALIZED_CONTEXT": return "ui.assetStage.phaseFinalized";
     case "READING_MANAGED_STATE": return "ui.assetStage.phaseOwnership";
     case "READING_NONCE": return "ui.assetStage.phaseNonce";
@@ -233,6 +234,13 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
     setStageMessage({ key: "ui.assetStage.checkingSaved", params: { transactionId: record.transactionId } });
     setError("");
     try {
+      const best = await locus.waitForBest(record.transactionId, { intervalMs: 1_000, timeoutMs: CREATE_ASSET_FINALIZATION_TIMEOUT_MS });
+      if (best.status === "reorged") throw new Error("TRANSACTION_REORGED");
+      if (best.status === "failed") throw new Error(best.error ?? "Create asset failed before best-chain inclusion.");
+      if (best.bestChainStatus === "included" && best.finalized !== true) {
+        setStageMessage("The asset is visible in the best chain and may still be reverted until finalization. A dependent Service action waits for finalized state under Formal.");
+        onCreated();
+      }
       const result = await resumeCreateAssetFinalization(
         record,
         (transactionId, actionHash) => locus.waitForActionByHash(transactionId, actionHash, { intervalMs: 1_000, timeoutMs: CREATE_ASSET_FINALIZATION_TIMEOUT_MS }),
@@ -253,9 +261,11 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
     } catch (cause) {
       const message = cause instanceof Error ? cause.message : "Unable to check the saved create-asset transaction.";
       setStage("FAILED");
-      setStageMessage(record.transactionId
-        ? { key: "ui.assetStage.resumeSaved", params: { transactionId: record.transactionId } }
-        : "The transaction status could not be confirmed.");
+      setStageMessage(message.includes("TRANSACTION_REORGED")
+        ? "The asset action was removed from the best chain. Check its status before retrying."
+        : record.transactionId
+          ? { key: "ui.assetStage.resumeSaved", params: { transactionId: record.transactionId } }
+          : "The transaction status could not be confirmed.");
       setError(message);
     } finally {
       activeResumeKeys.current.delete(record.key);
@@ -316,7 +326,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
     }
 
     setStage("PREPARING");
-    setStageMessage("Checking the deployment, finalized state, and Ownership nonce before opening your wallet.");
+    setStageMessage("Checking the deployment, best-chain state, and Ownership nonce before opening your wallet.");
     setError("");
     const timer = window.setTimeout(() => {
       let lastPhase: OwnershipPreparationPhase | null = null;
@@ -374,7 +384,7 @@ export function CreateAssetDialog({ open, locus, session, canPerformAuthorizedAc
     setStageMessage("Checking finalized asset state. A missing asset does not prove that a timed-out request was never queued.");
     try {
       const assetId = Uint8Array.from(record.assetId.slice(2).match(/.{2}/g)?.map((part) => Number.parseInt(part, 16)) ?? []);
-      const asset = await locus.getAsset(assetId);
+      const asset = await locus.getAssetFinalized(assetId);
       const expectedSupply = parseUnits(record.initialSupply, record.decimals);
       if (asset && asset.totalSupply === expectedSupply) {
         removeCreateAssetPending(window.localStorage, record.key);

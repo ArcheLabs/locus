@@ -6,6 +6,7 @@ export type SendState =
   | { status: "awaiting-signature" }
   | { status: "submitting" }
   | { status: "submitted"; transactionId: string; actionHash?: string; networkId: string }
+  | { status: "best-included"; transactionId: string; actionHash?: string; networkId: string }
   | { status: "applied"; transactionId: string; actionHash?: string; networkId: string }
   | { status: "failed"; error: string; networkId?: string; transactionId?: string };
 
@@ -16,10 +17,15 @@ export async function transferAndWait(
   amount: bigint,
   networkId: string,
   onSubmitted: (result: SubmitActionResult) => void,
+  onBestIncluded?: () => void,
 ): Promise<Extract<SendState, { status: "applied" }>> {
   const submitted = await locus.transfer(assetId, recipient, amount);
   onSubmitted(submitted);
-  const result = await locus.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+  const best = await locus.waitForBest(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+  if (best.status === "reorged") throw new Error("The transfer was removed from the best chain. Check its status before retrying.");
+  if (best.status === "failed") throw new Error(best.error ?? "Transaction failed before best-chain inclusion.");
+  if (best.bestChainStatus === "included" && best.finalized !== true) onBestIncluded?.();
+  const result = await locus.waitForFinalized(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
   if (result.actionReceipt.status !== "applied") {
     throw new Error(`Transaction failed${result.actionReceipt.errorCode === null ? "" : ` (error ${result.actionReceipt.errorCode})`}`);
   }

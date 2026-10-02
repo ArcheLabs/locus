@@ -203,11 +203,34 @@ export class LocusClient {
   }
 
   private async queryValue(queryName: string, key?: LocusValue): Promise<LocusValue | null> {
-    const result = await this.jamClient.queryLatest(queryName, key);
-    return result.value;
+    return (await this.queryBest(queryName, key)).value;
+  }
+
+  /** Read one state item from a single, reorgable best-chain snapshot. */
+  async queryBest(queryName: string, key?: LocusValue) {
+    if (!this.jamClient.queryBest) {
+      throw new Error("the configured JamScript client does not expose best-context queries");
+    }
+    return this.jamClient.queryBest(queryName, key);
+  }
+
+  /** Read one state item from a finalized snapshot for accounting or audit. */
+  async queryFinalized(queryName: string, key?: LocusValue) {
+    if (this.jamClient.queryFinalized) return this.jamClient.queryFinalized(queryName, key);
+    return this.jamClient.queryLatest(queryName, key);
   }
 
   async waitForAction(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }) {
+    return this.jamClient.waitForAction(transactionId, options);
+  }
+
+  async waitForBest(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }) {
+    if (!this.jamClient.waitForBest) throw new Error("the configured JamScript client does not expose best-chain transaction status");
+    return this.jamClient.waitForBest(transactionId, options);
+  }
+
+  async waitForFinalized(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }) {
+    if (this.jamClient.waitForFinalized) return this.jamClient.waitForFinalized(transactionId, options);
     return this.jamClient.waitForAction(transactionId, options);
   }
 
@@ -260,6 +283,11 @@ export class LocusClient {
   async finalizedContext() {
     if (!this.jamClient.finalizedContext) throw new Error("the configured JamScript client does not expose finalized context");
     return this.jamClient.finalizedContext();
+  }
+
+  async bestContext() {
+    if (!this.jamClient.bestContext) throw new Error("the configured JamScript client does not expose best context");
+    return this.jamClient.bestContext();
   }
 
   async createAsset(
@@ -390,6 +418,11 @@ export class LocusClient {
   async getAsset(assetId: AssetId): Promise<Asset | null> {
     assertId(assetId, "assetId");
     return asAsset(await this.queryValue("getAsset", assetId));
+  }
+
+  async getAssetFinalized(assetId: AssetId): Promise<Asset | null> {
+    assertId(assetId, "assetId");
+    return asAsset((await this.queryFinalized("getAsset", assetId)).value);
   }
 
   async balanceOf(assetId: AssetId, owner: Ownership): Promise<Amount> {

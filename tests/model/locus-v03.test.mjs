@@ -68,7 +68,7 @@ test("SDK defaults initialHolder to session.subject and validates explicit Owner
       calls.push({ actionName, input, payload: encodeActionPayload(abi, actionName, input) });
       return { transactionId: "0xcreate", status: "queued", actionHash: "0xaction" };
     },
-    async queryLatest() { return { value: null }; },
+    async queryBest() { return { value: null }; },
     async waitForAction() { return { status: "applied" }; },
   };
   const locus = new LocusClient(adapter, { signer, subject: alice });
@@ -305,7 +305,7 @@ test("SDK quote, pool read and slippage helper use exact integer rules", async (
     async submitOwnershipAction(actionName, input) {
       return { actionName, input, transactionId: "0x1", status: "queued", actionHash: "0x2" };
     },
-    async queryLatest(name, queryKey) { return { value: model.query(name, queryKey) }; },
+    async queryBest(name, queryKey) { return { value: model.query(name, queryKey) }; },
     async waitForAction() { return { status: "applied" }; },
   };
   const client = new LocusClient(adapter, null);
@@ -343,7 +343,7 @@ test("SDK supplies a quoted withdrawal for the division-free service action", as
       calls.push({ actionName, input, payload: encodeActionPayload(abi, actionName, input) });
       return { transactionId: "0xremove", status: "queued", actionHash: "0xaction" };
     },
-    async queryLatest(name, queryKey) { return { value: model.query(name, queryKey) }; },
+    async queryBest(name, queryKey) { return { value: model.query(name, queryKey) }; },
   };
   const locus = new LocusClient(adapter, { signer, subject: alice });
   await locus.removePoolLiquidity(assetB, assetA, 250n, 0n, 0n);
@@ -361,7 +361,7 @@ test("SDK supplies client-computed initial shares in create and empty-pool initi
       calls.push({ actionName, input, payload: encodeActionPayload(abi, actionName, input) });
       return { transactionId: `0x${calls.length}`, status: "queued", actionHash: "0xaction" };
     },
-    async queryLatest(name) {
+    async queryBest(name) {
       return { value: name === "getPool" ? { version: 2, reserve0: 0n, reserve1: 0n, totalShares: 0n } : null };
     },
   };
@@ -407,7 +407,7 @@ test("permissionless liquidity math stays integer-only at u64/u128 boundaries", 
 
 test("SDK treats never-written asset and pool counts as zero on a fresh Service", async () => {
   const adapter = {
-    async queryLatest() { return { value: null }; },
+    async queryBest() { return { value: null }; },
     async submitOwnershipAction() { throw new Error("unexpected submission"); },
   };
   const locus = new LocusClient(adapter, null);
@@ -424,7 +424,7 @@ test("SDK hydrates V2 pool key fields from the query key", async () => {
     totalShares: 236n,
   };
   const adapter = {
-    async queryLatest(queryName) {
+    async queryBest(queryName) {
       if (queryName === "getPool") return { value };
       if (queryName === "getPoolCount") return { value: 1n };
       if (queryName === "getPoolByIndex") return { value: canonical };
@@ -448,7 +448,7 @@ test("SDK pool listing is bounded and supports an explicit page offset", async (
     asset1: asset,
   }));
   const adapter = {
-    async queryLatest(name, queryKey) {
+    async queryBest(name, queryKey) {
       if (name === "getPoolCount") return { value: BigInt(keys.length) };
       if (name === "getPoolByIndex") return { value: keys[Number(queryKey)] };
       if (name === "getPool") return { value: { version: 2, reserve0: 10n, reserve1: 20n, totalShares: 14n } };
@@ -471,7 +471,7 @@ test("SDK lists only an Ownership's active indexed liquidity positions", async (
   model.transfer(alice, assetB, bob, 2_000n);
   model.addPoolLiquidityAs(bob, bob, assetA, assetB, 1_000n, 2_000n, 1_000n);
   const adapter = {
-    async queryLatest(name, queryKey) { return { value: model.query(name, queryKey) }; },
+    async queryBest(name, queryKey) { return { value: model.query(name, queryKey) }; },
     async submitOwnershipAction() { throw new Error("unexpected submission"); },
   };
   const locus = new LocusClient(adapter, null);
