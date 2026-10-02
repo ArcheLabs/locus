@@ -45,8 +45,16 @@ require a session.
 
 Network-mode transfers resolve EVM, Polkadot, and Locus ID destinations through
 the SDK, parse amounts as exact `bigint` u128 values, show a review step, call
-`LocusClient.transfer()`, wait for `transactionId` finalization, and show the
-receipt. Matrix, Telegram, Email, and GitHub remain visible as resolver
+`LocusClient.transfer()`, report Best inclusion as provisional progress, and
+wait for a finalized receipt matching the saved action hash before recording
+success. The same tracking rule applies to swaps, liquidity, asset creation,
+and Matrix controller authorization. Pending operations are stored locally
+with network, Service, account, transaction, and action identity; signatures,
+wallet secrets, and Matrix tokens are not stored. A timeout or reorganization
+keeps the original operation available for checking and does not offer an
+automatic replacement payment. Matrix authorization is enabled only after a
+finalized state query confirms the controller is active. Matrix, Telegram,
+Email, and GitHub remain visible as resolver
 extension points until a corresponding resolver is published.
 
 The Assets page exposes real `createAsset` and `Receive` flows when Network

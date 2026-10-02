@@ -18,6 +18,7 @@ import { formatBasisPoints } from "../liquidity/liquidityMath.js";
 import type { GlobalTransactionNotice } from "../../components/GlobalNotifications.js";
 import { useI18n } from "../../i18n/I18nProvider.js";
 import { AssetBalanceStatus } from "../../components/AssetBalanceStatus.js";
+import { createPendingOperationTracker, pendingOperationsForScope, currentOperationScope, updatePendingOperation } from "../pendingOperations.js";
 
 type Submission = "idle" | "awaiting-signature" | "submitted" | "applied" | "failed";
 type Quote = { amountIn: bigint; amountOut: bigint; minimumAmountOut: bigint; feeAmount: bigint };
@@ -32,7 +33,7 @@ function sameScope(current: ((scope: LiquidityScope) => boolean) | undefined, sc
   return current ? current(scope) : true;
 }
 
-export function SwapPage({ networkMode, networkId, status, serviceId, locus, assets, pools, poolLoading, poolError, sessionOwner, connectionId, isScopeCurrent, canPerformAuthorizedAction, authorizationWaitMessage, onConnect, onApplied, onNotify, onTransactionNotice, onClearTransactionNotice, onRefreshAssets, onRefreshPools, getBalanceState }: {
+export function SwapPage({ networkMode, networkId, status, serviceId, locus, assets, pools, poolLoading, poolError, sessionOwner, connectionId, isScopeCurrent, canPerformAuthorizedAction, authorizationWaitMessage, onConnect, onApplied, onNotify, onTransactionNotice, onRefreshAssets, onRefreshPools, getBalanceState }: {
   networkMode: boolean;
   networkId: string;
   status: string;
@@ -51,7 +52,6 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   onApplied: (item: { assetIn: string; assetOut: string; amountIn: string; amountOut: string; transactionId: string; networkId: string }) => void;
   onNotify: (message: string) => void;
   onTransactionNotice: (notice: GlobalTransactionNotice) => void;
-  onClearTransactionNotice: (id: string) => void;
   onRefreshAssets: () => Promise<unknown>;
   onRefreshPools: () => Promise<unknown>;
   getBalanceState: (asset: AssetView) => "known" | "loading" | "failed" | "signed-out";
@@ -189,52 +189,58 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
     setReviewOpen(false);
     setSubmission("awaiting-signature");
     setActionError("");
-    onClearTransactionNotice("swap-transaction");
+    const subject = locus.session?.subject ?? sessionOwner;
+    const tracking = createPendingOperationTracker(locus, networkId, subject, "swap");
+    const noticeId = `operation-${tracking.operation.operationId}`;
     let submittedTransactionId = "";
+    let resumeTracking: (() => ReturnType<LocusClient["waitForFinalized"]>) | undefined;
     let terminalFailure = false;
-    let reorged = false;
     try {
-      const submitted = await locus.swapExactIn(assetIn.assetId, assetOut.assetId, quote.amountIn, quote.minimumAmountOut);
+      const submitted = await locus.swapExactIn(assetIn.assetId, assetOut.assetId, quote.amountIn, quote.minimumAmountOut, tracking.submissionOptions);
       submittedTransactionId = submitted.transactionId;
+      tracking.onSubmitted(submitted);
       onTransactionNotice({
-        id: "swap-transaction",
-        title: "Swap pending",
-        message: "Waiting for confirmation.",
+        id: noticeId,
+        title: t("ui.swapPending"),
+        message: t("lifecycle.accepted"),
         transactionId: submitted.transactionId,
         busy: true,
       });
-      if (!sameScope(isScopeCurrent, expectedScope)) {
-        const receipt = await locus.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
-        onClearTransactionNotice("swap-transaction");
-        if (receipt.actionReceipt.status !== "applied") {
-          onTransactionNotice({ id: "swap-transaction", title: "Swap failed", message: "The action was not applied. Review the current balances before retrying.", transactionId: submitted.transactionId, tone: "error", dismissible: true });
-        }
-        setSubmission("idle");
-        return;
-      }
       setSubmission("submitted");
-      const best = await locus.waitForBest(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
-      if (best.status === "reorged") {
-        reorged = true;
-        throw new Error("The swap was removed from the best chain. Check its status before retrying.");
-      }
-      if (best.status === "failed") throw new Error(best.error ?? "Swap failed before best-chain inclusion.");
-      if (best.bestChainStatus === "included" && best.finalized !== true) {
+      const onUpdate = (update: Parameters<typeof tracking.onUpdate>[0]) => {
+        tracking.onUpdate(update);
+        const message = update.status.status === "reorged" ? t("lifecycle.reorged")
+          : update.status.status === "submission_unknown" ? t("lifecycle.submissionUnknown")
+            : update.confirmation === "best" ? t("lifecycle.bestIncluded")
+              : update.confirmation === "finalized"
+                ? update.actionResult === "applied" ? t("lifecycle.finalizedApplied")
+                  : update.actionResult ? t("lifecycle.finalizedFailure") : t("lifecycle.finalizedReceiptPending")
+                : t("lifecycle.accepted");
         onTransactionNotice({
-          id: "swap-transaction",
-          title: "Swap included in the best chain",
-          message: "The swap is visible in the current chain and can still be reverted until finalized. A follow-up swap waits because Formal builds the next Service Work from finalized pool state.",
-          transactionId: submitted.transactionId,
-          busy: true,
+          id: noticeId,
+          title: update.confirmation === "finalized" && update.actionResult && update.actionResult !== "applied" ? t("ui.swapFailed") : t("ui.swapPending"),
+          message,
+          transactionId: update.transactionId,
+          busy: (update.confirmation !== "finalized" || !update.actionResult) && update.status.status !== "submission_unknown",
+          ...(update.confirmation === "finalized" && update.actionResult && update.actionResult !== "applied" ? { tone: "error" as const } : {}),
+          dismissible: true,
         });
-        await Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
-      }
-      const receipt = await locus.waitForAction(submitted.transactionId, { intervalMs: 500, timeoutMs: 180_000 });
+        if (update.confirmation === "best") void Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
+      };
+      const wait = () => locus.waitForFinalized(submitted.transactionId, {
+        actionHash: submitted.actionHash,
+        intervalMs: 500,
+        timeoutMs: 180_000,
+        onUpdate,
+      });
+      resumeTracking = wait;
+      const receipt = await wait();
+      tracking.onFinalized(receipt);
       if (receipt.actionReceipt.status !== "applied") {
         terminalFailure = true;
         throw new Error(`Swap failed${receipt.actionReceipt.errorCode === null ? "" : ` (error ${receipt.actionReceipt.errorCode})`}`);
       }
-      onClearTransactionNotice("swap-transaction");
+      onTransactionNotice({ id: noticeId, title: t("swap.completed"), message: t("lifecycle.finalizedApplied"), transactionId: submitted.transactionId, dismissible: true });
       if (!sameScope(isScopeCurrent, expectedScope)) {
         setSubmission("idle");
         return;
@@ -257,16 +263,29 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       await Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
       onNotify(t("swap.completed"));
     } catch (cause) {
-      const causeCode = cause && typeof cause === "object" && "code" in cause ? (cause as { code?: unknown }).code : undefined;
-      if (causeCode === -32042 || (cause instanceof Error && cause.message.includes("TRANSACTION_REORGED"))) reorged = true;
+      tracking.onSubmissionUnknown(cause);
       const message = friendlySwapError(cause);
+      if (cause && typeof cause === "object" && (cause as { code?: unknown }).code === "WORK_FAILED") {
+        const lastStatus = (cause as { lastStatus?: { status?: string } }).lastStatus;
+        updatePendingOperation(window.localStorage, tracking.operation.operationId, {
+          phase: "failed", confirmation: "unknown", lastKnownStatus: lastStatus?.status ?? "failed", lastError: message,
+        });
+      }
+      const saved = pendingOperationsForScope(window.localStorage, currentOperationScope(locus, networkId, subject))
+        .find((operation) => operation.operationId === tracking.operation.operationId);
+      const unresolved = saved && !["failed", "finalized", "not-submitted"].includes(saved.phase);
       if (submittedTransactionId) {
         onTransactionNotice({
-          id: "swap-transaction",
-          title: terminalFailure ? t("ui.swapFailed") : reorged ? "Swap needs reconciliation" : t("ui.swapStatusAttention"),
-          message: terminalFailure ? t("ui.reviewBalancesBeforeRetry") : reorged ? message : t("ui.finalStatusUnavailable"),
+          id: noticeId,
+          title: terminalFailure || saved?.phase === "failed" ? t("ui.swapFailed") : t("ui.swapStatusAttention"),
+          message: terminalFailure || saved?.phase === "failed" ? t("ui.reviewBalancesBeforeRetry") : unresolved ? t("lifecycle.timeout") : t("ui.finalStatusUnavailable"),
           transactionId: submittedTransactionId,
-          tone: "error",
+          ...(unresolved ? {} : { tone: "error" as const }),
+          busy: Boolean(unresolved),
+          actionLabel: unresolved ? t("common.retry") : undefined,
+          onAction: unresolved ? () => {
+            if (resumeTracking) void resumeTracking();
+          } : undefined,
           dismissible: true,
         });
       }
@@ -274,8 +293,8 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
         setSubmission("idle");
         return;
       }
-      setSubmission("failed");
-      setActionError(submittedTransactionId ? "" : message);
+      setSubmission(unresolved ? "submitted" : "failed");
+      setActionError(submittedTransactionId && unresolved ? "" : message);
     }
   }
 

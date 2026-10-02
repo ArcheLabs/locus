@@ -163,66 +163,84 @@ export class LocusClient {
         assertOwnership(this.session.subject, "session.subject");
         return this.session;
     }
-    async submit(actionName, input) {
+    async submit(actionName, input, options = {}) {
         try {
+            await this.jamClient.assertTransactionLifecycleSupport();
             const session = this.requireSession();
-            return await this.jamClient.submitOwnershipAction(actionName, { ...input, subject: session.subject }, session.signer);
+            const actionInput = { ...input, subject: session.subject };
+            if (Object.keys(options).length === 0) {
+                return await this.jamClient.submitOwnershipAction(actionName, actionInput, session.signer);
+            }
+            return await this.jamClient.submitOwnershipAction(actionName, actionInput, session.signer, options);
         }
         catch (error) {
             throw normalizeLocusError(error) ?? error;
         }
     }
     async queryValue(queryName, key) {
-        const result = await this.jamClient.queryLatest(queryName, key);
-        return result.value;
+        return (await this.queryBest(queryName, key)).value;
+    }
+    /** Read one state item from a single, reorgable best-chain snapshot. */
+    async queryBest(queryName, key) {
+        return this.jamClient.queryBest(queryName, key);
+    }
+    /** Read one state item from a finalized snapshot for accounting or audit. */
+    async queryFinalized(queryName, key) {
+        return this.jamClient.queryFinalized(queryName, key);
     }
     async waitForAction(transactionId, options) {
         return this.jamClient.waitForAction(transactionId, options);
     }
+    async waitForBest(transactionId, options) {
+        return this.jamClient.waitForBest(transactionId, options);
+    }
+    async waitForFinalized(transactionId, options) {
+        return this.jamClient.waitForFinalized(transactionId, options);
+    }
+    async watchTransaction(transactionId, options) {
+        return this.jamClient.watchTransaction(transactionId, options);
+    }
     async waitForActionByHash(transactionId, actionHash, options) {
-        return this.jamClient.waitForAction(transactionId, actionHash, options);
+        return this.jamClient.waitForFinalized(transactionId, { ...options, actionHash });
+    }
+    assertTransactionLifecycleSupport() {
+        return this.jamClient.assertTransactionLifecycleSupport();
+    }
+    transactionScope() {
+        return this.jamClient.transactionScope();
     }
     /** Complete all deployment/state reads before the caller opens a wallet. */
-    prepareOwnershipAction(actionName, input, options = {}) {
+    async prepareOwnershipAction(actionName, input, options = {}) {
+        await this.jamClient.assertTransactionLifecycleSupport();
         const session = this.requireSession();
-        const prepare = this.jamClient.prepareOwnershipAction;
-        if (!prepare)
-            throw new Error("the configured JamScript client does not expose phased Ownership actions");
-        return prepare.call(this.jamClient, actionName, { ...input, subject: session.subject }, session.signer, options);
+        return this.jamClient.prepareOwnershipAction(actionName, { ...input, subject: session.subject }, session.signer, options);
     }
     /** Starts the wallet request synchronously when called from a user gesture. */
     signPreparedOwnershipAction(prepared) {
         this.requireSession();
-        const sign = this.jamClient.signPreparedOwnershipAction;
-        if (!sign)
-            throw new Error("the configured JamScript client does not expose phased Ownership actions");
-        return sign.call(this.jamClient, prepared);
+        return this.jamClient.signPreparedOwnershipAction(prepared);
     }
     abandonPreparedOwnershipAction(prepared) {
-        const abandon = this.jamClient.abandonPreparedOwnershipAction;
-        if (!abandon)
-            return;
-        abandon.call(this.jamClient, prepared);
+        this.jamClient.abandonPreparedOwnershipAction(prepared);
     }
-    submitSignedOwnershipAction(signed) {
+    abandonSignedOwnershipAction(signed) {
+        this.jamClient.abandonSignedOwnershipAction(signed);
+    }
+    submitSignedOwnershipAction(signed, options) {
         this.requireSession();
-        const submit = this.jamClient.submitSignedOwnershipAction;
-        if (!submit)
-            throw new Error("the configured JamScript client does not expose phased Ownership actions");
-        return submit.call(this.jamClient, signed);
+        return this.jamClient.submitSignedOwnershipAction(signed, options);
     }
     async transactionStatus(transactionId) {
-        if (!this.jamClient.transactionStatus)
-            throw new Error("the configured JamScript client does not expose transaction status");
         return this.jamClient.transactionStatus(transactionId);
     }
     async finalizedContext() {
-        if (!this.jamClient.finalizedContext)
-            throw new Error("the configured JamScript client does not expose finalized context");
         return this.jamClient.finalizedContext();
     }
-    async createAsset(assetId, name, symbol, decimals, initialSupply, initialHolder) {
-        return this.submit("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder));
+    async bestContext() {
+        return this.jamClient.bestContext();
+    }
+    async createAsset(assetId, name, symbol, decimals, initialSupply, initialHolder, submissionOptions = {}) {
+        return this.submit("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder), submissionOptions);
     }
     prepareCreateAsset(assetId, name, symbol, decimals, initialSupply, initialHolder, onProgress) {
         return this.prepareOwnershipAction("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder), { onProgress });
@@ -250,54 +268,63 @@ export class LocusClient {
             initialHolder: holder,
         };
     }
-    async transfer(assetId, to, amount) {
+    async transfer(assetId, to, amount, submissionOptions = {}) {
         assertId(assetId, "assetId");
         assertOwnership(to, "to");
         assertAmount(amount);
-        return this.submit("transfer", { assetId, to, amount });
+        return this.submit("transfer", { assetId, to, amount }, submissionOptions);
     }
-    async approve(assetId, spender, amount) {
+    async approve(assetId, spender, amount, submissionOptions = {}) {
         assertId(assetId, "assetId");
         assertOwnership(spender, "spender");
         assertAmount(amount);
-        return this.submit("approve", { assetId, spender, amount });
+        return this.submit("approve", { assetId, spender, amount }, submissionOptions);
     }
-    async transferFrom(assetId, from, to, amount) {
+    async transferFrom(assetId, from, to, amount, submissionOptions = {}) {
         assertId(assetId, "assetId");
         assertOwnership(from, "from");
         assertOwnership(to, "to");
         assertAmount(amount);
-        return this.submit("transferFrom", { assetId, from, to, amount });
+        return this.submit("transferFrom", { assetId, from, to, amount }, submissionOptions);
     }
-    async mint(assetId, to, amount) {
+    async mint(assetId, to, amount, submissionOptions = {}) {
         assertId(assetId, "assetId");
         assertOwnership(to, "to");
         assertAmount(amount);
-        return this.submit("mint", { assetId, to, amount });
+        return this.submit("mint", { assetId, to, amount }, submissionOptions);
     }
-    async burn(assetId, amount) {
+    async burn(assetId, amount, submissionOptions = {}) {
         assertId(assetId, "assetId");
         assertAmount(amount);
-        return this.submit("burn", { assetId, amount });
+        return this.submit("burn", { assetId, amount }, submissionOptions);
     }
-    async authorizeMatrixController(proof) {
+    async authorizeMatrixController(proof, submissionOptions = {}) {
         if (!(proof instanceof Uint8Array) || proof.length === 0 || proof.length > 4096) {
             throw new Error("Matrix controller authorization proof must be between 1 and 4096 bytes");
         }
-        return this.submit("authorizeMatrixController", { proof });
+        return this.submit("authorizeMatrixController", { proof }, submissionOptions);
     }
-    async addController(controller) {
+    async addController(controller, submissionOptions = {}) {
         assertOwnership(controller, "controller");
-        return this.submit("addController", { controller });
+        return this.submit("addController", { controller }, submissionOptions);
     }
-    async revokeController(controller) {
+    async revokeController(controller, submissionOptions = {}) {
         assertOwnership(controller, "controller");
-        return this.submit("revokeController", { controller });
+        return this.submit("revokeController", { controller }, submissionOptions);
     }
     async getControllerStatus(subject, controller) {
         assertOwnership(subject, "subject");
         assertOwnership(controller, "controller");
         const value = await this.queryValue("getControllerGrant", controllerGrantQueryKey(subject, controller));
+        return this.decodeControllerStatus(value);
+    }
+    async getControllerStatusFinalized(subject, controller) {
+        assertOwnership(subject, "subject");
+        assertOwnership(controller, "controller");
+        const value = (await this.queryFinalized("getControllerGrant", controllerGrantQueryKey(subject, controller))).value;
+        return this.decodeControllerStatus(value);
+    }
+    decodeControllerStatus(value) {
         if (value === null)
             return "absent";
         if (value === 1n || value === 1)
@@ -312,6 +339,10 @@ export class LocusClient {
     async getAsset(assetId) {
         assertId(assetId, "assetId");
         return asAsset(await this.queryValue("getAsset", assetId));
+    }
+    async getAssetFinalized(assetId) {
+        assertId(assetId, "assetId");
+        return asAsset((await this.queryFinalized("getAsset", assetId)).value);
     }
     async balanceOf(assetId, owner) {
         assertId(assetId, "assetId");
@@ -365,16 +396,16 @@ export class LocusClient {
         const key = canonicalPoolKey(assetA, assetB);
         return new BoundPool(this, key.asset0, key.asset1);
     }
-    async createPool(assetA, assetB, amountA, amountB) {
+    async createPool(assetA, assetB, amountA, amountB, submissionOptions = {}) {
         canonicalPoolKey(assetA, assetB);
         assertPoolReserve(amountA, "amountA");
         assertPoolReserve(amountB, "amountB");
         if (amountA === 0n || amountB === 0n)
             throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
         const initialShares = quoteInitialLiquidity(amountA, amountB).sharesMinted;
-        return this.submit("createPool", { assetA, assetB, amountA, amountB, initialShares });
+        return this.submit("createPool", { assetA, assetB, amountA, amountB, initialShares }, submissionOptions);
     }
-    async addPoolLiquidity(assetA, assetB, maxAmountA, maxAmountB, minShares) {
+    async addPoolLiquidity(assetA, assetB, maxAmountA, maxAmountB, minShares, submissionOptions = {}) {
         canonicalPoolKey(assetA, assetB);
         assertPoolReserve(maxAmountA, "maxAmountA");
         assertPoolReserve(maxAmountB, "maxAmountB");
@@ -403,9 +434,9 @@ export class LocusClient {
             sharesMinted: quote.sharesMinted,
             minShares,
             initialShares,
-        });
+        }, submissionOptions);
     }
-    async removePoolLiquidity(assetA, assetB, shares, minAmountA, minAmountB) {
+    async removePoolLiquidity(assetA, assetB, shares, minAmountA, minAmountB, submissionOptions = {}) {
         canonicalPoolKey(assetA, assetB);
         assertAmount(shares, "shares");
         assertAmount(minAmountA, "minAmountA");
@@ -427,7 +458,7 @@ export class LocusClient {
             amountBOut: assetAIs0 ? quote.amount1 : quote.amount0,
             minAmountA,
             minAmountB,
-        });
+        }, submissionOptions);
     }
     async liquiditySharesOf(assetA, assetB, owner) {
         const key = canonicalPoolKey(assetA, assetB);
@@ -490,13 +521,13 @@ export class LocusClient {
         }
         return positions;
     }
-    async swapExactIn(assetIn, assetOut, amountIn, minAmountOut) {
+    async swapExactIn(assetIn, assetOut, amountIn, minAmountOut, submissionOptions = {}) {
         canonicalPoolKey(assetIn, assetOut);
         assertPoolReserve(amountIn, "amountIn");
         assertAmount(minAmountOut, "minAmountOut");
         if (amountIn === 0n)
             throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
-        return this.submit("swapExactIn", { assetIn, assetOut, amountIn, minAmountOut });
+        return this.submit("swapExactIn", { assetIn, assetOut, amountIn, minAmountOut }, submissionOptions);
     }
     async quoteExactIn(assetIn, assetOut, amountIn) {
         const pool = await this.getPool(assetIn, assetOut);
@@ -532,14 +563,14 @@ export class BoundPool {
     quoteExactIn(assetIn, amountIn) {
         return this.client.quoteExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn);
     }
-    swapExactIn(assetIn, amountIn, minAmountOut) {
-        return this.client.swapExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn, minAmountOut);
+    swapExactIn(assetIn, amountIn, minAmountOut, submissionOptions) {
+        return this.client.swapExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn, minAmountOut, submissionOptions);
     }
-    addLiquidity(maxAmount0, maxAmount1, minShares) {
-        return this.client.addPoolLiquidity(this.asset0, this.asset1, maxAmount0, maxAmount1, minShares);
+    addLiquidity(maxAmount0, maxAmount1, minShares, submissionOptions) {
+        return this.client.addPoolLiquidity(this.asset0, this.asset1, maxAmount0, maxAmount1, minShares, submissionOptions);
     }
-    removeLiquidity(shares, minAmount0, minAmount1) {
-        return this.client.removePoolLiquidity(this.asset0, this.asset1, shares, minAmount0, minAmount1);
+    removeLiquidity(shares, minAmount0, minAmount1, submissionOptions) {
+        return this.client.removePoolLiquidity(this.asset0, this.asset1, shares, minAmount0, minAmount1, submissionOptions);
     }
     sharesOf(owner) {
         return this.client.liquiditySharesOf(this.asset0, this.asset1, owner);
@@ -582,22 +613,22 @@ export class BoundAsset {
     balanceOf(owner) {
         return this.client.balanceOf(this.assetId, owner);
     }
-    transfer(to, amount) {
-        return this.client.transfer(this.assetId, to, amount);
+    transfer(to, amount, submissionOptions) {
+        return this.client.transfer(this.assetId, to, amount, submissionOptions);
     }
-    approve(spender, amount) {
-        return this.client.approve(this.assetId, spender, amount);
+    approve(spender, amount, submissionOptions) {
+        return this.client.approve(this.assetId, spender, amount, submissionOptions);
     }
     allowance(owner, spender) {
         return this.client.allowance(this.assetId, owner, spender);
     }
-    transferFrom(from, to, amount) {
-        return this.client.transferFrom(this.assetId, from, to, amount);
+    transferFrom(from, to, amount, submissionOptions) {
+        return this.client.transferFrom(this.assetId, from, to, amount, submissionOptions);
     }
-    mint(to, amount) {
-        return this.client.mint(this.assetId, to, amount);
+    mint(to, amount, submissionOptions) {
+        return this.client.mint(this.assetId, to, amount, submissionOptions);
     }
-    burn(amount) {
-        return this.client.burn(this.assetId, amount);
+    burn(amount, submissionOptions) {
+        return this.client.burn(this.assetId, amount, submissionOptions);
     }
 }

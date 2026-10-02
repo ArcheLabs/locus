@@ -25,6 +25,12 @@ const treasury = evmOwnership("0x78B02E176e587E163661fBe70232CCDDEb11759e");
 const assetA = id(11);
 const assetB = id(22);
 
+const lifecycleSupport = {
+  async assertTransactionLifecycleSupport() {
+    return { transactionLifecycleVersion: 1, bestChainTracking: true, strictFinalizedReceipts: true };
+  },
+};
+
 function expectCode(code, callback) {
   assert.throws(callback, (error) => error?.code === code, `expected Locus abort ${code}`);
 }
@@ -63,7 +69,7 @@ test("authorized controller can issue to a different initial holder", () => {
 test("SDK defaults initialHolder to session.subject and validates explicit Ownership", async () => {
   const calls = [];
   const signer = { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } };
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction(actionName, input) {
       calls.push({ actionName, input, payload: encodeActionPayload(abi, actionName, input) });
       return { transactionId: "0xcreate", status: "queued", actionHash: "0xaction" };
@@ -301,7 +307,7 @@ test("reserve bounds protect u128 multiplication and empty pools reject quotes",
 test("SDK quote, pool read and slippage helper use exact integer rules", async () => {
   const model = fundedModel();
   model.createPoolAs(alice, alice, assetA, assetB, 100_000n, 200_000n);
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction(actionName, input) {
       return { actionName, input, transactionId: "0x1", status: "queued", actionHash: "0x2" };
     },
@@ -338,7 +344,7 @@ test("SDK supplies a quoted withdrawal for the division-free service action", as
   model.createPoolAs(alice, alice, assetA, assetB, 100_000n, 200_000n);
   const calls = [];
   const signer = { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } };
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction(actionName, input) {
       calls.push({ actionName, input, payload: encodeActionPayload(abi, actionName, input) });
       return { transactionId: "0xremove", status: "queued", actionHash: "0xaction" };
@@ -356,7 +362,7 @@ test("SDK supplies a quoted withdrawal for the division-free service action", as
 test("SDK supplies client-computed initial shares in create and empty-pool initialize actions", async () => {
   const calls = [];
   const signer = { async getController() { return alice; }, async signJamScriptAction() { return new Uint8Array([1]); } };
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async submitOwnershipAction(actionName, input) {
       calls.push({ actionName, input, payload: encodeActionPayload(abi, actionName, input) });
       return { transactionId: `0x${calls.length}`, status: "queued", actionHash: "0xaction" };
@@ -406,7 +412,7 @@ test("permissionless liquidity math stays integer-only at u64/u128 boundaries", 
 });
 
 test("SDK treats never-written asset and pool counts as zero on a fresh Service", async () => {
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async queryBest() { return { value: null }; },
     async submitOwnershipAction() { throw new Error("unexpected submission"); },
   };
@@ -423,7 +429,7 @@ test("SDK hydrates V2 pool key fields from the query key", async () => {
     reserve1: 456n,
     totalShares: 236n,
   };
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async queryBest(queryName) {
       if (queryName === "getPool") return { value };
       if (queryName === "getPoolCount") return { value: 1n };
@@ -447,7 +453,7 @@ test("SDK pool listing is bounded and supports an explicit page offset", async (
     asset0: assetA,
     asset1: asset,
   }));
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async queryBest(name, queryKey) {
       if (name === "getPoolCount") return { value: BigInt(keys.length) };
       if (name === "getPoolByIndex") return { value: keys[Number(queryKey)] };
@@ -470,7 +476,7 @@ test("SDK lists only an Ownership's active indexed liquidity positions", async (
   model.transfer(alice, assetA, bob, 1_000n);
   model.transfer(alice, assetB, bob, 2_000n);
   model.addPoolLiquidityAs(bob, bob, assetA, assetB, 1_000n, 2_000n, 1_000n);
-  const adapter = {
+  const adapter = { ...lifecycleSupport,
     async queryBest(name, queryKey) { return { value: model.query(name, queryKey) }; },
     async submitOwnershipAction() { throw new Error("unexpected submission"); },
   };

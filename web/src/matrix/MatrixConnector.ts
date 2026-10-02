@@ -10,6 +10,7 @@ import { createMatrixDeviceTrustMonitor, type MatrixDeviceTrustSnapshot } from "
 import { classifyMatrixProofFailure, missingMatrixProof, retryMatrixProofPreparation } from "./MatrixProofRetry.js";
 import { clearMatrixDeviceId, commitMatrixSessionAfterCryptoSetup, committedMatrixDeviceId, refreshMatrixOAuthToken, revokeMatrixOAuthSession, type MatrixOAuthSession } from "./MatrixOAuth.js";
 import { authenticateMatrixPassword } from "./MatrixPasswordLogin.js";
+import { createPendingOperationTracker } from "../locus/pendingOperations.js";
 
 export type MatrixStoredSession = MatrixOAuthSession;
 
@@ -68,6 +69,7 @@ type MatrixAuthorizationIntent = {
   networkDomain: string;
   serviceId: number;
   createdAt: number;
+  actionHash?: string;
 };
 
 type PendingMatrixControllerAuthorizationStore = {
@@ -117,7 +119,8 @@ function readPendingMatrixControllerAuthorizations(): PendingMatrixControllerAut
       || typeof (item as MatrixAuthorizationIntent).subjectKey !== "string" || typeof (item as MatrixAuthorizationIntent).controllerKey !== "string"
       || typeof (item as MatrixAuthorizationIntent).deviceId !== "string" || typeof (item as MatrixAuthorizationIntent).scopeKey !== "string"
       || typeof (item as MatrixAuthorizationIntent).networkId !== "string" || typeof (item as MatrixAuthorizationIntent).networkDomain !== "string"
-      || !Number.isSafeInteger((item as MatrixAuthorizationIntent).serviceId) || !Number.isFinite((item as MatrixAuthorizationIntent).createdAt))))) {
+      || !Number.isSafeInteger((item as MatrixAuthorizationIntent).serviceId) || !Number.isFinite((item as MatrixAuthorizationIntent).createdAt)
+      || ((item as MatrixAuthorizationIntent).actionHash !== undefined && typeof (item as MatrixAuthorizationIntent).actionHash !== "string"))))) {
     throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "Saved Matrix authorization recovery data is invalid; it was kept for inspection.");
   }
   return { version: 3, pending: parsed.pending as PendingMatrixControllerAuthorization[], intents: (parsed.intents ?? []) as MatrixAuthorizationIntent[], legacy: parsed.legacy as LegacyMatrixAuthorization[] };
@@ -169,6 +172,13 @@ function homeserverFromUserId(userId: string): string {
   const separator = userId.indexOf(":");
   if (separator < 2 || separator === userId.length - 1) throw new MatrixConnectorError("INVALID_LOGIN", "Enter a valid Matrix ID such as @alice:example.org");
   return `https://${userId.slice(separator + 1)}`;
+}
+
+function isDefiniteSubmissionRejection(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "number"
+    && (code < 0 || [400, 401, 403, 404, 422].includes(code));
 }
 
 export async function discoverHomeserver(userId: string, configured?: string): Promise<string> {
@@ -291,7 +301,7 @@ async function ensureMatrixController(
   const subjectKey = matrixOwnershipKeyHex(subject);
   const controllerKey = matrixOwnershipKeyHex(controllerOwnership);
   const pendingIdentity = { subjectKey, controllerKey, deviceId, scopeKey: scope.key };
-  const status = await scoped.getControllerStatus(subject, controllerOwnership);
+  const status = await scoped.getControllerStatusFinalized(subject, controllerOwnership);
   if (status === "revoked") {
     removePendingMatrixControllerAuthorization(pendingIdentity);
     throw new MatrixConnectorError(
@@ -303,11 +313,14 @@ async function ensureMatrixController(
     removePendingMatrixControllerAuthorization(pendingIdentity);
     return true;
   }
-  const settlePending = async (pending: PendingMatrixControllerAuthorization): Promise<"ready" | "expired" | "unknown"> => {
+  const settlePending = async (
+    pending: PendingMatrixControllerAuthorization,
+    tracking?: ReturnType<typeof createPendingOperationTracker>,
+  ): Promise<"ready" | "expired" | "unknown"> => {
     const deadline = Date.now() + 180_000;
     let lastStatus: Awaited<ReturnType<typeof locus.transactionStatus>> | undefined;
     const inspectChainAuthorization = async (): Promise<"ready" | "not-ready"> => {
-      const state = await scoped.getControllerStatus(subject, controllerOwnership);
+      const state = await scoped.getControllerStatusFinalized(subject, controllerOwnership);
       if (state === "active") {
         removePendingMatrixControllerAuthorization(pendingIdentity);
         return "ready";
@@ -345,17 +358,38 @@ async function ensureMatrixController(
         } else {
           onProgress("CONFIRMING");
         }
-        if (status.status === "imported") {
-          const receipt = status.actionIndex === null ? undefined : status.actionReceipts?.[status.actionIndex];
-          if (receipt && receipt.actionHash.toLowerCase() !== pending.actionHash.toLowerCase()) {
+        const remaining = Math.max(1, deadline - Date.now());
+        try {
+          const receipt = await locus.waitForFinalized(pending.transactionId, {
+            actionHash: pending.actionHash,
+            intervalMs: 1_000,
+            timeoutMs: Math.min(remaining, 5_000),
+            onUpdate: (update) => {
+              tracking?.onUpdate(update);
+              onProgress(update.status.status === "reorged" || update.status.status === "submission_unknown" ? "STATUS_UNKNOWN" : "CONFIRMING");
+            },
+          });
+          tracking?.onFinalized(receipt);
+          if (receipt.actionReceipt.status !== "applied") {
             removePendingMatrixControllerAuthorization(pendingIdentity);
-            throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The finalized transaction receipt did not match the saved Matrix authorization action.");
+            throw matrixControllerReceiptFailure(receipt.actionReceipt.errorCode);
           }
-          if (receipt && receipt.status !== "applied") {
+          if (await inspectChainAuthorization() === "ready") return "ready";
+        } catch (cause) {
+          const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
+          if (cause instanceof MatrixConnectorError) throw cause;
+          if (code === "WORK_FAILED") {
             removePendingMatrixControllerAuthorization(pendingIdentity);
-            throw matrixControllerReceiptFailure(receipt.errorCode);
+            throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", cause instanceof Error ? cause.message : "The authorization Work failed before producing a receipt.", { cause });
           }
-          if (receipt?.status === "applied" && await inspectChainAuthorization() === "ready") return "ready";
+          if (code === "LIFECYCLE_UNSUPPORTED" || code === "ACTION_IDENTITY_MISMATCH" || code === "ACTION_IDENTITY_AMBIGUOUS") {
+            throw new MatrixConnectorError("CONTROLLER_NOT_AUTHORIZED", "The Backend cannot verify the saved Matrix authorization transaction. Keep it pending and upgrade the Backend before retrying.", { cause });
+          }
+          if (code === "SUBMISSION_UNKNOWN" || code === "TIMEOUT" || code === "STATUS_UNAVAILABLE" || code === "RECEIPT_UNAVAILABLE") {
+            onProgress("STATUS_UNKNOWN");
+          } else {
+            throw cause;
+          }
         }
       } catch (cause) {
         const code = cause && typeof cause === "object" ? (cause as { code?: unknown }).code : undefined;
@@ -414,6 +448,12 @@ async function ensureMatrixController(
   const proof = keys.encodedProof;
   if (!proof) throw missingMatrixProof();
   const beforeSubmit = await locus.finalizedContext();
+  const tracking = createPendingOperationTracker(
+    scoped,
+    scope.networkId,
+    subject,
+    "matrix-controller-authorization",
+  );
   // Persist an ambiguity marker before calling the Service. If the request
   // succeeds but the response or transaction ID is lost, a later retry must
   // query chain state and must never blindly submit a duplicate.
@@ -430,10 +470,37 @@ async function ensureMatrixController(
   onProgress("SUBMITTING");
   let submitted: Awaited<ReturnType<typeof scoped.authorizeMatrixController>>;
   try {
-    submitted = await scoped.authorizeMatrixController(proof);
+    submitted = await scoped.authorizeMatrixController(proof, {
+      ...tracking.submissionOptions,
+      onSigned: async (info) => {
+        await tracking.submissionOptions.onSigned?.(info);
+        saveMatrixAuthorizationIntent({
+          subjectKey,
+          controllerKey,
+          deviceId,
+          scopeKey: scope.key,
+          networkId: scope.networkId,
+          networkDomain: scope.networkDomain,
+          serviceId: scope.serviceId,
+          createdAt: Date.now(),
+          actionHash: info.actionHash,
+        });
+      },
+    });
   } catch (cause) {
+    tracking.onSubmissionUnknown(cause);
+    const signedActionHash = tracking.getCurrent()?.actionHash;
+    if (!signedActionHash || isDefiniteSubmissionRejection(cause)) {
+      removePendingMatrixControllerAuthorization(pendingIdentity);
+      throw new MatrixConnectorError(
+        "CONTROLLER_SUBMISSION_REJECTED",
+        "The Matrix authorization was not accepted. You can retry after checking the displayed error.",
+        { cause },
+      );
+    }
     throw new MatrixConnectorError("CONTROLLER_SUBMISSION_UNKNOWN", "The authorization request may have been accepted. Its recovery marker was kept, and no duplicate request will be sent automatically.", { cause });
   }
+  tracking.onSubmitted(submitted);
   const submittedWithValidity = submitted as typeof submitted & { submittedSlot?: number; validUntil?: number };
   const submittedSlot = submittedWithValidity.submittedSlot ?? beforeSubmit.slot;
   const pending: PendingMatrixControllerAuthorization = {
@@ -457,7 +524,7 @@ async function ensureMatrixController(
     throw new MatrixConnectorError("CONTROLLER_SUBMISSION_UNKNOWN", "The authorization was submitted, but its transaction reference could not be saved. The recovery marker was kept to prevent a duplicate request.", { cause });
   }
   try {
-    const outcome = await settlePending(pending);
+    const outcome = await settlePending(pending, tracking);
     return outcome === "ready";
   } catch (cause) {
     if (cause instanceof MatrixControllerAuthorizationWaitTimeout) return false;

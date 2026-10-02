@@ -11,6 +11,8 @@ import type {
   LocusValue,
   ExactInQuote,
   OwnershipSession,
+  LocusActionSubmissionOptions,
+  TransactionTrackingOptions,
   LiquidityPosition,
   AddLiquidityQuote,
   RemoveLiquidityQuote,
@@ -189,14 +191,16 @@ export class LocusClient {
   private async submit(
     actionName: string,
     input: Record<string, LocusValue>,
+    options: LocusActionSubmissionOptions = {},
   ): Promise<SubmitActionResult> {
     try {
+      await this.jamClient.assertTransactionLifecycleSupport();
       const session = this.requireSession();
-      return await this.jamClient.submitOwnershipAction(
-        actionName,
-        { ...input, subject: session.subject },
-        session.signer,
-      );
+      const actionInput = { ...input, subject: session.subject };
+      if (Object.keys(options).length === 0) {
+        return await this.jamClient.submitOwnershipAction(actionName, actionInput, session.signer);
+      }
+      return await this.jamClient.submitOwnershipAction(actionName, actionInput, session.signer, options);
     } catch (error) {
       throw normalizeLocusError(error) ?? error;
     }
@@ -208,85 +212,85 @@ export class LocusClient {
 
   /** Read one state item from a single, reorgable best-chain snapshot. */
   async queryBest(queryName: string, key?: LocusValue) {
-    if (!this.jamClient.queryBest) {
-      throw new Error("the configured JamScript client does not expose best-context queries");
-    }
     return this.jamClient.queryBest(queryName, key);
   }
 
   /** Read one state item from a finalized snapshot for accounting or audit. */
   async queryFinalized(queryName: string, key?: LocusValue) {
-    if (this.jamClient.queryFinalized) return this.jamClient.queryFinalized(queryName, key);
-    return this.jamClient.queryLatest(queryName, key);
+    return this.jamClient.queryFinalized(queryName, key);
   }
 
-  async waitForAction(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }) {
+  async waitForAction(transactionId: string, options?: TransactionTrackingOptions) {
     return this.jamClient.waitForAction(transactionId, options);
   }
 
-  async waitForBest(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }) {
-    if (!this.jamClient.waitForBest) throw new Error("the configured JamScript client does not expose best-chain transaction status");
+  async waitForBest(transactionId: string, options?: TransactionTrackingOptions) {
     return this.jamClient.waitForBest(transactionId, options);
   }
 
-  async waitForFinalized(transactionId: string, options?: { intervalMs?: number; timeoutMs?: number }) {
-    if (this.jamClient.waitForFinalized) return this.jamClient.waitForFinalized(transactionId, options);
-    return this.jamClient.waitForAction(transactionId, options);
+  async waitForFinalized(transactionId: string, options?: TransactionTrackingOptions) {
+    return this.jamClient.waitForFinalized(transactionId, options);
+  }
+
+  async watchTransaction(transactionId: string, options?: TransactionTrackingOptions) {
+    return this.jamClient.watchTransaction(transactionId, options);
   }
 
   async waitForActionByHash(
     transactionId: string,
     actionHash: string,
-    options?: { intervalMs?: number; timeoutMs?: number },
+    options?: Omit<TransactionTrackingOptions, "actionHash">,
   ) {
-    return this.jamClient.waitForAction(transactionId, actionHash, options);
+    return this.jamClient.waitForFinalized(transactionId, { ...options, actionHash });
+  }
+
+  assertTransactionLifecycleSupport() {
+    return this.jamClient.assertTransactionLifecycleSupport();
+  }
+
+  transactionScope() {
+    return this.jamClient.transactionScope();
   }
 
   /** Complete all deployment/state reads before the caller opens a wallet. */
-  prepareOwnershipAction(
+  async prepareOwnershipAction(
     actionName: string,
     input: Record<string, LocusValue>,
     options: { onProgress?: (phase: OwnershipPreparationPhase) => void } = {},
   ): Promise<PreparedOwnershipAction> {
+    await this.jamClient.assertTransactionLifecycleSupport();
     const session = this.requireSession();
-    const prepare = this.jamClient.prepareOwnershipAction;
-    if (!prepare) throw new Error("the configured JamScript client does not expose phased Ownership actions");
-    return prepare.call(this.jamClient, actionName, { ...input, subject: session.subject }, session.signer, options);
+    return this.jamClient.prepareOwnershipAction(actionName, { ...input, subject: session.subject }, session.signer, options);
   }
 
   /** Starts the wallet request synchronously when called from a user gesture. */
   signPreparedOwnershipAction(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction> {
     this.requireSession();
-    const sign = this.jamClient.signPreparedOwnershipAction;
-    if (!sign) throw new Error("the configured JamScript client does not expose phased Ownership actions");
-    return sign.call(this.jamClient, prepared);
+    return this.jamClient.signPreparedOwnershipAction(prepared);
   }
 
   abandonPreparedOwnershipAction(prepared: PreparedOwnershipAction): void {
-    const abandon = this.jamClient.abandonPreparedOwnershipAction;
-    if (!abandon) return;
-    abandon.call(this.jamClient, prepared);
+    this.jamClient.abandonPreparedOwnershipAction(prepared);
   }
 
-  submitSignedOwnershipAction(signed: SignedOwnershipAction) {
+  abandonSignedOwnershipAction(signed: SignedOwnershipAction): void {
+    this.jamClient.abandonSignedOwnershipAction(signed);
+  }
+
+  submitSignedOwnershipAction(signed: SignedOwnershipAction, options?: { onSigned?: LocusActionSubmissionOptions["onSigned"] }) {
     this.requireSession();
-    const submit = this.jamClient.submitSignedOwnershipAction;
-    if (!submit) throw new Error("the configured JamScript client does not expose phased Ownership actions");
-    return submit.call(this.jamClient, signed);
+    return this.jamClient.submitSignedOwnershipAction(signed, options);
   }
 
   async transactionStatus(transactionId: string) {
-    if (!this.jamClient.transactionStatus) throw new Error("the configured JamScript client does not expose transaction status");
     return this.jamClient.transactionStatus(transactionId);
   }
 
   async finalizedContext() {
-    if (!this.jamClient.finalizedContext) throw new Error("the configured JamScript client does not expose finalized context");
     return this.jamClient.finalizedContext();
   }
 
   async bestContext() {
-    if (!this.jamClient.bestContext) throw new Error("the configured JamScript client does not expose best context");
     return this.jamClient.bestContext();
   }
 
@@ -297,8 +301,9 @@ export class LocusClient {
     decimals: number,
     initialSupply: Amount,
     initialHolder?: Ownership,
+    submissionOptions: LocusActionSubmissionOptions = {},
   ): Promise<SubmitActionResult> {
-    return this.submit("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder));
+    return this.submit("createAsset", this.createAssetInput(assetId, name, symbol, decimals, initialSupply, initialHolder), submissionOptions);
   }
 
   prepareCreateAsset(
@@ -344,18 +349,18 @@ export class LocusClient {
     };
   }
 
-  async transfer(assetId: AssetId, to: Ownership, amount: Amount): Promise<SubmitActionResult> {
+  async transfer(assetId: AssetId, to: Ownership, amount: Amount, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
     assertOwnership(to, "to");
     assertAmount(amount);
-    return this.submit("transfer", { assetId, to, amount });
+    return this.submit("transfer", { assetId, to, amount }, submissionOptions);
   }
 
-  async approve(assetId: AssetId, spender: Ownership, amount: Amount): Promise<SubmitActionResult> {
+  async approve(assetId: AssetId, spender: Ownership, amount: Amount, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
     assertOwnership(spender, "spender");
     assertAmount(amount);
-    return this.submit("approve", { assetId, spender, amount });
+    return this.submit("approve", { assetId, spender, amount }, submissionOptions);
   }
 
   async transferFrom(
@@ -363,48 +368,60 @@ export class LocusClient {
     from: Ownership,
     to: Ownership,
     amount: Amount,
+    submissionOptions: LocusActionSubmissionOptions = {},
   ): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
     assertOwnership(from, "from");
     assertOwnership(to, "to");
     assertAmount(amount);
-    return this.submit("transferFrom", { assetId, from, to, amount });
+    return this.submit("transferFrom", { assetId, from, to, amount }, submissionOptions);
   }
 
-  async mint(assetId: AssetId, to: Ownership, amount: Amount): Promise<SubmitActionResult> {
+  async mint(assetId: AssetId, to: Ownership, amount: Amount, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
     assertOwnership(to, "to");
     assertAmount(amount);
-    return this.submit("mint", { assetId, to, amount });
+    return this.submit("mint", { assetId, to, amount }, submissionOptions);
   }
 
-  async burn(assetId: AssetId, amount: Amount): Promise<SubmitActionResult> {
+  async burn(assetId: AssetId, amount: Amount, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     assertId(assetId, "assetId");
     assertAmount(amount);
-    return this.submit("burn", { assetId, amount });
+    return this.submit("burn", { assetId, amount }, submissionOptions);
   }
 
-  async authorizeMatrixController(proof: Uint8Array): Promise<SubmitActionResult> {
+  async authorizeMatrixController(proof: Uint8Array, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     if (!(proof instanceof Uint8Array) || proof.length === 0 || proof.length > 4096) {
       throw new Error("Matrix controller authorization proof must be between 1 and 4096 bytes");
     }
-    return this.submit("authorizeMatrixController", { proof });
+    return this.submit("authorizeMatrixController", { proof }, submissionOptions);
   }
 
-  async addController(controller: Ownership): Promise<SubmitActionResult> {
+  async addController(controller: Ownership, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     assertOwnership(controller, "controller");
-    return this.submit("addController", { controller });
+    return this.submit("addController", { controller }, submissionOptions);
   }
 
-  async revokeController(controller: Ownership): Promise<SubmitActionResult> {
+  async revokeController(controller: Ownership, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     assertOwnership(controller, "controller");
-    return this.submit("revokeController", { controller });
+    return this.submit("revokeController", { controller }, submissionOptions);
   }
 
   async getControllerStatus(subject: Ownership, controller: Ownership): Promise<ControllerStatus> {
     assertOwnership(subject, "subject");
     assertOwnership(controller, "controller");
     const value = await this.queryValue("getControllerGrant", controllerGrantQueryKey(subject, controller));
+    return this.decodeControllerStatus(value);
+  }
+
+  async getControllerStatusFinalized(subject: Ownership, controller: Ownership): Promise<ControllerStatus> {
+    assertOwnership(subject, "subject");
+    assertOwnership(controller, "controller");
+    const value = (await this.queryFinalized("getControllerGrant", controllerGrantQueryKey(subject, controller))).value;
+    return this.decodeControllerStatus(value);
+  }
+
+  private decodeControllerStatus(value: LocusValue | null): ControllerStatus {
     if (value === null) return "absent";
     if (value === 1n || value === 1) return "active";
     if (value === 0n || value === 0) return "revoked";
@@ -480,16 +497,16 @@ export class LocusClient {
     return new BoundPool(this, key.asset0, key.asset1);
   }
 
-  async createPool(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult> {
+  async createPool(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     canonicalPoolKey(assetA, assetB);
     assertPoolReserve(amountA, "amountA");
     assertPoolReserve(amountB, "amountB");
     if (amountA === 0n || amountB === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_LIQUIDITY_AMOUNT);
     const initialShares = quoteInitialLiquidity(amountA, amountB).sharesMinted;
-    return this.submit("createPool", { assetA, assetB, amountA, amountB, initialShares });
+    return this.submit("createPool", { assetA, assetB, amountA, amountB, initialShares }, submissionOptions);
   }
 
-  async addPoolLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount, minShares: Amount): Promise<SubmitActionResult> {
+  async addPoolLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount, minShares: Amount, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     canonicalPoolKey(assetA, assetB);
     assertPoolReserve(maxAmountA, "maxAmountA");
     assertPoolReserve(maxAmountB, "maxAmountB");
@@ -516,10 +533,10 @@ export class LocusClient {
       sharesMinted: quote.sharesMinted,
       minShares,
       initialShares,
-    });
+    }, submissionOptions);
   }
 
-  async removePoolLiquidity(assetA: AssetId, assetB: AssetId, shares: Amount, minAmountA: Amount, minAmountB: Amount): Promise<SubmitActionResult> {
+  async removePoolLiquidity(assetA: AssetId, assetB: AssetId, shares: Amount, minAmountA: Amount, minAmountB: Amount, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     canonicalPoolKey(assetA, assetB);
     assertAmount(shares, "shares");
     assertAmount(minAmountA, "minAmountA");
@@ -539,7 +556,7 @@ export class LocusClient {
       amountBOut: assetAIs0 ? quote.amount1 : quote.amount0,
       minAmountA,
       minAmountB,
-    });
+    }, submissionOptions);
   }
 
   async liquiditySharesOf(assetA: AssetId, assetB: AssetId, owner: Ownership): Promise<Amount> {
@@ -601,12 +618,12 @@ export class LocusClient {
     return positions;
   }
 
-  async swapExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult> {
+  async swapExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount, minAmountOut: Amount, submissionOptions: LocusActionSubmissionOptions = {}): Promise<SubmitActionResult> {
     canonicalPoolKey(assetIn, assetOut);
     assertPoolReserve(amountIn, "amountIn");
     assertAmount(minAmountOut, "minAmountOut");
     if (amountIn === 0n) throw locusError(LOCUS_ERROR_CODES.INVALID_SWAP_AMOUNT);
-    return this.submit("swapExactIn", { assetIn, assetOut, amountIn, minAmountOut });
+    return this.submit("swapExactIn", { assetIn, assetOut, amountIn, minAmountOut }, submissionOptions);
   }
 
   async quoteExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount): Promise<ExactInQuote> {
@@ -639,14 +656,14 @@ export class BoundPool {
   quoteExactIn(assetIn: AssetId, amountIn: Amount): Promise<ExactInQuote> {
     return this.client.quoteExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn);
   }
-  swapExactIn(assetIn: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult> {
-    return this.client.swapExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn, minAmountOut);
+  swapExactIn(assetIn: AssetId, amountIn: Amount, minAmountOut: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult> {
+    return this.client.swapExactIn(assetIn, compareAssetIds(assetIn, this.asset0) === 0 ? this.asset1 : this.asset0, amountIn, minAmountOut, submissionOptions);
   }
-  addLiquidity(maxAmount0: Amount, maxAmount1: Amount, minShares: Amount): Promise<SubmitActionResult> {
-    return this.client.addPoolLiquidity(this.asset0, this.asset1, maxAmount0, maxAmount1, minShares);
+  addLiquidity(maxAmount0: Amount, maxAmount1: Amount, minShares: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult> {
+    return this.client.addPoolLiquidity(this.asset0, this.asset1, maxAmount0, maxAmount1, minShares, submissionOptions);
   }
-  removeLiquidity(shares: Amount, minAmount0: Amount, minAmount1: Amount): Promise<SubmitActionResult> {
-    return this.client.removePoolLiquidity(this.asset0, this.asset1, shares, minAmount0, minAmount1);
+  removeLiquidity(shares: Amount, minAmount0: Amount, minAmount1: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult> {
+    return this.client.removePoolLiquidity(this.asset0, this.asset1, shares, minAmount0, minAmount1, submissionOptions);
   }
   sharesOf(owner: Ownership): Promise<Amount> {
     return this.client.liquiditySharesOf(this.asset0, this.asset1, owner);
@@ -692,27 +709,27 @@ export class BoundAsset {
     return this.client.balanceOf(this.assetId, owner);
   }
 
-  transfer(to: Ownership, amount: Amount): Promise<SubmitActionResult> {
-    return this.client.transfer(this.assetId, to, amount);
+  transfer(to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult> {
+    return this.client.transfer(this.assetId, to, amount, submissionOptions);
   }
 
-  approve(spender: Ownership, amount: Amount): Promise<SubmitActionResult> {
-    return this.client.approve(this.assetId, spender, amount);
+  approve(spender: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult> {
+    return this.client.approve(this.assetId, spender, amount, submissionOptions);
   }
 
   allowance(owner: Ownership, spender: Ownership): Promise<Amount> {
     return this.client.allowance(this.assetId, owner, spender);
   }
 
-  transferFrom(from: Ownership, to: Ownership, amount: Amount): Promise<SubmitActionResult> {
-    return this.client.transferFrom(this.assetId, from, to, amount);
+  transferFrom(from: Ownership, to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult> {
+    return this.client.transferFrom(this.assetId, from, to, amount, submissionOptions);
   }
 
-  mint(to: Ownership, amount: Amount): Promise<SubmitActionResult> {
-    return this.client.mint(this.assetId, to, amount);
+  mint(to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult> {
+    return this.client.mint(this.assetId, to, amount, submissionOptions);
   }
 
-  burn(amount: Amount): Promise<SubmitActionResult> {
-    return this.client.burn(this.assetId, amount);
+  burn(amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult> {
+    return this.client.burn(this.assetId, amount, submissionOptions);
   }
 }

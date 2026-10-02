@@ -1,5 +1,5 @@
 import { type Ownership, type SubmitActionResult } from "@jamscript/client";
-import type { Amount, Asset, AssetId, JamScriptLikeClient, LocusValue, ExactInQuote, OwnershipSession, LiquidityPosition, AddLiquidityQuote, RemoveLiquidityQuote, PreparedOwnershipAction, OwnershipPreparationPhase, SignedOwnershipAction, Pool } from "./types.js";
+import type { Amount, Asset, AssetId, JamScriptLikeClient, LocusValue, ExactInQuote, OwnershipSession, LocusActionSubmissionOptions, TransactionTrackingOptions, LiquidityPosition, AddLiquidityQuote, RemoveLiquidityQuote, PreparedOwnershipAction, OwnershipPreparationPhase, SignedOwnershipAction, Pool } from "./types.js";
 export declare const MAX_POOL_RESERVE: bigint;
 export declare const SWAP_FEE_BPS: 30;
 export type ControllerStatus = "absent" | "active" | "revoked";
@@ -17,14 +17,23 @@ export declare class LocusClient {
     private requireSession;
     private submit;
     private queryValue;
-    waitForAction(transactionId: string, options?: {
-        intervalMs?: number;
-        timeoutMs?: number;
-    }): Promise<import("@jamscript/client").WaitForActionResult>;
-    waitForActionByHash(transactionId: string, actionHash: string, options?: {
-        intervalMs?: number;
-        timeoutMs?: number;
-    }): Promise<import("@jamscript/client").WaitForActionResult>;
+    /** Read one state item from a single, reorgable best-chain snapshot. */
+    queryBest(queryName: string, key?: LocusValue): Promise<import("./types.js").LocusQueryResult>;
+    /** Read one state item from a finalized snapshot for accounting or audit. */
+    queryFinalized(queryName: string, key?: LocusValue): Promise<import("./types.js").LocusQueryResult>;
+    waitForAction(transactionId: string, options?: TransactionTrackingOptions): Promise<import("@jamscript/client").WaitForActionResult>;
+    waitForBest(transactionId: string, options?: TransactionTrackingOptions): Promise<import("./types.js").LocusTransactionStatusResult>;
+    waitForFinalized(transactionId: string, options?: TransactionTrackingOptions): Promise<import("@jamscript/client").WaitForActionResult>;
+    watchTransaction(transactionId: string, options?: TransactionTrackingOptions): Promise<import("@jamscript/client").WaitForActionResult>;
+    waitForActionByHash(transactionId: string, actionHash: string, options?: Omit<TransactionTrackingOptions, "actionHash">): Promise<import("@jamscript/client").WaitForActionResult>;
+    assertTransactionLifecycleSupport(): Promise<import("@jamscript/client").BackendCapabilitiesV1>;
+    transactionScope(): {
+        genesisHash: string;
+        networkDomain: string;
+        serviceId: number;
+        serviceKey: string;
+        codeHash: string;
+    };
     /** Complete all deployment/state reads before the caller opens a wallet. */
     prepareOwnershipAction(actionName: string, input: Record<string, LocusValue>, options?: {
         onProgress?: (phase: OwnershipPreparationPhase) => void;
@@ -32,23 +41,32 @@ export declare class LocusClient {
     /** Starts the wallet request synchronously when called from a user gesture. */
     signPreparedOwnershipAction(prepared: PreparedOwnershipAction): Promise<SignedOwnershipAction>;
     abandonPreparedOwnershipAction(prepared: PreparedOwnershipAction): void;
-    submitSignedOwnershipAction(signed: SignedOwnershipAction): Promise<SubmitActionResult>;
-    transactionStatus(transactionId: string): Promise<import("@jamscript/client").TransactionStatusResult>;
+    abandonSignedOwnershipAction(signed: SignedOwnershipAction): void;
+    submitSignedOwnershipAction(signed: SignedOwnershipAction, options?: {
+        onSigned?: LocusActionSubmissionOptions["onSigned"];
+    }): Promise<SubmitActionResult>;
+    transactionStatus(transactionId: string): Promise<import("./types.js").LocusTransactionStatusResult>;
     finalizedContext(): Promise<import("@jamscript/client").FinalizedContext>;
-    createAsset(assetId: AssetId, name: string | Uint8Array, symbol: string | Uint8Array, decimals: number, initialSupply: Amount, initialHolder?: Ownership): Promise<SubmitActionResult>;
+    bestContext(): Promise<import("@jamscript/client").FinalizedContext & {
+        contextType: "best";
+    }>;
+    createAsset(assetId: AssetId, name: string | Uint8Array, symbol: string | Uint8Array, decimals: number, initialSupply: Amount, initialHolder?: Ownership, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
     prepareCreateAsset(assetId: AssetId, name: string | Uint8Array, symbol: string | Uint8Array, decimals: number, initialSupply: Amount, initialHolder?: Ownership, onProgress?: (phase: OwnershipPreparationPhase) => void): Promise<PreparedOwnershipAction>;
     private createAssetInput;
-    transfer(assetId: AssetId, to: Ownership, amount: Amount): Promise<SubmitActionResult>;
-    approve(assetId: AssetId, spender: Ownership, amount: Amount): Promise<SubmitActionResult>;
-    transferFrom(assetId: AssetId, from: Ownership, to: Ownership, amount: Amount): Promise<SubmitActionResult>;
-    mint(assetId: AssetId, to: Ownership, amount: Amount): Promise<SubmitActionResult>;
-    burn(assetId: AssetId, amount: Amount): Promise<SubmitActionResult>;
-    authorizeMatrixController(proof: Uint8Array): Promise<SubmitActionResult>;
-    addController(controller: Ownership): Promise<SubmitActionResult>;
-    revokeController(controller: Ownership): Promise<SubmitActionResult>;
+    transfer(assetId: AssetId, to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    approve(assetId: AssetId, spender: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    transferFrom(assetId: AssetId, from: Ownership, to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    mint(assetId: AssetId, to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    burn(assetId: AssetId, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    authorizeMatrixController(proof: Uint8Array, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    addController(controller: Ownership, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    revokeController(controller: Ownership, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
     getControllerStatus(subject: Ownership, controller: Ownership): Promise<ControllerStatus>;
+    getControllerStatusFinalized(subject: Ownership, controller: Ownership): Promise<ControllerStatus>;
+    private decodeControllerStatus;
     isControllerActive(subject: Ownership, controller: Ownership): Promise<boolean>;
     getAsset(assetId: AssetId): Promise<Asset | null>;
+    getAssetFinalized(assetId: AssetId): Promise<Asset | null>;
     balanceOf(assetId: AssetId, owner: Ownership): Promise<Amount>;
     allowance(assetId: AssetId, owner: Ownership, spender: Ownership): Promise<Amount>;
     listAssets(): Promise<AssetId[]>;
@@ -58,9 +76,9 @@ export declare class LocusClient {
         limit?: number;
     }): Promise<Pool[]>;
     pool(assetA: AssetId, assetB: AssetId): BoundPool;
-    createPool(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount): Promise<SubmitActionResult>;
-    addPoolLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount, minShares: Amount): Promise<SubmitActionResult>;
-    removePoolLiquidity(assetA: AssetId, assetB: AssetId, shares: Amount, minAmountA: Amount, minAmountB: Amount): Promise<SubmitActionResult>;
+    createPool(assetA: AssetId, assetB: AssetId, amountA: Amount, amountB: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    addPoolLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount, minShares: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    removePoolLiquidity(assetA: AssetId, assetB: AssetId, shares: Amount, minAmountA: Amount, minAmountB: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
     liquiditySharesOf(assetA: AssetId, assetB: AssetId, owner: Ownership): Promise<Amount>;
     liquidityPositionCount(owner: Ownership): Promise<Amount>;
     quoteAddLiquidity(assetA: AssetId, assetB: AssetId, maxAmountA: Amount, maxAmountB: Amount): Promise<AddLiquidityQuote>;
@@ -69,7 +87,7 @@ export declare class LocusClient {
         offset?: bigint;
         limit?: number;
     }): Promise<LiquidityPosition[]>;
-    swapExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult>;
+    swapExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount, minAmountOut: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
     quoteExactIn(assetIn: AssetId, assetOut: AssetId, amountIn: Amount): Promise<ExactInQuote>;
     quoteAddLiquidityForPool(asset0: AssetId, asset1: AssetId, maxAmount0: Amount, maxAmount1: Amount): Promise<AddLiquidityQuote>;
     quoteRemoveLiquidityForPool(asset0: AssetId, asset1: AssetId, owner: Ownership, shares: Amount): Promise<RemoveLiquidityQuote>;
@@ -82,9 +100,9 @@ export declare class BoundPool {
     constructor(client: LocusClient, asset0: AssetId, asset1: AssetId);
     get(): Promise<Pool | null>;
     quoteExactIn(assetIn: AssetId, amountIn: Amount): Promise<ExactInQuote>;
-    swapExactIn(assetIn: AssetId, amountIn: Amount, minAmountOut: Amount): Promise<SubmitActionResult>;
-    addLiquidity(maxAmount0: Amount, maxAmount1: Amount, minShares: Amount): Promise<SubmitActionResult>;
-    removeLiquidity(shares: Amount, minAmount0: Amount, minAmount1: Amount): Promise<SubmitActionResult>;
+    swapExactIn(assetIn: AssetId, amountIn: Amount, minAmountOut: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    addLiquidity(maxAmount0: Amount, maxAmount1: Amount, minShares: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    removeLiquidity(shares: Amount, minAmount0: Amount, minAmount1: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
     sharesOf(owner: Ownership): Promise<Amount>;
     quoteAddLiquidity(maxAmount0: Amount, maxAmount1: Amount): Promise<AddLiquidityQuote>;
     quoteRemoveLiquidity(owner: Ownership, shares: Amount): Promise<RemoveLiquidityQuote>;
@@ -100,10 +118,10 @@ export declare class BoundAsset {
     issuer(): Promise<Ownership>;
     totalSupply(): Promise<Amount>;
     balanceOf(owner: Ownership): Promise<Amount>;
-    transfer(to: Ownership, amount: Amount): Promise<SubmitActionResult>;
-    approve(spender: Ownership, amount: Amount): Promise<SubmitActionResult>;
+    transfer(to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    approve(spender: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
     allowance(owner: Ownership, spender: Ownership): Promise<Amount>;
-    transferFrom(from: Ownership, to: Ownership, amount: Amount): Promise<SubmitActionResult>;
-    mint(to: Ownership, amount: Amount): Promise<SubmitActionResult>;
-    burn(amount: Amount): Promise<SubmitActionResult>;
+    transferFrom(from: Ownership, to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    mint(to: Ownership, amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
+    burn(amount: Amount, submissionOptions?: LocusActionSubmissionOptions): Promise<SubmitActionResult>;
 }

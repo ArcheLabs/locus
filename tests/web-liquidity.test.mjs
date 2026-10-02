@@ -86,8 +86,9 @@ test("Liquidity is visible to all users and positions/pools come from Service qu
 
 test("pending liquidity transactions are persisted and do not trigger automatic resubmission", () => {
   assert.match(pageSource, /locus\.liquidity\.pending\.v2/);
-  assert.match(pageSource, /actionLabel: "Check status"/);
-  assert.match(pageSource, /transaction is saved\. Check its status before signing another liquidity action/);
+  assert.match(pageSource, /actionLabel: t\("auth\.checkStatus"\)/);
+  assert.match(pageSource, /: pending \? t\("ui\.transactionPending"\)/);
+  assert.match(pageSource, /busyOrPending/);
   assert.match(pageSource, /clearFinalizedFailure\(/);
 });
 

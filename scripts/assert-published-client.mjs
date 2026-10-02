@@ -5,8 +5,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { lstat, readFile } from "node:fs/promises";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const expectedVersion = "0.1.0-rc.4";
+const expectedVersion = "0.1.0-rc.5";
 const requiredMethods = [
+  "assertTransactionLifecycleSupport",
+  "transactionScope",
+  "waitForBest",
+  "waitForFinalized",
+  "watchTransaction",
   "prepareOwnershipAction",
   "signPreparedOwnershipAction",
   "submitSignedOwnershipAction",
@@ -17,10 +22,10 @@ for (const consumer of ["root", "web"]) {
   const clientDirectory = join(packageDirectory, "node_modules/@jamscript/client");
   assert.equal((await lstat(clientDirectory)).isSymbolicLink(), false, `${consumer} package must not be a workspace/link install`);
   const packageJson = JSON.parse(await readFile(join(clientDirectory, "package.json"), "utf8"));
-  assert.equal(packageJson.version, expectedVersion, `${consumer} must resolve the published rc.4 package`);
+  assert.equal(packageJson.version, expectedVersion, `${consumer} must resolve the installed rc.5 package`);
 
   const entry = packageJson.exports?.["."]?.import ?? packageJson.module;
-  assert.equal(typeof entry, "string", "published Client must declare its ESM entry point");
+  assert.equal(typeof entry, "string", "installed Client must declare its ESM entry point");
   const moduleUrl = pathToFileURL(join(clientDirectory, entry)).href;
   const source = `
     import assert from "node:assert/strict";
@@ -32,5 +37,5 @@ for (const consumer of ["root", "web"]) {
   `;
   const result = spawnSync(process.execPath, ["--input-type=module", "-e", source], { encoding: "utf8" });
   assert.equal(result.status, 0, `${consumer} phased API check failed:\n${result.stderr}`);
-  console.log(`${consumer.toUpperCase()}_PUBLISHED_CLIENT=${packageJson.version} PHASED_API=PASS`);
+  console.log(`${consumer.toUpperCase()}_INSTALLED_CLIENT=${packageJson.version} LIFECYCLE_AND_PHASED_APIS=PASS`);
 }
