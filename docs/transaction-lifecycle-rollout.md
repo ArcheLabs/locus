@@ -5,15 +5,16 @@ values under `[jamscript]`, `[jamscript_backend]`, and `[jamscript_client]` in
 `releases.lock` are the historical source pins in this Locus branch (RC8/RC4),
 not a live deployment record. The operator confirmed the current server uses
 Backend RC10 and its previous server used RC9. `[transaction_lifecycle_upgrade]`
-records the next required versions for this change. Do not treat the pending
-versions as published artifacts.
+records the next required versions for this change. Client RC6 is published and
+verified; the Backend runtime image digest and live capability check remain
+pending.
 
 ## Required artifacts
 
 | Component | Required version | State in this change |
 |---|---|---|
-| `@jamscript/client` | `0.1.0-rc.5` | Source builds and local tarball is checked; publish is pending |
-| JamScript Backend | `backend-v0.1.0-rc.11` | Source changes are under validation; image and digest are pending |
+| `@jamscript/client` | `0.1.0-rc.6` | Published; registry integrity and lifecycle declarations verified |
+| JamScript Backend | `backend-v0.1.0-rc.11` | Release published; deployment image digest and capability check are pending |
 | MiniJAM | Existing Stage-1 interface | No protocol change is required |
 
 The Backend must report `transactionLifecycleVersion: 1`,
@@ -27,32 +28,27 @@ automatically submits a replacement for an unknown result.
 
 ## Release sequence
 
-1. Finish JamScript formatting, Client tests, Backend tests, and Clippy. Build
-   the Backend image from the reviewed source and publish it under a new
-   immutable tag/digest. Verify the capability response against that exact
+1. Build the Backend image from the reviewed RC11 source and publish it under
+   an immutable tag/digest. Verify the capability response against that exact
    image before updating deployment descriptors.
-2. Publish `@jamscript/client@0.1.0-rc.5`. Compare the published tarball SHA-512
-   with the reviewed artifact and confirm the lifecycle methods exist in its
-   ESM output and declaration files.
-3. Install that published Client in both Locus consumers with clean lockfile
+2. Install the published `@jamscript/client@0.1.0-rc.6` in both Locus consumers
+   with clean lockfile
    installs. Run the root checks/tests and production web build. The
    `assert-published-client.mjs` gate checks the installed package rather than
    source files.
-4. Update the deployed release lock with the actual Backend image digest and
+3. Update the deployed release lock with the actual Backend image digest and
    published npm package, then deploy the Locus frontend. This is a frontend
    and Backend rollout; it does not require rebuilding the Locus Service blob,
    changing its Service ID, or clearing user state.
-5. Confirm the live Backend capability response before enabling writes. Keep
+4. Confirm the live Backend capability response before enabling writes. Keep
    the existing pending operation records readable through the rollout and
    verify one controlled non-production transaction through Best and
    finalized receipt.
 
 Do not update a deployment lock with a guessed digest or claim a version is
-live based on `package.json`. The pre-publication package lock records the
-expected registry URL and this locally verified tarball integrity:
-`sha512-aUS3tfOnqr61ym7/V8n59S2bqrRZOIw+dNWwSFGjmXkcR9BP/1SY6b0kdUPRFi2pONuSMYZeydiN1a46P4NjFQ==`.
-Clean consumer installation from the public registry becomes verifiable only
-after publication.
+live based on `package.json`. Both consumer lockfiles point to the published
+RC6 registry tarball and include its verified integrity. The Backend image
+digest remains pending until verified against the deployment image.
 
 ## Recovery and rollback
 

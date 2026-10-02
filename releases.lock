@@ -26,8 +26,8 @@ formal_rpc_image = "ghcr.io/archelabs/minijam-formal-rpc@sha256:6314129f900154ec
 # These are lifecycle-upgrade requirements, not claims about the currently
 # deployed release pins above. Publish and verify both artifacts before use.
 [transaction_lifecycle_upgrade]
-status = "pending_artifact_publication"
-minimum_client = "@jamscript/client@0.1.0-rc.5"
+status = "pending_backend_image_digest"
+minimum_client = "@jamscript/client@0.1.0-rc.6"
 minimum_backend = "backend-v0.1.0-rc.11"
 backend_image_digest = "pending"
 durable_transaction_lookup = false

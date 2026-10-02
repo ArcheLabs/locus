@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { lstat, readFile } from "node:fs/promises";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const expectedVersion = "0.1.0-rc.5";
+const expectedVersion = "0.1.0-rc.6";
 const requiredMethods = [
   "assertTransactionLifecycleSupport",
   "transactionScope",
@@ -22,7 +22,7 @@ for (const consumer of ["root", "web"]) {
   const clientDirectory = join(packageDirectory, "node_modules/@jamscript/client");
   assert.equal((await lstat(clientDirectory)).isSymbolicLink(), false, `${consumer} package must not be a workspace/link install`);
   const packageJson = JSON.parse(await readFile(join(clientDirectory, "package.json"), "utf8"));
-  assert.equal(packageJson.version, expectedVersion, `${consumer} must resolve the installed rc.5 package`);
+  assert.equal(packageJson.version, expectedVersion, `${consumer} must resolve the installed ${expectedVersion} package`);
 
   const entry = packageJson.exports?.["."]?.import ?? packageJson.module;
   assert.equal(typeof entry, "string", "installed Client must declare its ESM entry point");

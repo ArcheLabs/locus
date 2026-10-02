@@ -7,7 +7,7 @@ images by digest. Do not use the Stage-1 Testnet Compose file for Local.
 
 This guide describes the existing release baseline. It does not satisfy the
 pending transaction-lifecycle upgrade: the new Locus Client requires the
-published JamScript Client RC5 and a Backend with lifecycle capability v1.
+published JamScript Client RC6 and a Backend with lifecycle capability v1.
 Follow [the lifecycle release checklist](transaction-lifecycle-rollout.md)
 before deploying this branch; the older locked Backend is intentionally
 rejected for new writes.
