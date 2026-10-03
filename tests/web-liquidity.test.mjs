@@ -84,10 +84,14 @@ test("Liquidity is visible to all users and positions/pools come from Service qu
   assert.doesNotMatch(appSource + pageSource, /isLiquidityManager|managerKey|POOL_MANAGER_REQUIRED|Connect Treasury/);
 });
 
-test("pending liquidity transactions are persisted and do not trigger automatic resubmission", () => {
-  assert.match(pageSource, /locus\.liquidity\.pending\.v2/);
+test("pending liquidity transactions are tracked individually and unlock after refreshed Best inclusion", () => {
+  assert.match(pageSource, /locus\.liquidity\.pending\.v3/);
+  assert.match(pageSource, /legacyPendingStorageKey/);
+  assert.match(pageSource, /Array\.isArray\(value\).*value\.filter\(isPendingAction\)/s);
+  assert.match(pageSource, /const hasBlockingPending = scopedPendingActions\.some\(\(action\) => action\.phase !== "best-included"\)/);
+  assert.match(pageSource, /refreshBeforeNextAction\(request\.scope\)/);
+  assert.match(pageSource, /upsertPendingAction\(saved\)/);
   assert.match(pageSource, /actionLabel: t\("auth\.checkStatus"\)/);
-  assert.match(pageSource, /: pending \? t\("ui\.transactionPending"\)/);
   assert.match(pageSource, /busyOrPending/);
   assert.match(pageSource, /clearFinalizedFailure\(/);
 });
