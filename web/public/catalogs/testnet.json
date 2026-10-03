@@ -2,7 +2,7 @@
   "version": 1,
   "network": "testnet",
   "genesisHash": "0x9c04459aee37fe359cbe22986805c96a071054be986847b36212f4535b5baa3a",
-  "serviceId": 4139860077,
+  "serviceId": 3962414306,
   "assets": [
     {
       "key": "dot",

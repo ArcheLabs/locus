@@ -1,17 +1,17 @@
 [jamscript]
-version = "v0.1.0-rc.8"
+version = "v0.1.0-rc.12"
 
 [jamscript_backend]
-version = "backend-v0.1.0-rc.8"
+version = "backend-v0.1.0-rc.12"
 image = "ghcr.io/archelabs/jamscript-backend"
-digest = "sha256:4fd6baf37c7a4ba539585f9b1a157dad053d0836f75ded49b97fb704179a6e25"
+digest = "sha256:40fc14f5a10d8f22803340da5fd7ce585356dfb9072b3d5a80ba565c0ddb83cf"
 
 [jamscript_client]
 package = "@jamscript/client"
-version = "0.1.0-rc.4"
+version = "0.1.0-rc.7"
 
 [locus]
-service_artifact_commit = "359f4605f6a8ff2dc96fbbbd9be608e8babce51c"
+service_artifact_commit = "2b6aeb5a51005d3503edfcfa97be780994fa5550"
 
 [minijam]
 version = "stage1-v0.2.1"
@@ -23,16 +23,20 @@ node_image = "ghcr.io/archelabs/minijam-node@sha256:ba765011d45f6f0307328e55f3d7
 worker_image = "ghcr.io/archelabs/minijam-worker@sha256:714bf7456ad797d8436568cfbe0375f8afbead892c7bb407fd60bb3f6ed8ac2f"
 formal_rpc_image = "ghcr.io/archelabs/minijam-formal-rpc@sha256:6314129f900154ec2f001e73b2f09c1e4ad747bc12f972438c372f55e2210904"
 
-# The lifecycle artifacts below are published and the Locus candidate is built;
-# the existing live release pins above remain historical until service migration.
 [transaction_lifecycle_upgrade]
-status = "candidate_built_pending_capability_check_and_service_migration"
+status = "deployed_and_seeded_fresh_state"
 jamscript_version = "v0.1.0-rc.12"
 minimum_client = "@jamscript/client@0.1.0-rc.7"
 minimum_backend = "backend-v0.1.0-rc.12"
 backend_image_digest = "sha256:40fc14f5a10d8f22803340da5fd7ce585356dfb9072b3d5a80ba565c0ddb83cf"
 candidate_source_commit = "3832c917852ce65d0166120e2b7d5978e91308ef"
 candidate_code_hash = "0xc8f58efb503f4dce2615fc19e163d8690300794a33381a44de9f9ebbc54a4a62"
+locus_repository_commit = "2b6aeb5a51005d3503edfcfa97be780994fa5550"
+deployed_service_id = 3962414306
+deployment_finalized_block = 24901
+managed_state_migrated = false
+initial_asset_symbols = ["DOT", "MINI", "USDT", "AAPL", "NVDA", "TSLA"]
+treasury_evm_address = "0x544ac734c6b113789ea97ac145b1a141bb7e0c65"
 candidate_heap_initial_bytes = 1048576
 candidate_heap_max_bytes = 16777216
 durable_transaction_lookup = false

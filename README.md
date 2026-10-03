@@ -45,7 +45,7 @@ the adapter directly from the npm package at the Locus source path.
 
 The pinned release baseline is recorded in [`releases.lock`](releases.lock).
 MiniJAM is consumed from the independent `ArcheLabs/minijam-client`
-`stage1-v0.2.0` release image.
+`stage1-v0.2.1` release image.
 
 ## Local web preview
 
@@ -55,7 +55,7 @@ Install the web dependencies once:
 npm --prefix web install
 ```
 
-Start the real network-mode preview (Local by default):
+Start the real network-mode preview (Stage-1 TestNet by default):
 
 ```bash
   npm --prefix web run dev -- --host 127.0.0.1
@@ -75,10 +75,9 @@ Production builds always use Network Mode. `VITE_LOCUS_MODE=demo` only affects
 the Vite development server. Network Mode loads the runtime configuration from
 [`web/public/locus-networks.json`](web/public/locus-networks.json), fetches the
 deployment descriptor, creates the published `JamScriptClient`, and calls
-`validateDeployment()` before showing real assets. The live web deployment
-uses same-origin `/rpc` to reach the loopback backend. The current network is
-MiniJAM Local / Development; Testnet remains unconfigured until a canonical
-descriptor is published.
+`validateDeployment()` before showing real assets. The live web deployment uses same-origin `/rpc` to reach the Stage-1 Backend.
+The production descriptor binds TestNet to Service `3962414306`; the Local
+network remains available for development.
 
 In Network Mode, `Connect` uses a browser-provided EVM EIP-1193 wallet, the
 official Polkadot extension-dapp adapter, the official Solana Wallet Standard
@@ -172,10 +171,17 @@ to mock data; Demo Mode is explicit and is only for the frontend prototype.
 
 ## Published platform baseline
 
-The checked-in `releases.lock` retains historical deployment pins separately
-from the RC12/Client RC7 upgrade candidate. The current `dist/` candidate uses
-JamScript RC12 and has not been deployed. The last reported server baseline
-was Backend RC10 after RC9; verify the live capability response before rollout.
+The active Stage-1 deployment uses the prebuilt Service in `dist/` from Locus
+commit `2b6aeb5a51005d3503edfcfa97be780994fa5550`, JamScript RC12, Backend
+RC12, and Client RC7. Service `3962414306` finalized at block `24901` with code
+hash `0xc8f58efb503f4dce2615fc19e163d8690300794a33381a44de9f9ebbc54a4a62`.
+It was initialized from an empty managed-state database; no old Locus state was
+migrated. The previous immutable Service remains on the original MiniJAM chain.
+The six curated assets are freshly initialized on the new Service, with their
+full initial supplies assigned to the configured Treasury. The release pins
+and deployment record are in [`releases.lock`](releases.lock) and the
+[TestNet deployment runbook](deploy/testnet/README.md).
+
 Locus does not reproduce JamScript compiler, runtime, or Ownership protocol
 features locally.
 

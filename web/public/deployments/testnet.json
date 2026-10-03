@@ -4,9 +4,9 @@
   "backendUrl": "https://rpc-stage1.minijam.xyz/rpc",
   "genesisHash": "0x9c04459aee37fe359cbe22986805c96a071054be986847b36212f4535b5baa3a",
   "networkDomain": "0x9c04459aee37fe359cbe22986805c96a071054be986847b36212f4535b5baa3a",
-  "serviceId": 4139860077,
+  "serviceId": 3962414306,
   "serviceKey": "0x2c6cc0eb8b419fdf4ed3290d33adb830628f000f54d03018130fcc19bdd249fc",
-  "codeHash": "0x7244d2be5d4c66cd59b186700c18e86464e0e5768cb73e64b4d03258cbd97114",
+  "codeHash": "0xc8f58efb503f4dce2615fc19e163d8690300794a33381a44de9f9ebbc54a4a62",
   "abiVersion": 1,
   "abi": {
     "abiVersion": 1,
@@ -1608,9 +1608,9 @@
     ]
   },
   "provenance": {
-    "locusCommit": "359f4605f6a8ff2dc96fbbbd9be608e8babce51c",
-    "jamscriptVersion": "v0.1.0-rc.8",
-    "backendVersion": "backend-v0.1.0-rc.8",
+    "locusCommit": "2b6aeb5a51005d3503edfcfa97be780994fa5550",
+    "jamscriptVersion": "v0.1.0-rc.12",
+    "backendVersion": "backend-v0.1.0-rc.12",
     "minijamVersion": "stage1-v0.2.1"
   }
 }
