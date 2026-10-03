@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { lstat, readFile } from "node:fs/promises";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-const expectedVersion = "0.1.0-rc.6";
+const expectedVersion = "0.1.0-rc.7";
 const requiredMethods = [
   "assertTransactionLifecycleSupport",
   "transactionScope",
@@ -31,6 +31,13 @@ for (const consumer of ["root", "web"]) {
     import assert from "node:assert/strict";
     const client = await import(${JSON.stringify(moduleUrl)});
     assert.equal(typeof client.JamScriptClient, "function");
+    assert.equal(typeof client.RpcError, "function");
+    const fault = new client.RpcError("NOT_SUBMITTED: GUEST_HEAP_LIMIT_EXCEEDED", -32045, {
+      code: "NOT_SUBMITTED",
+      cause: { code: "GUEST_HEAP_LIMIT_EXCEEDED", message: "Guest allocation exceeded its memory budget", stage: "plan", details: { heapMaxBytes: 16777216 } },
+    });
+    assert.equal(fault.structuredError?.code, "GUEST_HEAP_LIMIT_EXCEEDED");
+    assert.equal(fault.structuredError?.submissionState, "not_submitted");
     for (const method of ${JSON.stringify(requiredMethods)}) {
       assert.equal(typeof client.JamScriptClient.prototype[method], "function", method);
     }

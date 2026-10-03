@@ -5,12 +5,13 @@ MiniJAM Local / Development network. The machine size affects build speed only;
 it is not a deployment gate. The checked-in Compose file pins both runtime
 images by digest. Do not use the Stage-1 Testnet Compose file for Local.
 
-This guide describes the existing release baseline. It does not satisfy the
-pending transaction-lifecycle upgrade: the new Locus Client requires the
-published JamScript Client RC6 and a Backend with lifecycle capability v1.
-Follow [the lifecycle release checklist](transaction-lifecycle-rollout.md)
-before deploying this branch; the older locked Backend is intentionally
-rejected for new writes.
+This guide records the existing deployment baseline. A new Locus build now
+targets JamScript RC12, Backend RC12, and Client RC7, but active immutable
+Services still contain their old guest allocator. Follow
+[the lifecycle and memory rollout checklist](transaction-lifecycle-rollout.md)
+before directing a live frontend at a rebuilt Service; the checked-in
+deployment descriptor must continue to match its currently registered code
+hash until a separate service migration is complete.
 
 ## Runtime layout
 
@@ -67,7 +68,8 @@ sudo docker compose -f deploy/local/compose.yaml up -d backend
 curl -fsS http://127.0.0.1:8090/readinessz
 ```
 
-Install the JamScript CLI version in `releases.lock`, then install dependencies
+Install the JamScript CLI version listed under
+`[transaction_lifecycle_upgrade]` in `releases.lock`, then install dependencies
 with the checked-in npm lockfiles. Build and check the service before deploying
 the verified artifact:
 
@@ -90,9 +92,9 @@ the canonical descriptor from the new chain values:
 
 ```sh
 LOCUS_COMMIT="$(git rev-parse HEAD)" \
-JAMSCRIPT_VERSION=v0.1.0-rc.8 \
-JAMSCRIPT_BACKEND_VERSION=backend-v0.1.0-rc.8 \
-MINIJAM_VERSION=stage1-v0.2.0 \
+JAMSCRIPT_VERSION=v0.1.0-rc.12 \
+JAMSCRIPT_BACKEND_VERSION=backend-v0.1.0-rc.12 \
+MINIJAM_VERSION=stage1-v0.2.1 \
 node scripts/write-web-deployment.mjs \
   --network local --backend /rpc --service-id "$LOCUS_SERVICE_ID" \
   --genesis-hash "$GENESIS_HASH" --network-domain "$GENESIS_HASH"

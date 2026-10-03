@@ -17,7 +17,7 @@
     "check:matrix-resolver": "node scripts/check-matrix-resolver.mjs"
   },
   "dependencies": {
-    "@jamscript/client": "0.1.0-rc.6",
+    "@jamscript/client": "0.1.0-rc.7",
     "@polkadot/util-crypto": "^14.0.1",
     "@scure/base": "^2.4.0"
   },

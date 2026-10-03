@@ -1,21 +1,28 @@
-# Transaction lifecycle release checklist
+# JamScript RC12 / Client RC7 Locus rollout
 
-The lifecycle changes require a matching JamScript Client and Backend. The
-values under `[jamscript]`, `[jamscript_backend]`, and `[jamscript_client]` in
-`releases.lock` are the historical source pins in this Locus branch (RC8/RC4),
-not a live deployment record. The operator confirmed the current server uses
-Backend RC10 and its previous server used RC9. `[transaction_lifecycle_upgrade]`
-records the next required versions for this change. Client RC6 is published and
-verified; the Backend runtime image digest and live capability check remain
-pending.
+The current frontend and service source now target JamScript RC12 and Client
+RC7. The active deployment descriptors and checked-in `dist/` artifact still
+identify older immutable Services; changing the frontend or Backend does not
+replace their guest code. The `[jamscript]`, `[jamscript_backend]`, and
+`[jamscript_client]` entries in `releases.lock` describe that historical
+baseline. `[transaction_lifecycle_upgrade]` records the new target pair and
+verified Backend image digest.
 
 ## Required artifacts
 
-| Component | Required version | State in this change |
+| Component | Required version | State |
 |---|---|---|
-| `@jamscript/client` | `0.1.0-rc.6` | Published; registry integrity and lifecycle declarations verified |
-| JamScript Backend | `backend-v0.1.0-rc.11` | Release published; deployment image digest and capability check are pending |
+| JamScript CLI/toolchain | `v0.1.0-rc.12` | Published; clean isolated installer and toolchain verification passed |
+| `@jamscript/client` | `0.1.0-rc.7` | Published; installed in both consumers with registry integrity |
+| JamScript Backend | `backend-v0.1.0-rc.12` | Published; GHCR digest recorded; live capability check remains before rollout |
 | MiniJAM | Existing Stage-1 interface | No protocol change is required |
+
+Locus pins a 1 MiB initial guest heap and a 16 MiB maximum in `jamscript.toml`.
+The build checks `build.json` to ensure the produced artifact carries these
+budgets. JamScript RC12's new allocator only affects a Service after rebuilding
+and deploying its guest artifact. Existing immutable Services continue using
+their previous allocator until an application migration or replacement Service
+is carried out.
 
 The Backend must report `transactionLifecycleVersion: 1`,
 `bestChainTracking: true`, and `strictFinalizedReceipts: true` from
@@ -26,29 +33,41 @@ Backend restart, an old transaction ID may be unavailable. Locus therefore
 restores only records with the saved transaction ID and action hash, and never
 automatically submits a replacement for an unknown result.
 
+Client RC7 preserves structured Backend errors. Locus turns a confirmed local
+preflight heap-limit error into a clear message and labels it not submitted.
+Formal terminal guest traps may still arrive as generic `Panic`; the current
+Formal status interface does not provide a structured guest fault to the
+Backend or SDK. Locus must not infer an OOM cause from that panic or advise a
+retry until the transaction status is known.
+
 ## Release sequence
 
-1. Build the Backend image from the reviewed RC11 source and publish it under
-   an immutable tag/digest. Verify the capability response against that exact
-   image before updating deployment descriptors.
-2. Install the published `@jamscript/client@0.1.0-rc.6` in both Locus consumers
-   with clean lockfile
+1. Install the RC12 Backend image by the recorded digest, then verify the live
+   `jamscript_getCapabilitiesV1` response reports
+   `transactionLifecycleVersion: 1`, `bestChainTracking: true`, and
+   `strictFinalizedReceipts: true` before enabling writes.
+2. Use JamScript RC12 to build the Locus service with the checked-in memory
+   budget. Verify `guestMemory`, the artifact hash, ABI, and service descriptor;
+   run the real PVM multi-action and over-budget checks plus a controlled
+   MiniJAM E2E. A prebuilt RC8 artifact is not an RC12 guest.
+3. Install `@jamscript/client@0.1.0-rc.7` in both consumers with clean lockfile
    installs. Run the root checks/tests and production web build. The
-   `assert-published-client.mjs` gate checks the installed package rather than
-   source files.
-3. Update the deployed release lock with the actual Backend image digest and
-   published npm package, then deploy the Locus frontend. This is a frontend
-   and Backend rollout; it does not require rebuilding the Locus Service blob,
-   changing its Service ID, or clearing user state.
-4. Confirm the live Backend capability response before enabling writes. Keep
-   the existing pending operation records readable through the rollout and
-   verify one controlled non-production transaction through Best and
-   finalized receipt.
+   `assert-published-client.mjs` gate checks that the installed package unwraps
+   structured no-submit guest faults as well as exposing lifecycle APIs.
+4. Plan deployment of the new immutable Service separately. Preserve balances,
+   grants, pools, pending transaction records, and ownership nonces through the
+   application's migration plan; do not point the frontend descriptor at a
+   newly built code hash until that Service is registered and its state is
+   ready. This repository change does not deploy or migrate a live Service.
+5. After the service/backend/frontend rollout, verify a controlled
+   non-production transaction at Best and at finalized receipt.
 
-Do not update a deployment lock with a guessed digest or claim a version is
-live based on `package.json`. Both consumer lockfiles point to the published
-RC6 registry tarball and include its verified integrity. The Backend image
-digest remains pending until verified against the deployment image.
+The Backend image digest recorded for RC12 is
+`sha256:40fc14f5a10d8f22803340da5fd7ce585356dfb9072b3d5a80ba565c0ddb83cf`.
+It was read from the published GHCR manifest, not inferred from the tag.
+Neither this lock entry nor the package versions indicate that the live Backend,
+frontend, or immutable Service has been upgraded; the capability check and
+service migration are still deployment steps.
 
 ## Recovery and rollback
 

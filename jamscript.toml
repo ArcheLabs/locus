@@ -10,6 +10,10 @@ backend = "scriptc"
 [deployment]
 default_network = "local"
 
+[guest.memory]
+heap_initial_bytes = 1048576
+heap_max_bytes = 16777216
+
 [networks.local]
 kind = "minijam"
 deployment_rpc = "http://127.0.0.1:8080"

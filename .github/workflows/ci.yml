@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  JAMSCRIPT_VERSION: v0.1.0-rc.8
+  JAMSCRIPT_VERSION: v0.1.0-rc.12
   NODE_VERSION: 24.15.0
 
 jobs:

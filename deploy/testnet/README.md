@@ -1,10 +1,17 @@
 # MiniJAM Stage-1 TestNet and Locus Backend
 
-This deployment profile is pinned to MiniJAM `stage1-v0.2.1` and the
-Locus Service artifact from commit
-`359f4605f6a8ff2dc96fbbbd9be608e8babce51c`. Image digests, release commit,
-chain-spec checksums, and Backend digest are recorded in
-[`releases.lock`](../../releases.lock).
+This deployment profile's existing artifact is pinned to MiniJAM
+`stage1-v0.2.1` and the Locus Service artifact from commit
+`359f4605f6a8ff2dc96fbbbd9be608e8babce51c`. Its guest was built before the
+RC12 allocator upgrade. `releases.lock` records the historical Service and
+MiniJAM pins plus the RC12 Backend candidate digest; this profile's Backend
+compose file is pinned to that RC12 image.
+
+The RC12 Locus source builds a separate 1 MiB initial / 16 MiB maximum heap
+artifact. Do not replace this profile's existing service descriptor or deploy
+the rebuilt artifact until the new immutable Service and its state migration
+are verified. The Pages build continues to validate the checked-in artifact
+and must not claim RC12 provenance for the old code hash.
 
 ## Runtime shape
 

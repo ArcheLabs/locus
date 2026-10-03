@@ -35,8 +35,8 @@ const descriptor = {
   abi,
   provenance: {
     locusCommit: process.env.LOCUS_COMMIT ?? "",
-    jamscriptVersion: process.env.JAMSCRIPT_VERSION ?? "v0.1.0-rc.8",
-    backendVersion: process.env.JAMSCRIPT_BACKEND_VERSION ?? "backend-v0.1.0-rc.8",
+    jamscriptVersion: process.env.JAMSCRIPT_VERSION ?? "v0.1.0-rc.12",
+    backendVersion: process.env.JAMSCRIPT_BACKEND_VERSION ?? "backend-v0.1.0-rc.12",
     minijamVersion: process.env.MINIJAM_VERSION ?? "stage1-v0.2.1",
   },
 };

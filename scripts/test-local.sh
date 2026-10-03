@@ -11,6 +11,8 @@ fi
 echo "SDK_TYPECHECK=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}/tests/web-lifecycle-store.test.mjs"
 echo "WEB_LIFECYCLE_STORE_TESTS=PASS"
+"${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}/tests/web-error-normalize.test.mjs"
+echo "WEB_ERROR_NORMALIZE_TESTS=PASS"
 "${NODE_BIN}" --test "${ROOT_DIR}"/tests/matrix-airdrop.test.mjs
 echo "MATRIX_AIRDROP_TESTS=PASS"
 "${NODE_BIN}" --experimental-strip-types --test "${ROOT_DIR}"/tests/model/*.test.mjs "${ROOT_DIR}"/tests/vectors/*.test.mjs

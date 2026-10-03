@@ -1,6 +1,6 @@
 services:
   jamscript-backend:
-    image: ghcr.io/archelabs/jamscript-backend@sha256:4fd6baf37c7a4ba539585f9b1a157dad053d0836f75ded49b97fb704179a6e25
+    image: ghcr.io/archelabs/jamscript-backend@sha256:40fc14f5a10d8f22803340da5fd7ce585356dfb9072b3d5a80ba565c0ddb83cf
     restart: unless-stopped
     stop_grace_period: 60s
     environment:
