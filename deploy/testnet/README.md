@@ -1,18 +1,18 @@
 # MiniJAM Stage-1 TestNet and Locus Backend
 
-This deployment profile's existing artifact is pinned to MiniJAM
-`stage1-v0.2.1` and the Locus Service artifact from commit
-`359f4605f6a8ff2dc96fbbbd9be608e8babce51c`. Its guest was built before the
-RC12 allocator upgrade. `releases.lock` records the historical Service and
-MiniJAM pins plus the RC12 Backend candidate digest; this profile's Backend
-compose file is pinned to that RC12 image.
+Stage-1 runs MiniJAM `stage1-v0.2.1` and the prebuilt Locus RC12 candidate
+from Locus commit `2b6aeb5a51005d3503edfcfa97be780994fa5550`. The active
+immutable Service is `3962414306`, finalized at block `24901`, with code hash
+`0xc8f58efb503f4dce2615fc19e163d8690300794a33381a44de9f9ebbc54a4a62`. Its
+Backend runs RC12 with a fresh data directory. The prior Service `4139860077`
+and Backend data directory `/var/lib/locus/backend-rc10` remain preserved; no
+application state was copied to the new Service or Backend.
 
-The checked-in `dist/` is now the canonical RC12 candidate with a 1 MiB initial
-and 16 MiB maximum heap. Its code hash differs from the registered Service in
-the existing descriptor. Do not replace that descriptor or deploy the
-candidate until the new immutable Service and its state migration are verified.
-The Pages publication gate remains closed while the descriptor refers to the
-old code hash.
+The checked-in `dist/` is the verified RC12 artifact with a 1 MiB initial and
+16 MiB maximum heap. Six curated assets were recreated on the new Service and
+their full initial supplies were verified at Treasury `0x544ac734c6b113789ea97ac145b1a141bb7e0c65`.
+No pools or old balances were migrated. The live Pages descriptor and catalog
+must identify Service `3962414306` and match this artifact before publication.
 
 ## Runtime shape
 
@@ -54,12 +54,13 @@ Worker health, or Tuwunel Client API.
    `minijam-testnet-chain`. Verify its readiness at
    `http://127.0.0.1:8090/readinessz` and confirm the chain identity before
    deploying the Locus Service.
-7. Validate the checked-in RC12 candidate using
-   `python3 scripts/verify-prebuilt-dist.py`. Deploy it only as a new immutable
-   Service after the state migration plan and rollout window are ready.
-8. Generate `web/public/deployments/testnet.json` only from finalized on-chain
-   deployment evidence. The Pages workflow refuses publication when this
-   descriptor does not match the checked artifact metadata and locked versions.
+7. Validate the checked-in RC12 artifact using
+   `python3 scripts/verify-prebuilt-dist.py`; deploy it as a new immutable
+   Service from the prebuilt artifact. For a fresh Stage-1 rollout, create a
+   new Backend data directory and do not copy the prior managed-state database.
+8. Generate `web/public/deployments/testnet.json` from finalized on-chain
+   deployment evidence, then publish the matching curated catalog. The Pages
+   workflow checks the descriptor, artifact metadata, and locked versions.
 
 Start the node by itself after importing the matching authority keys. The
 Node-only profile avoids requiring the still-unconfigured Formal RPC relayer
