@@ -1,5 +1,5 @@
 {
   "version": 1,
-  "application": "generated_builder_application.rs",
+  "application": "service_descriptor.c",
   "native_modules": []
 }

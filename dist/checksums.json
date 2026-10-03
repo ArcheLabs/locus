@@ -2,11 +2,11 @@
   "version": 1,
   "algorithm": "blake2b-256",
   "files": {
-    "build.json": "0xb6f0769f424d246d1944578439827fe8dd5d8808f1c5450e27353d2b2c8ec5c5",
-    "builder.json": "0xa06db0dc5d39e1a550394f8bfabebc92c45b9fda218726a723efeabb1532ca02",
+    "build.json": "0x2c8aa86d63b64b8ad87dfd2118264cb48d3e1f539eed9e87570eb38c2175dc70",
+    "builder.json": "0x9f0df0ff61005ba08cf84b6a7eb0c9e3ea7893f1f51d1b6d9ac4478ab7064a88",
     "generated_builder_application.rs": "0xfc2650f1ecae6614a1f7829ad5556d77a05eff124e0d8145d09d3cbd25b9ae92",
     "generated_service.rs": "0xd9ea667e67e4dc35f69d8c50d3b1351596acd3601246b783e6e0f14e75d5b823",
-    "protocol-v0.json": "0xbb42ea889e759d31f32bdf013fe3de3198918db127f78391ed7cd3a1ecf0173b",
+    "protocol-v0.json": "0xb4387bded0ff56a31bb551c20fad10e843eedf7974ed6d26ebc157e7f138ff29",
     "scriptc/jamscript_numeric_runtime.ts": "0xa770bd900c3e84bc80884e56b46e72190033d154c6e4c1c6367884f34f738dc2",
     "scriptc/scriptc_runtime.ts": "0xe76872a2191c773face4554e63e0f052a1555d41d387aa34dd91cbdd6d0eebd4",
     "scriptc/scriptc_service.json": "0x4f7a2d6bf7d1662b7bad037e515f4ea7eb6f04465fbf0b09036b7bc13fc8eb76",
@@ -16,10 +16,10 @@
     "scriptc/scriptc_service.ts": "0xb92fb43f77f436adcec0c1119be803884932cad3aa3574a6e7e954c53bbd7855",
     "scriptc/scriptc_service_adapter.c": "0x0e7c90093f4d45329fac7c78ebb767a32ead29e522eecb110ff0d720208c426d",
     "service.abi.json": "0x2a06783d3a21bd1a178cb1709c3fb3b5df42ac8b657a8fa092a31590cbe6c426",
-    "service.blob": "0x7244d2be5d4c66cd59b186700c18e86464e0e5768cb73e64b4d03258cbd97114",
-    "service.elf": "0xdaa4176890ec65c0eaa1a05a8df95bd74f226dccdcf00b5dc533d8b92c0866f1",
-    "service.polkavm": "0x4f0f90942858c640ede469d9c1e589ff9fb60e1e699d0e45fb789b1d1aa19226",
-    "service.pvm": "0x4f0f90942858c640ede469d9c1e589ff9fb60e1e699d0e45fb789b1d1aa19226",
-    "service_descriptor.c": "0xb6eba9e9c3b4a9f4fa8bfea046908799e8bcc410c52b4d597afc720e54cdf69c"
+    "service.blob": "0xc8f58efb503f4dce2615fc19e163d8690300794a33381a44de9f9ebbc54a4a62",
+    "service.elf": "0xd4ef468d4c36a894bf7f5952e98534fbe4b9b901ef4f9fe059c429b189ecd75f",
+    "service.polkavm": "0x68382c7c3baffa245e9753bb80a63f381a3f50ee32bf21e1f97a18e18f4f9ba6",
+    "service.pvm": "0x68382c7c3baffa245e9753bb80a63f381a3f50ee32bf21e1f97a18e18f4f9ba6",
+    "service_descriptor.c": "0xecb2ab32f336e18a2db4df9302f2e93fbdbb8940816d49ef0aa6654b615fc2f3"
   }
 }

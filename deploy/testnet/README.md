@@ -7,11 +7,12 @@ RC12 allocator upgrade. `releases.lock` records the historical Service and
 MiniJAM pins plus the RC12 Backend candidate digest; this profile's Backend
 compose file is pinned to that RC12 image.
 
-The RC12 Locus source builds a separate 1 MiB initial / 16 MiB maximum heap
-artifact. Do not replace this profile's existing service descriptor or deploy
-the rebuilt artifact until the new immutable Service and its state migration
-are verified. The Pages build continues to validate the checked-in artifact
-and must not claim RC12 provenance for the old code hash.
+The checked-in `dist/` is now the canonical RC12 candidate with a 1 MiB initial
+and 16 MiB maximum heap. Its code hash differs from the registered Service in
+the existing descriptor. Do not replace that descriptor or deploy the
+candidate until the new immutable Service and its state migration are verified.
+The Pages publication gate remains closed while the descriptor refers to the
+old code hash.
 
 ## Runtime shape
 
@@ -53,11 +54,9 @@ Worker health, or Tuwunel Client API.
    `minijam-testnet-chain`. Verify its readiness at
    `http://127.0.0.1:8090/readinessz` and confirm the chain identity before
    deploying the Locus Service.
-7. Validate the existing `dist/` artifact using
-   `python3 scripts/verify-prebuilt-dist.py`. Do not compile or rewrite it.
-   Use the pinned JamScript CLI's direct artifact deployment path only after
-   confirming its signer configuration and compatibility with the recorded
-   non-canonical toolchain provenance.
+7. Validate the checked-in RC12 candidate using
+   `python3 scripts/verify-prebuilt-dist.py`. Deploy it only as a new immutable
+   Service after the state migration plan and rollout window are ready.
 8. Generate `web/public/deployments/testnet.json` only from finalized on-chain
    deployment evidence. The Pages workflow refuses publication when this
    descriptor does not match the checked artifact metadata and locked versions.

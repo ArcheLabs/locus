@@ -1,10 +1,10 @@
 # JamScript RC12 / Client RC7 Locus rollout
 
-The current frontend and service source now target JamScript RC12 and Client
-RC7. The active deployment descriptors and checked-in `dist/` artifact still
-identify older immutable Services; changing the frontend or Backend does not
-replace their guest code. The `[jamscript]`, `[jamscript_backend]`, and
-`[jamscript_client]` entries in `releases.lock` describe that historical
+The current frontend and service source target JamScript RC12 and Client RC7.
+The checked-in `dist/` now contains a canonical RC12 candidate, while active
+deployment descriptors still identify older immutable Services. Changing the
+frontend or Backend does not replace their guest code. The `[jamscript]`,
+`[jamscript_backend]`, and `[jamscript_client]` entries in `releases.lock` describe that historical
 baseline. `[transaction_lifecycle_upgrade]` records the new target pair and
 verified Backend image digest.
 
@@ -46,19 +46,22 @@ retry until the transaction status is known.
    `jamscript_getCapabilitiesV1` response reports
    `transactionLifecycleVersion: 1`, `bestChainTracking: true`, and
    `strictFinalizedReceipts: true` before enabling writes.
-2. Use JamScript RC12 to build the Locus service with the checked-in memory
-   budget. Verify `guestMemory`, the artifact hash, ABI, and service descriptor;
-   run the real PVM multi-action and over-budget checks plus a controlled
-   MiniJAM E2E. A prebuilt RC8 artifact is not an RC12 guest.
+2. The checked-in candidate was built with JamScript RC12, a 1 MiB initial
+   heap, and a 16 MiB maximum; its code hash is recorded in `releases.lock`.
+   Verify the artifact hash, ABI, and service descriptor, then run the real PVM
+   multi-action and over-budget checks plus a controlled MiniJAM E2E.
 3. Install `@jamscript/client@0.1.0-rc.7` in both consumers with clean lockfile
    installs. Run the root checks/tests and production web build. The
    `assert-published-client.mjs` gate checks that the installed package unwraps
    structured no-submit guest faults as well as exposing lifecycle APIs.
-4. Plan deployment of the new immutable Service separately. Preserve balances,
-   grants, pools, pending transaction records, and ownership nonces through the
-   application's migration plan; do not point the frontend descriptor at a
-   newly built code hash until that Service is registered and its state is
-   ready. This repository change does not deploy or migrate a live Service.
+4. Plan deployment of the new immutable Service separately. The checked-in
+   candidate does not match the active descriptors, so the Pages publication
+   gate will reject publication until finalized deployment evidence is
+   recorded. Preserve balances, grants, pools, pending transaction records,
+   and ownership nonces through the application's migration plan; do not point
+   the frontend descriptor at a newly built code hash until that Service is
+   registered and its state is ready. This repository change does not deploy
+   or migrate a live Service.
 5. After the service/backend/frontend rollout, verify a controlled
    non-production transaction at Best and at finalized receipt.
 

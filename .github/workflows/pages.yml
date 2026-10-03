@@ -55,7 +55,7 @@ jobs:
           npm ci
           npm --prefix web ci
 
-      - name: Verify fixed prebuilt Locus Service artifact
+      - name: Verify checked-in RC12 Locus Service candidate
         run: python3 scripts/verify-prebuilt-dist.py
 
       - name: Build production web client

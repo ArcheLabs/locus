@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include <stddef.h>
-#include "jam/service-descriptor-v1.h"
+#include "jam/service-descriptor-v2.h"
 
 extern void jamscript_scriptc_service_init(void);
 extern void jamscript_scriptc_authorizeMatrixController_entry_v1(const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t *, size_t, const uint8_t **, size_t *);
@@ -61,8 +61,8 @@ static const JamScriptActionDescriptorV1 jamscript_actions[] = {
     { { 0x24, 0xd4, 0x70, 0x3c, 0x92, 0x6f, 0xf7, 0x4f }, JAMSCRIPT_AUTH_OWNERSHIP_V1, { 0 }, jamscript_scriptc_burn_entry_v1 },
 };
 
-const JamScriptServiceDescriptorV1 jamscript_service_descriptor_v1 = {
-    1,
+const JamScriptServiceDescriptorV2 jamscript_service_descriptor_v2 = {
+    JAMSCRIPT_SERVICE_DESCRIPTOR_V2,
     13,
     jamscript_actions,
     12,
@@ -72,5 +72,7 @@ const JamScriptServiceDescriptorV1 jamscript_service_descriptor_v1 = {
     0,
     { 0 },
     { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
-    jamscript_scriptc_service_init
+    jamscript_scriptc_service_init,
+    1048576,
+    16777216
 };

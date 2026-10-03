@@ -23,12 +23,16 @@ node_image = "ghcr.io/archelabs/minijam-node@sha256:ba765011d45f6f0307328e55f3d7
 worker_image = "ghcr.io/archelabs/minijam-worker@sha256:714bf7456ad797d8436568cfbe0375f8afbead892c7bb407fd60bb3f6ed8ac2f"
 formal_rpc_image = "ghcr.io/archelabs/minijam-formal-rpc@sha256:6314129f900154ec2f001e73b2f09c1e4ad747bc12f972438c372f55e2210904"
 
-# These published lifecycle-upgrade artifacts are targets, not claims about
-# the currently deployed release pins above. Check live capabilities before use.
+# The lifecycle artifacts below are published and the Locus candidate is built;
+# the existing live release pins above remain historical until service migration.
 [transaction_lifecycle_upgrade]
-status = "pending_service_rebuild_and_capability_check"
+status = "candidate_built_pending_capability_check_and_service_migration"
 jamscript_version = "v0.1.0-rc.12"
 minimum_client = "@jamscript/client@0.1.0-rc.7"
 minimum_backend = "backend-v0.1.0-rc.12"
 backend_image_digest = "sha256:40fc14f5a10d8f22803340da5fd7ce585356dfb9072b3d5a80ba565c0ddb83cf"
+candidate_source_commit = "3832c917852ce65d0166120e2b7d5978e91308ef"
+candidate_code_hash = "0xc8f58efb503f4dce2615fc19e163d8690300794a33381a44de9f9ebbc54a4a62"
+candidate_heap_initial_bytes = 1048576
+candidate_heap_max_bytes = 16777216
 durable_transaction_lookup = false

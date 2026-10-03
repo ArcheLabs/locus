@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify the fixed, prebuilt Locus Service artifact without compiling it."""
+"""Verify the canonical checked-in RC12 Locus Service candidate artifact."""
 
 import hashlib
 import json
@@ -7,8 +7,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1] / "dist"
-EXPECTED_CODE_HASH = "0x7244d2be5d4c66cd59b186700c18e86464e0e5768cb73e64b4d03258cbd97114"
+EXPECTED_CODE_HASH = "0xc8f58efb503f4dce2615fc19e163d8690300794a33381a44de9f9ebbc54a4a62"
 EXPECTED_ABI_HASH = "0x2a06783d3a21bd1a178cb1709c3fb3b5df42ac8b657a8fa092a31590cbe6c426"
+EXPECTED_TOOLCHAIN_ID = "scriptc-m2-v2"
+EXPECTED_TOOLCHAIN_SHA256 = "f9c6405a153a1707c33d384984923bba6652744bd2bef688a8079d0541567420"
 
 
 def fail(message: str) -> None:
@@ -49,12 +51,23 @@ if build.get("code_hash") != files["service.blob"] or build.get("code_hash") != 
     fail("service blob hash differs from the locked build metadata")
 if build.get("abi_hash") != files["service.abi.json"] or build.get("abi_hash") != EXPECTED_ABI_HASH:
     fail("ABI hash differs from the locked build metadata")
-if build.get("canonical_toolchain") is not False:
-    fail("recorded toolchain provenance changed")
-if build.get("jamscript_toolchain_id") != "development" or build.get("jamscript_toolchain_sha256") != "":
-    fail("recorded development toolchain provenance changed")
+if build.get("canonical_toolchain") is not True:
+    fail("artifact was not built with the canonical toolchain")
+if (
+    build.get("jamscript_toolchain_id") != EXPECTED_TOOLCHAIN_ID
+    or build.get("jamscript_toolchain_sha256") != EXPECTED_TOOLCHAIN_SHA256
+):
+    fail("recorded RC12 toolchain provenance changed")
+memory = build.get("guestMemory")
+if (
+    not isinstance(memory, dict)
+    or memory.get("heapInitialBytes") != 1_048_576
+    or memory.get("effectiveHeapMaxBytes") != 16_777_216
+):
+    fail("guest memory budget differs from the Locus RC12 budget")
 
 print("PREBUILT_ARTIFACT_CHECKSUMS=verified")
 print("SERVICE_CODE_HASH=verified")
 print("SERVICE_ABI_HASH=verified")
-print("CANONICAL_TOOLCHAIN=false")
+print("CANONICAL_TOOLCHAIN=true")
+print("GUEST_MEMORY_BUDGET=verified")

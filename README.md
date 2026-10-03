@@ -172,12 +172,12 @@ to mock data; Demo Mode is explicit and is only for the frontend prototype.
 
 ## Published platform baseline
 
-The checked-in `releases.lock` retains the historical Locus source pins:
-JamScript and Backend RC8 with Client RC4. It is not a record of the live
-server. The operator has confirmed the current server uses Backend RC10 and
-the previous server used RC9. This lifecycle change requires Backend RC11 and
-Client RC6 after those artifacts are published and verified. Locus does not
-reproduce JamScript compiler, runtime, or Ownership protocol features locally.
+The checked-in `releases.lock` retains historical deployment pins separately
+from the RC12/Client RC7 upgrade candidate. The current `dist/` candidate uses
+JamScript RC12 and has not been deployed. The last reported server baseline
+was Backend RC10 after RC9; verify the live capability response before rollout.
+Locus does not reproduce JamScript compiler, runtime, or Ownership protocol
+features locally.
 
 For a fresh single-host MiniJAM Local deployment, see the
 [Local server deployment runbook](docs/local-server-deployment.md).
