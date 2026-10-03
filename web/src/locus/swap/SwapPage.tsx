@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, ArrowDownUp, ArrowLeftRight } from "lucide-react";
 import { formatUnits, minimumAmountOut, ownershipKey, parseUnits, quoteExactIn, SWAP_FEE_BPS, toHex, type LocusClient, type Ownership, type Pool } from "@archelabs/locus";
 import type { AssetView } from "../assets.js";
@@ -20,7 +20,7 @@ import { useI18n } from "../../i18n/I18nProvider.js";
 import { AssetBalanceStatus } from "../../components/AssetBalanceStatus.js";
 import { createPendingOperationTracker, pendingOperationsForScope, currentOperationScope, updatePendingOperation } from "../pendingOperations.js";
 
-type Submission = "idle" | "awaiting-signature" | "submitted" | "applied" | "failed";
+type Submission = "idle" | "awaiting-signature" | "submitted" | "failed";
 type Quote = { amountIn: bigint; amountOut: bigint; minimumAmountOut: bigint; feeAmount: bigint };
 
 export { parseSlippageBps } from "./swapValidation.js";
@@ -64,9 +64,24 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   const [amountTouched, setAmountTouched] = useState(false);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [submission, setSubmission] = useState<Submission>("idle");
+  const [activeSubmissionId, setActiveSubmissionId] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
+  const activeSubmissionIdRef = useRef<string | null>(null);
+  const displayedSubmissionIdRef = useRef<string | null>(null);
   const { t, text } = useI18n();
-  const busy = submission === "awaiting-signature" || submission === "submitted";
+  const busy = activeSubmissionId !== null;
+
+  function releaseSubmission(operationId: string) {
+    if (activeSubmissionIdRef.current !== operationId) return;
+    activeSubmissionIdRef.current = null;
+    setActiveSubmissionId(null);
+  }
+
+  function clearDisplayedSubmission() {
+    displayedSubmissionIdRef.current = null;
+    setSubmission("idle");
+    setActionError("");
+  }
 
   useEffect(() => {
     if (busy) return;
@@ -81,6 +96,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       setAssetOutId(defaultOut);
       setAmount("");
       setAmountTouched(false);
+      displayedSubmissionIdRef.current = null;
       setSubmission("idle");
       setActionError("");
       setReviewOpen(false);
@@ -150,8 +166,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
     setAssetOutId(output);
     setAmount("");
     setAmountTouched(false);
-    setSubmission("idle");
-    setActionError("");
+    clearDisplayedSubmission();
     setReviewOpen(false);
   }
 
@@ -175,7 +190,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
   }
 
   async function confirmSwap() {
-    if (!locus || !assetIn || !assetOut || !quote || !sessionOwner || serviceId === null || pairUnsupported) return;
+    if (activeSubmissionIdRef.current || !locus || !assetIn || !assetOut || !quote || !sessionOwner || serviceId === null || pairUnsupported) return;
     if (!canPerformAuthorizedAction()) {
       setActionError(t("auth.accountStillAuthorizing"));
       return;
@@ -187,13 +202,18 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       ownerKey: toHex(ownershipKey(sessionOwner)).toLowerCase(),
     };
     setReviewOpen(false);
-    setSubmission("awaiting-signature");
-    setActionError("");
+    clearDisplayedSubmission();
     const subject = locus.session?.subject ?? sessionOwner;
     const tracking = createPendingOperationTracker(locus, networkId, subject, "swap");
-    const noticeId = `operation-${tracking.operation.operationId}`;
+    const operationId = tracking.operation.operationId;
+    const noticeId = `operation-${operationId}`;
+    activeSubmissionIdRef.current = operationId;
+    displayedSubmissionIdRef.current = operationId;
+    setActiveSubmissionId(operationId);
+    setSubmission("awaiting-signature");
     let submittedTransactionId = "";
     let resumeTracking: (() => ReturnType<LocusClient["waitForFinalized"]>) | undefined;
+    let bestRefresh: Promise<PromiseSettledResult<unknown>[]> | undefined;
     let terminalFailure = false;
     try {
       const submitted = await locus.swapExactIn(assetIn.assetId, assetOut.assetId, quote.amountIn, quote.minimumAmountOut, tracking.submissionOptions);
@@ -206,7 +226,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
         transactionId: submitted.transactionId,
         busy: true,
       });
-      setSubmission("submitted");
+      if (displayedSubmissionIdRef.current === operationId) setSubmission("submitted");
       const onUpdate = (update: Parameters<typeof tracking.onUpdate>[0]) => {
         tracking.onUpdate(update);
         const message = update.status.status === "reorged" ? t("lifecycle.reorged")
@@ -225,7 +245,13 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
           ...(update.confirmation === "finalized" && update.actionResult && update.actionResult !== "applied" ? { tone: "error" as const } : {}),
           dismissible: true,
         });
-        if (update.confirmation === "best") void Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
+        if (update.confirmation === "best" && !bestRefresh) {
+          bestRefresh = Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
+          void bestRefresh.then(() => {
+            releaseSubmission(operationId);
+            if (displayedSubmissionIdRef.current === operationId) setSubmission("idle");
+          });
+        }
       };
       const wait = () => locus.waitForFinalized(submitted.transactionId, {
         actionHash: submitted.actionHash,
@@ -236,16 +262,19 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       resumeTracking = wait;
       const receipt = await wait();
       tracking.onFinalized(receipt);
+      releaseSubmission(operationId);
       if (receipt.actionReceipt.status !== "applied") {
         terminalFailure = true;
         throw new Error(`Swap failed${receipt.actionReceipt.errorCode === null ? "" : ` (error ${receipt.actionReceipt.errorCode})`}`);
       }
       onTransactionNotice({ id: noticeId, title: t("swap.completed"), message: t("lifecycle.finalizedApplied"), transactionId: submitted.transactionId, dismissible: true });
       if (!sameScope(isScopeCurrent, expectedScope)) {
-        setSubmission("idle");
+        if (displayedSubmissionIdRef.current === operationId) {
+          displayedSubmissionIdRef.current = null;
+          setSubmission("idle");
+        }
         return;
       }
-      setSubmission("applied");
       try {
         onApplied({
           assetIn: assetIn.symbol,
@@ -258,8 +287,13 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       } catch {
         // A browser-local activity write must not change the finalized transaction result.
       }
-      setAmount("");
-      setAmountTouched(false);
+      if (displayedSubmissionIdRef.current === operationId) {
+        displayedSubmissionIdRef.current = null;
+        setSubmission("idle");
+        setAmount("");
+        setAmountTouched(false);
+        setActionError("");
+      }
       await Promise.allSettled([onRefreshAssets(), onRefreshPools()]);
       onNotify(t("swap.completed"));
     } catch (cause) {
@@ -290,11 +324,18 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
         });
       }
       if (!sameScope(isScopeCurrent, expectedScope)) {
-        setSubmission("idle");
+        releaseSubmission(operationId);
+        if (displayedSubmissionIdRef.current === operationId) {
+          displayedSubmissionIdRef.current = null;
+          setSubmission("idle");
+        }
         return;
       }
-      setSubmission(unresolved ? "submitted" : "failed");
-      setActionError(submittedTransactionId && unresolved ? "" : message);
+      if (!unresolved) releaseSubmission(operationId);
+      if (displayedSubmissionIdRef.current === operationId) {
+        setSubmission(unresolved ? bestRefresh ? "idle" : "submitted" : "failed");
+        setActionError(submittedTransactionId && unresolved ? "" : message);
+      }
     }
   }
 
@@ -307,8 +348,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
     if (!assetIn || assetIn.balance === null) return;
     setAmount(formatUnits(assetIn.balance, assetIn.decimals));
     setAmountTouched(true);
-    setSubmission("idle");
-    setActionError("");
+    clearDisplayedSubmission();
   }
 
   return <section className="page page--narrow swap-page">
@@ -323,7 +363,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
           id="swap-amount"
           amount={amount}
           disabled={busy}
-          onAmountChange={(value) => { setAmount(value); setSubmission("idle"); setActionError(""); }}
+          onAmountChange={(value) => { setAmount(value); clearDisplayedSubmission(); }}
           onAmountBlur={() => setAmountTouched(true)}
           onMax={useMax}
           maxDisabled={!assetIn || assetIn.balance === null}
@@ -356,7 +396,7 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       <details className="swap-advanced-details" open={detailsOpen} onToggle={(event) => setDetailsOpen(event.currentTarget.open)}>
         <summary>{t("ui.transactionDetails")}</summary>
         <FormField label={t("swap.slippage")} htmlFor="swap-slippage" error={visibleSlippageError ? t("swap.enterSlippage") : null} errorId="swap-slippage-error" className="swap-settings-field">
-          <div className="swap-slippage-input"><input id="swap-slippage" inputMode="decimal" disabled={busy} value={slippage} onChange={(event) => setSlippage(event.target.value)} aria-invalid={visibleSlippageError} aria-describedby={visibleSlippageError ? "swap-slippage-error" : undefined} /><span>%</span></div>
+          <div className="swap-slippage-input"><input id="swap-slippage" inputMode="decimal" disabled={busy} value={slippage} onChange={(event) => { setSlippage(event.target.value); clearDisplayedSubmission(); }} aria-invalid={visibleSlippageError} aria-describedby={visibleSlippageError ? "swap-slippage-error" : undefined} /><span>%</span></div>
         </FormField>
         {quote && assetOut && <dl className="swap-quote-details">
           <div><dt>{t("ui.minimumReceived")}</dt><dd>{formatUnits(quote.minimumAmountOut, assetOut.decimals)} {assetOut.symbol}</dd></div>
@@ -366,8 +406,8 @@ export function SwapPage({ networkMode, networkId, status, serviceId, locus, ass
       </details>
 
       {actionError && <p className="action-status action-status--error" role="alert">{text(actionError)}</p>}
-      <ActionButton className={`swap-review-action${pairUnsupported ? " action-button--unsupported" : ""}`} variant="primary" icon={ArrowLeftRight} fullWidth disabled={busy || status !== "ready" || poolLoading || Boolean(poolError) || pairUnsupported || !quote || !assetIn || !assetOut || Boolean(validation) || slippageMissing || submission === "applied"} onClick={openReview}>
-        {pairUnsupported ? t("swap.swapNotSupported") : submission === "awaiting-signature" ? t("send.approveWallet") : submission === "submitted" ? t("send.waitingConfirmation") : submission === "applied" ? t("swap.completed") : sessionOwner ? t("swap.reviewSwap") : t("swap.connectToSwap")}
+      <ActionButton className={`swap-review-action${pairUnsupported ? " action-button--unsupported" : ""}`} variant="primary" icon={ArrowLeftRight} fullWidth disabled={busy || status !== "ready" || poolLoading || Boolean(poolError) || pairUnsupported || !quote || !assetIn || !assetOut || Boolean(validation) || slippageMissing} onClick={openReview}>
+        {pairUnsupported ? t("swap.swapNotSupported") : submission === "awaiting-signature" ? t("send.approveWallet") : submission === "submitted" ? t("send.waitingConfirmation") : sessionOwner ? t("swap.reviewSwap") : t("swap.connectToSwap")}
       </ActionButton>
     </div>
 
