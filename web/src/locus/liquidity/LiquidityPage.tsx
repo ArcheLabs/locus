@@ -28,18 +28,26 @@ const OWNERSHIP_PREPARATION_TIMEOUT_MS = 45_000;
 const WALLET_SIGNATURE_TIMEOUT_MS = 120_000;
 
 function pendingStorageKey(scope: LiquidityScope): string {
+  return `locus.liquidity.pending.v3.${scope.networkId}.${scope.serviceId ?? 0}.${scope.ownerKey ?? "disconnected"}`;
+}
+
+function legacyPendingStorageKey(scope: LiquidityScope): string {
   return `locus.liquidity.pending.v2.${scope.networkId}.${scope.serviceId ?? 0}.${scope.ownerKey ?? "disconnected"}`;
 }
 
-function readPending(key: string): PendingAction | null {
+function isPendingAction(value: unknown): value is PendingAction {
+  if (!value || typeof value !== "object") return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.transactionId === "string" && typeof row.action === "string" && typeof row.networkId === "string"
+    && typeof row.serviceId === "number" && typeof row.ownerKey === "string" && typeof row.createdAt === "number";
+}
+
+function readPending(key: string): PendingAction[] {
   try {
     const value: unknown = JSON.parse(window.localStorage.getItem(key) ?? "null");
-    if (!value || typeof value !== "object") return null;
-    const row = value as Record<string, unknown>;
-    if (typeof row.transactionId !== "string" || typeof row.action !== "string" || typeof row.networkId !== "string"
-      || typeof row.serviceId !== "number" || typeof row.ownerKey !== "string" || typeof row.createdAt !== "number") return null;
-    return row as PendingAction;
-  } catch { return null; }
+    if (Array.isArray(value)) return value.filter(isPendingAction);
+    return isPendingAction(value) ? [value] : [];
+  } catch { return []; }
 }
 
 function operationLabel(operation: Operation): string {
@@ -122,13 +130,16 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   const [positionsPageLoading, setPositionsPageLoading] = useState(false);
   const [positionsPageError, setPositionsPageError] = useState("");
   const [review, setReview] = useState<LiquidityReview | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [localBusy, setLocalBusy] = useState(false);
+  const [activeOperationIds, setActiveOperationIds] = useState<Set<string>>(() => new Set());
+  const activeOperationIdsRef = useRef(activeOperationIds);
   const [preparingAction, setPreparingAction] = useState(false);
   const [preparedAction, setPreparedAction] = useState<PreparedOwnershipAction | null>(null);
   const preparedActionRef = useRef<PreparedOwnershipAction | null>(null);
   const preparationGeneration = useRef(0);
   const preparationTimer = useRef<number | null>(null);
   const routePairHydration = useRef<string | null>(null);
+  const displayedActionIdRef = useRef<string | null>(null);
   const [transactionId, setTransactionId] = useState("");
   const [error, setError] = useState("");
   const [pairPoolState, setPairPoolState] = useState<PairPoolState | null>(null);
@@ -143,9 +154,17 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   const storageKey = pendingStorageKey(scope);
   const transactionNoticeId = `liquidity-${storageKey}`;
   const pendingScopeReady = networkReady && sessionOwner !== null && serviceId !== null;
-  const [pending, setPending] = useState<PendingAction | null>(() => pendingScopeReady ? readPending(storageKey) : null);
+  const [pendingActions, setPendingActions] = useState<PendingAction[]>(() => {
+    if (!pendingScopeReady) return [];
+    const current = readPending(storageKey);
+    return current.length ? current : readPending(legacyPendingStorageKey(scope));
+  });
+  const pendingActionsRef = useRef(pendingActions);
   const [submissionUnknown, setSubmissionUnknown] = useState(false);
-  const pendingMatchesScope = !!pending && pending.networkId === networkId && pending.serviceId === serviceId && pending.ownerKey === ownerKey;
+  const scopedPendingActions = useMemo(
+    () => pendingActions.filter((action) => action.networkId === networkId && action.serviceId === serviceId && action.ownerKey === ownerKey),
+    [networkId, ownerKey, pendingActions, serviceId],
+  );
   const previousTransactionNoticeId = useRef(transactionNoticeId);
   const selectedA = assets.find((asset) => asset.assetIdHex === assetAId) ?? null;
   const selectedB = assets.find((asset) => asset.assetIdHex === assetBId) ?? null;
@@ -160,11 +179,50 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }, [additionalPools, pools]);
   const poolEmpty = !!selectedPool && selectedPool.totalShares === 0n;
   const operation: Exclude<Operation, "remove"> = !selectedPool ? "create" : poolEmpty ? "initialize" : "add";
-  const busyOrPending = busy || !!pending || submissionUnknown;
+  const busy = localBusy || activeOperationIds.size > 0;
+  const hasBlockingPending = scopedPendingActions.some((action) => action.phase !== "best-included");
+  const busyOrPending = busy || hasBlockingPending || submissionUnknown;
   const formLocked = busyOrPending || !!review;
   const removalPosition = review?.operation === "remove" ? review.position ?? null : null;
   const isScopeCurrentRef = useRef(isScopeCurrent);
   isScopeCurrentRef.current = isScopeCurrent;
+
+  function beginActiveOperation(operationId: string) {
+    const next = new Set(activeOperationIdsRef.current);
+    next.add(operationId);
+    activeOperationIdsRef.current = next;
+    setActiveOperationIds(next);
+  }
+
+  function finishActiveOperation(operationId: string) {
+    if (!activeOperationIdsRef.current.has(operationId)) return;
+    const next = new Set(activeOperationIdsRef.current);
+    next.delete(operationId);
+    activeOperationIdsRef.current = next;
+    setActiveOperationIds(next);
+  }
+
+  function updatePendingActions(update: (current: PendingAction[]) => PendingAction[]) {
+    const next = update(pendingActionsRef.current);
+    pendingActionsRef.current = next;
+    setPendingActions(next);
+    try { window.localStorage.setItem(storageKey, JSON.stringify(next)); } catch { /* Keep the in-memory pending guard if storage is unavailable. */ }
+  }
+
+  function upsertPendingAction(action: PendingAction) {
+    updatePendingActions((current) => [...current.filter((item) => item.transactionId.toLowerCase() !== action.transactionId.toLowerCase()), action]);
+  }
+
+  function findPendingAction(transactionIdToFind: string, key = storageKey): PendingAction | undefined {
+    return pendingActionsRef.current.find((item) => item.transactionId.toLowerCase() === transactionIdToFind.toLowerCase())
+      ?? readPending(key).find((item) => item.transactionId.toLowerCase() === transactionIdToFind.toLowerCase());
+  }
+
+  function removePendingAction(transactionIdToRemove: string) {
+    const removed = pendingActionsRef.current.find((item) => item.transactionId.toLowerCase() === transactionIdToRemove.toLowerCase());
+    if (removed) previousPendingNoticeIds.current.delete(removed.operationId ? `operation-${removed.operationId}` : transactionNoticeId);
+    updatePendingActions((current) => current.filter((item) => item.transactionId.toLowerCase() !== transactionIdToRemove.toLowerCase()));
+  }
   const selectedAmounts = selectedA && selectedB ? (() => {
     try { return [parseUnits(amountA, selectedA.decimals), parseUnits(amountB, selectedB.decimals)] as const; } catch { return null; }
   })() : null;
@@ -219,9 +277,22 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }, [review, scope]);
 
   useEffect(() => {
-    setPending(pendingScopeReady ? readPending(storageKey) : null);
+    const current = pendingScopeReady ? readPending(storageKey) : [];
+    const legacy = pendingScopeReady && current.length === 0 ? readPending(legacyPendingStorageKey(scope)) : [];
+    const loaded = current.length ? current : legacy;
+    pendingActionsRef.current = loaded;
+    setPendingActions(loaded);
+    if (legacy.length) {
+      try {
+        window.localStorage.setItem(storageKey, JSON.stringify(legacy));
+        window.localStorage.removeItem(legacyPendingStorageKey(scope));
+      } catch { /* Leave the legacy record intact if migration storage is unavailable. */ }
+    }
     setTransactionId("");
-  }, [pendingScopeReady, storageKey]);
+    activeOperationIdsRef.current = new Set();
+    setActiveOperationIds(new Set());
+    setLocalBusy(false);
+  }, [pendingScopeReady, scope, storageKey]);
 
   useEffect(() => {
     if (!locus || !sessionOwner || !pendingScopeReady) {
@@ -234,17 +305,28 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     setSubmissionUnknown(unresolved);
   }, [locus, networkId, pendingScopeReady, sessionOwner]);
 
+  const previousPendingNoticeIds = useRef(new Set<string>());
   useEffect(() => {
     if (previousTransactionNoticeId.current !== transactionNoticeId) {
       onClearTransactionNotice(previousTransactionNoticeId.current);
       previousTransactionNoticeId.current = transactionNoticeId;
     }
-    if (!pendingScopeReady || !pendingMatchesScope) {
+    if (!pendingScopeReady) {
+      for (const previousId of previousPendingNoticeIds.current) onClearTransactionNotice(previousId);
+      previousPendingNoticeIds.current.clear();
       onClearTransactionNotice(transactionNoticeId);
       return;
     }
-    if (pending) {
-      showPendingNotice(pending, busy);
+    const noticeIds = new Set(scopedPendingActions.map((action) => action.operationId ? `operation-${action.operationId}` : transactionNoticeId));
+    for (const previousId of previousPendingNoticeIds.current) {
+      if (!noticeIds.has(previousId)) onClearTransactionNotice(previousId);
+    }
+    previousPendingNoticeIds.current = noticeIds;
+    if (scopedPendingActions.length) {
+      for (const action of scopedPendingActions) {
+        const operationBusy = action.operationId ? activeOperationIds.has(action.operationId) : busy;
+        showPendingNotice(action, operationBusy);
+      }
       return;
     }
     if (transactionId) {
@@ -252,7 +334,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       return;
     }
     onClearTransactionNotice(transactionNoticeId);
-  }, [busy, error, locus, onClearTransactionNotice, onTransactionNotice, pending, pendingMatchesScope, pendingScopeReady, scope, storageKey, transactionId, transactionNoticeId]);
+  }, [activeOperationIds, busy, error, locus, onClearTransactionNotice, onTransactionNotice, pendingScopeReady, scopedPendingActions, scope, storageKey, transactionId, transactionNoticeId]);
 
   useEffect(() => {
     setAdditionalPools([]);
@@ -309,6 +391,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }, [assetAId, assetBId, locus, networkReady, pairRefreshRevision, scope]);
 
   function setPair(a: string, b: string, changedSide: "a" | "b" | "both" = "both") {
+    displayedActionIdRef.current = null;
     setAssetAId(a); setAssetBId(b);
     if (changedSide === "a" || changedSide === "both") setAmountA("");
     if (changedSide === "b" || changedSide === "both") setAmountB("");
@@ -316,6 +399,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }
 
   function updateAmountA(value: string) {
+    displayedActionIdRef.current = null;
     setAmountA(value);
     setError("");
     if (!selectedPool || poolEmpty || !selectedA || !selectedB) return;
@@ -329,6 +413,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }
 
   function updateAmountB(value: string) {
+    displayedActionIdRef.current = null;
     setAmountB(value);
     setError("");
     if (!selectedPool || poolEmpty || !selectedA || !selectedB) return;
@@ -490,10 +575,10 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       if (a > selectedA.balance || b > selectedB.balance) throw new Error("One or both amounts exceed your balance.");
       if (!liquidityQuote) throw new Error("These amounts are too large, too small, or outside the pool reserve limit.");
       const request: LiquidityReview = { operation, scope, assetA: selectedA, assetB: selectedB, amountA, amountB };
-      setBusy(true);
+      setLocalBusy(true);
       await prepareForReview(request, withdrawPercent, true);
     } catch { setError(t("errors.enterNonZeroAmounts")); }
-    finally { setBusy(false); }
+    finally { setLocalBusy(false); }
   }
 
   async function refreshAfterApplied(expectedScope: LiquidityScope) {
@@ -508,13 +593,26 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     setPositionCursor(nextPositionCount > 50n ? 50n : nextPositionCount); await onRefreshAssets();
   }
 
+  async function refreshBeforeNextAction(expectedScope: LiquidityScope) {
+    await refreshAfterApplied(expectedScope);
+    if (!locus || !selectedA || !selectedB || selectedA.assetIdHex === selectedB.assetIdHex || !isScopeCurrent(expectedScope)) return;
+    const requestKey = `${selectedA.assetIdHex}:${selectedB.assetIdHex}`;
+    setPairPoolState({ key: requestKey, pool: null, loading: true, error: "" });
+    try {
+      const pool = await locus.getPool(selectedA.assetId, selectedB.assetId);
+      if (isScopeCurrent(expectedScope)) setPairPoolState({ key: requestKey, pool, loading: false, error: "" });
+    } catch {
+      if (isScopeCurrent(expectedScope)) {
+        setPairPoolState({ key: requestKey, pool: null, loading: false, error: "This pair's pool state could not be loaded. Retry before submitting." });
+      }
+    }
+  }
+
   async function clearPreReceiptFailure(id: string, cause: unknown, expectedScope: LiquidityScope): Promise<boolean> {
     const reason = preReceiptFailure(cause, id);
     if (!reason || !isScopeCurrent(expectedScope)) return false;
-    const saved = readPending(storageKey);
-    if (saved?.transactionId.toLowerCase() === id.toLowerCase()) window.localStorage.removeItem(storageKey);
-    setPending((current) => current?.transactionId.toLowerCase() === id.toLowerCase() ? null : current);
-    setTransactionId(id);
+    const saved = findPendingAction(id);
+    removePendingAction(id);
     setPairRefreshRevision((revision) => revision + 1);
     let refreshed = false;
     try { await refreshAfterApplied(expectedScope); refreshed = true; } catch { /* Keep the terminal failure visible if refresh is temporarily unavailable. */ }
@@ -523,7 +621,10 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       ? "Pool creation on this deployed Service must be upgraded before retrying."
       : "Review the current pool and balance state before another attempt.";
     const message = `The transaction failed before an action receipt was created (${reason}). No liquidity action was applied. ${refreshed ? "Pool state and balances were refreshed." : "The automatic state refresh failed; refresh the page before continuing."} ${followUp}`;
-    setError(message);
+    if (saved?.operationId && displayedActionIdRef.current === saved.operationId) {
+      setTransactionId(id);
+      setError(message);
+    }
     showLiquidityFailureNotice(id, message, saved?.operationId ? `operation-${saved.operationId}` : transactionNoticeId);
     return true;
   }
@@ -551,12 +652,13 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }
 
   function clearFinalizedFailure(id: string, status: string, errorCode: number | null) {
-    const saved = readPending(storageKey);
-    if (saved?.transactionId.toLowerCase() === id.toLowerCase()) window.localStorage.removeItem(storageKey);
-    setPending((current) => current?.transactionId.toLowerCase() === id.toLowerCase() ? null : current);
-    setTransactionId(id);
+    const saved = findPendingAction(id);
+    removePendingAction(id);
     const message = `Transaction finalized as ${status}${errorCode === null ? "" : ` (error ${errorCode})`}. The liquidity action was not applied; review the current state before trying again.`;
-    setError(message);
+    if (saved?.operationId && displayedActionIdRef.current === saved.operationId) {
+      setTransactionId(id);
+      setError(message);
+    }
     showLiquidityFailureNotice(id, message, saved?.operationId ? `operation-${saved.operationId}` : transactionNoticeId);
     setPairRefreshRevision((revision) => revision + 1);
   }
@@ -587,8 +689,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
 
   function savePendingPhase(current: PendingAction, phase: NonNullable<PendingAction["phase"]>): PendingAction {
     const updated = { ...current, phase };
-    try { window.localStorage.setItem(storageKey, JSON.stringify(updated)); } catch { /* Keep the in-memory pending guard if local storage is unavailable. */ }
-    setPending(updated);
+    upsertPendingAction(updated);
     return updated;
   }
 
@@ -620,9 +721,11 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   }
 
   async function waitForPending(current: PendingAction, expectedScope = scope) {
-    if (!locus || busy || !isScopeCurrent(expectedScope)) return;
-    setBusy(true); setError("");
+    const activeId = current.operationId ?? current.transactionId;
+    if (!locus || activeOperationIdsRef.current.has(activeId) || !isScopeCurrent(expectedScope)) return;
+    if (current.phase !== "best-included") beginActiveOperation(activeId);
     let refreshedBest = false;
+    let finalizedReceiptReceived = false;
     try {
       const receipt = await locus.waitForFinalized(current.transactionId, {
         ...(current.actionHash ? { actionHash: current.actionHash } : {}),
@@ -631,36 +734,56 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         onUpdate: (update) => {
           if (!isScopeCurrent(expectedScope)) return;
           if (update.status.status === "reorged") {
+            refreshedBest = false;
+            beginActiveOperation(activeId);
             showPendingNotice(savePendingPhase(current, "reorged"), true);
           } else if (update.confirmation === "best") {
             showPendingNotice(savePendingPhase(current, "best-included"), true);
             if (!refreshedBest) {
               refreshedBest = true;
-              void refreshAfterApplied(expectedScope);
+              void refreshBeforeNextAction(expectedScope).then(() => {
+                if (!isScopeCurrent(expectedScope)) return;
+                const saved = findPendingAction(current.transactionId);
+                if (saved?.phase === "best-included") {
+                  showPendingNotice(saved, false);
+                  finishActiveOperation(activeId);
+                }
+              }).catch(() => {
+                if (!isScopeCurrent(expectedScope)) return;
+                refreshedBest = false;
+                const updated = savePendingPhase(current, "pending");
+                showPendingNotice(updated, false);
+                finishActiveOperation(activeId);
+              });
             }
           } else if (update.confirmation === "finalized" && !update.actionResult) {
             showPendingNotice(current, true, "finalized-receipt-pending");
           }
         },
       });
+      finalizedReceiptReceived = true;
       if (!isScopeCurrent(expectedScope)) return;
       if (receipt.actionReceipt.status !== "applied") {
         clearFinalizedFailure(current.transactionId, receipt.actionReceipt.status, receipt.actionReceipt.errorCode);
         return;
       }
-      window.localStorage.removeItem(storageKey); setPending(null); setTransactionId("");
-      onClearTransactionNotice(transactionNoticeId);
+      removePendingAction(current.transactionId);
+      onClearTransactionNotice(current.operationId ? `operation-${current.operationId}` : transactionNoticeId);
+      if (current.action !== "Remove liquidity") onActionSuccess(current.action === "Create pool" ? t("liquidity.poolCreated") : t("liquidity.liquidityAdded"));
       await refreshAfterApplied(expectedScope);
       setPairRefreshRevision((revision) => revision + 1);
-      if (current.action !== "Remove liquidity") onActionSuccess(current.action === "Create pool" ? t("liquidity.poolCreated") : t("liquidity.liquidityAdded"));
     } catch (cause) {
       if (!isScopeCurrent(expectedScope)) return;
+      if (finalizedReceiptReceived) {
+        setPairRefreshRevision((revision) => revision + 1);
+        return;
+      }
       if (await clearPreReceiptFailure(current.transactionId, cause, expectedScope)) return;
-      showPendingNotice(readPending(storageKey) ?? current, false);
+      showPendingNotice(findPendingAction(current.transactionId) ?? current, false);
     } finally {
-      setBusy(false);
+      finishActiveOperation(activeId);
       if (isScopeCurrent(expectedScope)) {
-        const saved = readPending(storageKey);
+        const saved = findPendingAction(current.transactionId);
         if (saved?.transactionId.toLowerCase() === current.transactionId.toLowerCase()) showPendingNotice(saved, false);
       }
     }
@@ -675,6 +798,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     const subject = locus.session?.subject ?? sessionOwner;
     if (!subject) return;
     const tracking = createPendingOperationTracker(locus, review.scope.networkId, subject, `liquidity-${review.operation}`);
+    const operationId = tracking.operation.operationId;
     let signature: Promise<SignedOwnershipAction>;
     try {
       // No RPC or asynchronous state read may run before this call. It must
@@ -691,8 +815,10 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     preparedActionRef.current = null;
     setPreparedAction(null);
     setPreparingAction(false);
-    setBusy(true);
+    displayedActionIdRef.current = operationId;
+    setTransactionId("");
     setError("");
+    beginActiveOperation(operationId);
     void finishConfirmedAction(review, prepared, signature, tracking);
   }
 
@@ -702,13 +828,16 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     signature: Promise<SignedOwnershipAction>,
     tracking: ReturnType<typeof createPendingOperationTracker>,
   ) {
+    const operationId = tracking.operation.operationId;
     if (!locus) {
       tracking.onNotSubmitted(new Error("The active Locus session was closed before submission."));
+      finishActiveOperation(operationId);
       return;
     }
     let signatureReceived = false;
     let submissionAttempted = false;
     let submittedId = "";
+    let finalizedReceiptReceived = false;
     try {
       const signed = await waitForWalletSignature(signature, WALLET_SIGNATURE_TIMEOUT_MS);
       signatureReceived = true;
@@ -737,8 +866,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         operationId: tracking.operation.operationId,
         phase: "pending",
       };
-      setPending(saved); setTransactionId(submittedId);
-      try { window.localStorage.setItem(pendingStorageKey(request.scope), JSON.stringify(saved)); } catch { /* Keep the in-memory pending guard if this browser blocks local storage. */ }
+      upsertPendingAction(saved);
       closeReview();
 
       let refreshedBest = false;
@@ -750,12 +878,26 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
           tracking.onUpdate(update);
           if (!isScopeCurrentRef.current(request.scope)) return;
           if (update.status.status === "reorged") {
+            refreshedBest = false;
             showPendingNotice(savePendingPhase(saved, "reorged"), true);
           } else if (update.confirmation === "best") {
             showPendingNotice(savePendingPhase(saved, "best-included"), true);
             if (!refreshedBest) {
               refreshedBest = true;
-              void refreshAfterApplied(request.scope);
+              void refreshBeforeNextAction(request.scope).then(() => {
+                if (!isScopeCurrentRef.current(request.scope)) return;
+                const refreshed = findPendingAction(submittedId, pendingStorageKey(request.scope));
+                if (refreshed?.phase === "best-included") {
+                  showPendingNotice(refreshed, false);
+                  finishActiveOperation(operationId);
+                }
+              }).catch(() => {
+                if (!isScopeCurrentRef.current(request.scope)) return;
+                refreshedBest = false;
+                const updated = savePendingPhase(saved, "pending");
+                showPendingNotice(updated, false);
+                finishActiveOperation(operationId);
+              });
             }
           } else if (update.confirmation === "finalized" && !update.actionResult) {
             showPendingNotice(saved, true, "finalized-receipt-pending");
@@ -763,25 +905,34 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         },
       });
       tracking.onFinalized(receipt);
+      finalizedReceiptReceived = true;
       if (!isScopeCurrentRef.current(request.scope)) return;
       if (receipt.actionReceipt.status !== "applied") {
         clearFinalizedFailure(submittedId, receipt.actionReceipt.status, receipt.actionReceipt.errorCode);
         return;
       }
-      window.localStorage.removeItem(pendingStorageKey(request.scope));
-      setPending(null); setTransactionId("");
+      removePendingAction(submittedId);
+      onClearTransactionNotice(`operation-${operationId}`);
       onTransactionNotice({
-        id: `operation-${tracking.operation.operationId}`,
+        id: `operation-${operationId}`,
         title: operationLabel(request.operation),
         message: t("lifecycle.finalizedApplied"),
         transactionId: submittedId,
         dismissible: true,
       });
-      if (request.operation !== "remove") { setAmountA(""); setAmountB(""); }
+      if (displayedActionIdRef.current === operationId) {
+        displayedActionIdRef.current = null;
+        if (request.operation !== "remove") { setAmountA(""); setAmountB(""); }
+        setError("");
+      }
       await refreshAfterApplied(request.scope);
       setPairRefreshRevision((revision) => revision + 1);
       if (request.operation !== "remove") onActionSuccess(request.operation === "create" ? t("liquidity.poolCreated") : t("liquidity.liquidityAdded"));
     } catch (cause) {
+      if (finalizedReceiptReceived) {
+        if (isScopeCurrentRef.current(request.scope)) setPairRefreshRevision((revision) => revision + 1);
+        return;
+      }
       if (submissionAttempted) tracking.onSubmissionUnknown(cause);
       else tracking.onNotSubmitted(cause);
       if (!signatureReceived) locus.abandonPreparedOwnershipAction(prepared);
@@ -790,8 +941,8 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
       if (!submittedId && /error 6002|POOL_ALREADY_EXISTS/i.test(normalizeActionError(cause, ""))) {
         setPairRefreshRevision((revision) => revision + 1);
       }
-      closeReview();
-      if (submittedId) showPendingNotice(readPending(pendingStorageKey(request.scope)) ?? {
+      if (displayedActionIdRef.current === operationId) closeReview();
+      if (submittedId) showPendingNotice(findPendingAction(submittedId, pendingStorageKey(request.scope)) ?? {
         transactionId: submittedId,
         action: operationLabel(request.operation),
         networkId: request.scope.networkId,
@@ -812,10 +963,10 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
             tone: "error",
             dismissible: true,
           });
-        } else setError(t("errors.submissionOutcomeUnknown", { reason: friendlyError(cause) }));
+        } else if (displayedActionIdRef.current === operationId) setError(t("errors.submissionOutcomeUnknown", { reason: friendlyError(cause) }));
       }
     } finally {
-      setBusy(false);
+      finishActiveOperation(operationId);
     }
   }
 
@@ -824,12 +975,13 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
     setWithdrawPercent(50);
     setWithdrawPercentText("50");
     setCustomWithdraw(true);
-    setBusy(true);
+    setLocalBusy(true);
     try { await prepareForReview({ operation: "remove", position, scope }, 50, true); }
-    finally { setBusy(false); }
+    finally { setLocalBusy(false); }
   }
 
   function updateCustomWithdrawPercent(value: string) {
+    displayedActionIdRef.current = null;
     setWithdrawPercentText(value);
     const trimmedValue = value.trim();
     const percent = trimmedValue ? Number(trimmedValue) : 0;
@@ -886,11 +1038,11 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
   const ctaLabel = !sessionOwner ? t("common.connect")
     : !selectedA || !selectedB ? t("ui.selectAssets")
       : selectedA.assetIdHex === selectedB.assetIdHex ? t("swap.chooseDifferent")
-        : !networkReady ? t("ui.serviceNotReady")
-          : selectedPoolLoading ? t("ui.waitingPool")
-            : selectedPoolError ? t("ui.poolStateFailed")
-              : pending ? t("ui.transactionPending")
-                : busy ? t("ui.preparing")
+          : !networkReady ? t("ui.serviceNotReady")
+            : selectedPoolLoading ? t("ui.waitingPool")
+              : selectedPoolError ? t("ui.poolStateFailed")
+              : busy ? t("ui.preparing")
+                : hasBlockingPending ? t("ui.transactionPending")
                   : selectedA.balance === null || selectedB.balance === null ? [selectedA, selectedB].some(asset => getBalanceState(asset) === "loading") ? t("liquidity.loadingBalances") : t("ui.balanceUnavailable")
                     : insufficientAsset ? t("ui.insufficient", { symbol: insufficientAsset.symbol })
                       : !validAmounts ? requiredAmountMissing ? t("liquidity.provide") : t("ui.enterAmount")
@@ -1029,7 +1181,7 @@ export function LiquidityPage({ view, initialTab, initialPair, assets, pools, po
         {selectedPoolError && <div className="liquidity-query-error" role="alert"><p>{text(selectedPoolError)}</p><ActionButton size="small" variant="secondary" icon={RefreshCw} onClick={() => setPairRefreshRevision((revision) => revision + 1)}>{t("ui.retryPoolLookup")}</ActionButton></div>}
         {positionsPageError && <div className="inline-alert" role="alert">{positionsPageError}</div>}
         {sessionOwner && !canPerformAuthorizedAction() && <p className="account-access-status" role="status">{t("auth.accountStillAuthorizing")}</p>}
-        <ActionButton variant="primary" icon={sessionOwner ? Droplets : undefined} loading={(busy && !pending) || selectedPoolLoading} fullWidth disabled={ctaDisabled} onClick={() => sessionOwner ? void submitPreview() : onConnect()}>{ctaLabel}</ActionButton>
+        <ActionButton variant="primary" icon={sessionOwner ? Droplets : undefined} loading={busy || selectedPoolLoading} fullWidth disabled={ctaDisabled} onClick={() => sessionOwner ? void submitPreview() : onConnect()}>{ctaLabel}</ActionButton>
       </section>
     </>}
 
