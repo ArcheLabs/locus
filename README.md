@@ -1,189 +1,48 @@
-# Locus v0.3
+# Locus
 
-Locus is an Ownership-native multi-asset service for JamScript. Assets are
-owned directly by canonical JamScript `Ownership` values; Locus does not
-create application identities, wallet accounts, or bridge destinations. The
-v0.3 web client presents curated MiniJAM test assets and demo equities,
-supports single-pool exact-input swaps, and provides permissionless liquidity
-positions with non-transferable per-Ownership shares.
+Create, send, and swap assets on MiniJAM.
 
-```text
-Asset → Ownership
-```
+[Open Locus →](https://locus.minijam.xyz) · [JamScript](https://github.com/ArcheLabs/JamScript)
 
-JamScript Core authenticates the cryptographic controller of each signed
-action and exposes provider-neutral cryptographic primitives. Matrix M→S→D
-verification is implemented by the JamScript Ownership Matrix adapter on top
-of those primitives. Locus consumes that adapter and does not implement
-Matrix cryptography. It keeps controller grants and Matrix bootstrap tombstones
-in its own managed state, and applies each grant to a stable `subject`. Assets,
-balances, allowances, and identity authorization therefore share one Locus
-state root. Locus does not use a network-scoped Ownership Control service.
+Locus is a multi-asset service built with JamScript. Assets belong directly to
+cryptographic `Ownership` identities, with support for EVM, Polkadot, Solana,
+and Matrix accounts.
 
-## Consumer-mode development
+## ✨ Features
 
-Locus consumes the published JamScript Client package directly. A clean
-checkout installs the pinned dependencies from npm and uses the published
-JamScript CLI with its canonical managed toolchain; no JamScript source
-checkout or locally packed Client tarball is needed.
+- Create assets, transfer balances, and manage allowances.
+- Swap assets and provide liquidity through constant-product pools.
+- Send to wallet addresses, Matrix IDs, or canonical `locus:` identifiers.
+
+## ⚡ Quick start
 
 ```bash
+git clone https://github.com/ArcheLabs/locus.git
+cd locus
 npm ci
 npm --prefix web ci
-jams --version
-jams toolchain verify
-npm run check
-npm run build
-npm test
-npm run build:web
+npm run dev
 ```
 
-The Locus check and build scripts bundle the published Ownership Matrix
-service adapter into a temporary JamScript project, then invoke the installed
-`jams` CLI and its canonical managed toolchain. The compiler does not import
-the adapter directly from the npm package at the Locus source path.
+Open [localhost:5173](http://localhost:5173). The web client connects to the
+configured Stage-1 TestNet by default.
 
-The pinned release baseline is recorded in [`releases.lock`](releases.lock).
-MiniJAM is consumed from the independent `ArcheLabs/minijam-client`
-`stage1-v0.2.1` release image.
+For Service development, install the JamScript version pinned in
+[`releases.lock`](releases.lock) and follow the
+[development guide](docs/consumer-development.md).
 
-## Local web preview
+## 📚 Documentation
 
-Install the web dependencies once:
+- [Frontend and network configuration](docs/frontend.md)
+- [Ownership and account authorization](docs/ownership.md)
+- [Matrix recipient resolution](docs/matrix-recipient-resolution.md)
+- [TestNet deployment](deploy/testnet/README.md)
 
-```bash
-npm --prefix web install
-```
+## ⚠️ TestNet preview
 
-Start the real network-mode preview (Stage-1 TestNet by default):
+Locus is experimental. Curated tokens are test assets; demo equities provide
+no ownership, dividend, voting, or redemption rights.
 
-```bash
-  npm --prefix web run dev -- --host 127.0.0.1
-```
+## 📄 License
 
-Open [http://127.0.0.1:5173](http://127.0.0.1:5173). Network Mode loads the
-configured network and never falls back to Demo Mode.
-
-To preview the prototype assets and activity data, explicitly opt in to Demo:
-
-```bash
-VITE_LOCUS_MODE=demo \
-  npm --prefix web run dev -- --host 127.0.0.1
-```
-
-Production builds always use Network Mode. `VITE_LOCUS_MODE=demo` only affects
-the Vite development server. Network Mode loads the runtime configuration from
-[`web/public/locus-networks.json`](web/public/locus-networks.json), fetches the
-deployment descriptor, creates the published `JamScriptClient`, and calls
-`validateDeployment()` before showing real assets. The live web deployment uses same-origin `/rpc` to reach the Stage-1 Backend.
-The production descriptor binds TestNet to Service `3962414306`; the Local
-network remains available for development.
-
-In Network Mode, `Connect` uses a browser-provided EVM EIP-1193 wallet, the
-official Polkadot extension-dapp adapter, the official Solana Wallet Standard
-registry, or the Matrix login flow. If a wallet exposes multiple accounts, the
-account is selected explicitly. A Polkadot account without a reliable
-`ed25519`, `sr25519`, or `ecdsa` scheme is rejected rather than guessed.
-Transfers show a review step before signing. The Assets page is the default
-page, supports searchable network-asset selection, can create an asset with
-the connected Ownership as issuer, and can display a canonical `locus:` Receive
-identifier. Demo Mode remains mock-only and never submits these actions.
-
-Matrix uses the cross-signing master key as the stable Locus subject and the
-current device Ed25519 key as the controller. The web adapter uses the public
-`matrix-js-sdk` login/API surface and a single `OlmMachine` crypto engine; it
-does not call `initRustCrypto()`, access private SDK fields, persist passwords,
-or hash Matrix IDs into Ownership. `/keys/query` evidence is encoded through
-the JamScript Matrix proof codec and a recipient resolves to the master key,
-never to a device key. Login reads trust from the pinned
-`@matrix-org/matrix-sdk-crypto-wasm` `OlmMachine`: the own cross-signing
-identity must be verified and trust its current device, and the exact current
-device must be cross-signed by its owner and trusted through cross-signing.
-The generic/local device verification bit is not used. Key queries refresh the
-SDK store before this decision, while sync and foreground events trigger
-rechecks; transient or missing SDK data stays `UNKNOWN`.
-
-Only after that trust policy passes does Locus build the existing
-`MatrixControlClaimProofV1` and call `authorizeMatrixController(proof)` for
-its `(master subject, device controller)` pair. The session becomes `READY`
-only after the service reports the controller active and a final SDK trust
-read still passes. Missing or temporarily unavailable proof material,
-network errors, timeouts, and rate limits stay retryable; Locus application
-error `5005` is the definitive invalid-proof result, while
-`M_UNKNOWN_TOKEN`/OAuth `invalid_grant` are reported as expired Matrix
-sessions. Full proofs and proof bytes are not included in errors.
-
-Interactive SAS uses the SDK's own verification request and SAS objects and
-requires explicit acceptance and matching confirmation. The crypto SDK also
-has QR APIs, but this web UI currently negotiates and renders SAS only; QR
-requests receive a compatibility message. This limit is the same on all
-devices; QR is not claimed as supported until scanner/display UI and real
-interoperability checks are added. Any number of cross-signing-verified
-devices can authorize independently; active controllers do not approve new
-devices, and a revoked pair cannot be re-enrolled with its old proof.
-
-The browser stores ordinary wallet session identifiers in local storage and
-Matrix access/refresh credentials in session storage only. EVM account changes
-invalidate the old signer immediately. Radix Dialog, DropdownMenu, and
-Popover provide Escape, focus, restore, and outside-click behavior. The
-deterministic mock signer tests run with `npm test`; real browser wallet smoke
-tests still require the corresponding wallet extension or Wallet Standard
-provider to be installed.
-
-The published JamScript Client package contains the Matrix proof codec and the
-Ownership Matrix client/service adapters. Its service adapter verifies M→S→D
-using provider-neutral JamScript primitives; Locus delegates verification to
-that adapter. Locus uses its own `LocusClient` identity methods and injects
-`subject` into business payloads; it does not submit `actAs`.
-
-Stop the Vite preview with `Ctrl-C`. If it was started in the Docker preview
-container used by this checkout, stop it with:
-
-```bash
-docker rm -f locus-v02-web-preview
-```
-
-## Protocol surface
-
-The service exposes `authorizeMatrixController`, `addController`,
-`revokeController`, `createAsset`, pool-management actions, `swapExactIn`,
-`transfer`, `approve`, `transferFrom`, `mint`, and `burn`. `createAsset` keeps
-the issuer (`subject`) separate from its optional `initialHolder`; the SDK
-defaults the holder to the current subject. Controller authorization is local
-to Locus, and recipient Ownership values do not need to be registered.
-Balances use a canonical `ownershipKey(owner)` state key, while the public SDK
-continues to accept and return `Ownership` values. All quantities remain
-`bigint`/JamScript `u128` values. Swap v0 uses a fixed 30 bps fee, one
-constant-product pool per canonical asset pair, and a reserve cap that keeps
-the multiplication within `u128`.
-
-Curated asset presentation is bound to the selected deployment and on-chain
-asset ID, metadata, and issuer. A matching symbol by itself never grants a
-brand icon or curated badge. DOT and USDT entries are test representations;
-AAPL, NVDA, and TSLA are demo equities without ownership, dividend, voting, or
-redemption rights. Swap prices come from pool reserves only, not a market
-oracle. The current Local deployment has no seeded pools, so Swap reports that
-liquidity is not initialized and does not produce a quote.
-
-The SDK is in [`sdk/src`](sdk/src), the service is [`src/service.ts`](src/service.ts),
-and the React/Vite web client is in [`web`](web). Network Mode never falls back
-to mock data; Demo Mode is explicit and is only for the frontend prototype.
-
-## Published platform baseline
-
-The active Stage-1 deployment uses the prebuilt Service in `dist/` from Locus
-commit `2b6aeb5a51005d3503edfcfa97be780994fa5550`, JamScript RC12, Backend
-RC12, and Client RC7. Service `3962414306` finalized at block `24901` with code
-hash `0xc8f58efb503f4dce2615fc19e163d8690300794a33381a44de9f9ebbc54a4a62`.
-It was initialized from an empty managed-state database; no old Locus state was
-migrated. The previous immutable Service remains on the original MiniJAM chain.
-The six curated assets are freshly initialized on the new Service, with their
-full initial supplies assigned to the configured Treasury. The release pins
-and deployment record are in [`releases.lock`](releases.lock) and the
-[TestNet deployment runbook](deploy/testnet/README.md).
-
-Locus does not reproduce JamScript compiler, runtime, or Ownership protocol
-features locally.
-
-For a fresh single-host MiniJAM Local deployment, see the
-[Local server deployment runbook](docs/local-server-deployment.md).
+[Apache-2.0](LICENSE)
